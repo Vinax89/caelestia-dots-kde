@@ -309,11 +309,12 @@ Singleton {
         // ── dpms off / dpms on ───────────────────────────────────────
         if (request === "dpms off" || request === "dpms on") {
             if (isKDE) {
-                const enable = request === "dpms on";
-                KWinActiveWindowBridge.runArbitraryScript(
-                    `var outs = workspace.outputs(); ` +
-                    `for (var i = 0; i < outs.length; i++) outs[i].setEnabled(${enable});`
-                );
+                const method = (request === "dpms on") ? "turnOn" : "turnOff";
+                Quickshell.execDetached([
+                    "qdbus6", "org.kde.Solid.PowerManagement", 
+                    "/org/kde/Solid/PowerManagement/Actions/DPMSControl", 
+                    "org.kde.Solid.PowerManagement.Actions.DPMSControl." + method
+                ]);
             }
             return;
         }
