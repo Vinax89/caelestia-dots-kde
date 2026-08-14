@@ -163,16 +163,34 @@ Item {
                 }
                 onWheel: event => {
                     if (!Config.bar.scrollActions.workspaces) return;
-                    
+
+                    let direction = 0;
+                    if (event.angleDelta.y > 0 || event.angleDelta.x > 0)
+                        direction = -1;
+                    else if (event.angleDelta.y < 0 || event.angleDelta.x < 0)
+                        direction = 1;
+                    else
+                        return;
+
+                    if (typeof KWinWorkspaceState !== "undefined" && KWinWorkspaceState.workspaces.length > 0) {
+                        const workspaceList = KWinWorkspaceState.workspaces;
+                        const activeIndex = Math.max(0, Math.min(workspaceList.length - 1, KWinWorkspaceState.activeId - 1));
+                        const targetIndex = (activeIndex + direction + workspaceList.length) % workspaceList.length;
+                        const targetId = workspaceList[targetIndex]?.id;
+                        if (targetId)
+                            KWinWorkspaceState.switchTo(targetId);
+                        return;
+                    }
+
                     const isKWin = typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.windowList;
-                    
-                    if (event.angleDelta.y > 0 || event.angleDelta.x > 0) {
+
+                    if (direction < 0) {
                         if (isKWin) {
                             KWinActiveWindowBridge.previousDesktop();
                         } else {
                             Quickshell.execDetached(["qdbus6", "org.kde.KWin", "/KWin", "previousDesktop"]);
                         }
-                    } else if (event.angleDelta.y < 0 || event.angleDelta.x < 0) {
+                    } else {
                         if (isKWin) {
                             KWinActiveWindowBridge.nextDesktop();
                         } else {
