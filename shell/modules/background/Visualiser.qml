@@ -17,9 +17,27 @@ Item {
     readonly property bool windowHidesVisualiser: {
         let isHidden = false;
         if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.activeWindow) {
-            isHidden = KWinActiveWindowBridge.activeWindow.fullscreen || KWinActiveWindowBridge.activeWindow.maximized;
-            if (isHidden && !Config.background.visualiser.hideOnAllMonitors) {
-                isHidden = KWinActiveWindowBridge.activeOutputName === screen.name;
+            const windows = KWinActiveWindowBridge.windowList || [];
+            const activeWsId = typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState.activeId : -1;
+
+            for (let i = 0; i < windows.length; ++i) {
+                const window = windows[i];
+                if (window.minimized || !(window.fullscreen || window.maximized))
+                    continue;
+                if (activeWsId > 0 && window.workspace?.id !== activeWsId)
+                    continue;
+                if (!Config.background.visualiser.hideOnAllMonitors && window.output !== screen.name)
+                    continue;
+                isHidden = true;
+                break;
+            }
+
+            // Keep the focused-window path as a startup fallback until the
+            // complete window list has arrived from the KWin bridge.
+            if (windows.length === 0) {
+                isHidden = KWinActiveWindowBridge.activeWindow.fullscreen || KWinActiveWindowBridge.activeWindow.maximized;
+                if (isHidden && !Config.background.visualiser.hideOnAllMonitors)
+                    isHidden = KWinActiveWindowBridge.activeOutputName === screen.name;
             }
         } else {
             if (Config.background.visualiser.hideOnAllMonitors) {
