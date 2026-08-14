@@ -22,8 +22,11 @@ section() {
 export BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$BUNDLE_DIR" || die "Could not enter $BUNDLE_DIR"
 
-# Prevent concurrent update runs from racing on git/CMake/config writes.
-exec 9>"${XDG_RUNTIME_DIR:-/tmp}/caelestia-update.lock"
+# Prevent concurrent update runs in a private directory.
+LOCK_DIR="${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/caelestia"
+mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
+exec 9>"$LOCK_DIR/update.lock"
 flock -n 9 || { echo "Another Caelestia update is already running."; exit 1; }
 
 section "Step 1 - Source Code Update"

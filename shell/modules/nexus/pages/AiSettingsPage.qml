@@ -305,7 +305,7 @@ PageBase {
         Process {
             id: installProc
 
-            command: ["sh", "-c", "curl -fsSL https://claude.ai/install.sh | bash"]
+            command: ["sh", "-c", "tmp=$(mktemp) && trap 'rm -f \"$tmp\"' EXIT && curl -fsSL --proto '=https' --tlsv1.2 -o \"$tmp\" https://claude.ai/install.sh && bash \"$tmp\""]
             stdout: SplitParser {
                 onRead: line => root.installStatus = line
             }

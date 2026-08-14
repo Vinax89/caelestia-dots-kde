@@ -4,6 +4,7 @@
 #include <QLocalSocket>
 #include <QQmlEngine>
 #include <QTimer>
+#include <QStringList>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -44,9 +45,12 @@ private:
 
     QLocalSocket* m_socket;
     QTimer* m_reconnectTimer;
+    QTimer* m_connectTimeout;
+    QStringList m_socketPaths;
+    int m_socketIndex = 0;
     QString m_clientId;
     bool m_connected;
     QByteArray m_buffer;
-};
 
+};
 } // namespace caelestia

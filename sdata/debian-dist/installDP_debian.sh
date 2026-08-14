@@ -216,8 +216,8 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
             fi
             if command -v cargo-binstall >/dev/null 2>&1; then
                 cargo-binstall -y satty || {
-                    log "Normal cargo-binstall failed. Trying with sudo..."
-                    sudo "$(command -v cargo-binstall)" -y satty || { err "sudo cargo-binstall $pkg failed."; FAILED_PKGS+=("$pkg"); }
+                    err "cargo-binstall failed for $pkg; refusing to rerun an untrusted binary as root."
+                    FAILED_PKGS+=("$pkg")
                 }
             else
                 err "cargo-binstall not available to install $pkg."

@@ -19,9 +19,13 @@ section() {
 
 section "Ollama AI Setup for Caelestia"
 
-# 1. Install Ollama
+# 1. Install Ollama from a downloaded temporary script. The upstream
+# installer remains remote code; pin and verify it before production use.
 section "Step 1/4 - Install Ollama"
-curl -fsSL https://ollama.com/install.sh | sh  # ci:allow-curl-pipe
+tmp_installer="$(mktemp)"
+trap 'rm -f "$tmp_installer"' EXIT
+curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp_installer" https://ollama.com/install.sh
+sh "$tmp_installer"
 
 # 2. Enable and start the systemd service
 section "Step 2/4 - Enable and Start Ollama Daemon"

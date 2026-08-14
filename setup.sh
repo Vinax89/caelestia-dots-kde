@@ -19,11 +19,12 @@ SCRIPTS_DIR="$BUNDLE_DIR/scripts"
 export BUNDLE_DIR
 export INSTALL_START_EPOCH="$(date +%s)"
 
-# Prevent concurrent runs.
-if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
-    exec 9>"${XDG_RUNTIME_DIR:-/tmp}/caelestia-setup.lock"
-    flock -n 9 || { echo "Another Caelestia setup is already running."; exit 1; }
-fi
+# Prevent concurrent runs in a private directory.
+LOCK_DIR="${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/caelestia"
+mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
+exec 9>"$LOCK_DIR/setup.lock"
+flock -n 9 || { echo "Another Caelestia setup is already running."; exit 1; }
 
 detect_base_distro() {
     local detected="unknown"
@@ -380,9 +381,10 @@ cleanup_install_state() {
     
     if [[ -n "${TMUX:-}" && "${CAELESTIA_TMUX_MASTER:-0}" == "1" ]]; then
         tmux kill-session -t caelestia_install 2>/dev/null || true
-        rm -f /tmp/caelestia_cmd /tmp/caelestia_status
     fi
-    rm -f /tmp/caelestia_tmux_wrapper.sh
+    if [[ -n "${CAELESTIA_IPC_DIR:-}" ]]; then
+        rm -rf -- "$CAELESTIA_IPC_DIR"
+    fi
 }
 trap cleanup_install_state EXIT
 
@@ -391,13 +393,16 @@ if [[ -z "${TMUX:-}" && "${CAELESTIA_NO_TMUX:-0}" == "0" && "${CAELESTIA_USE_TMU
     tmux kill-session -t caelestia_install 2>/dev/null || true
     
     export CAELESTIA_TMUX_MASTER=1
-    rm -f /tmp/caelestia_cmd /tmp/caelestia_status
-    rm -f /tmp/caelestia_installer_err.log
-    mkfifo /tmp/caelestia_cmd
-    mkfifo /tmp/caelestia_status
-    
+    CAELESTIA_IPC_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-install-XXXXXX")" || {
+        echo "[FATAL] Failed to create private installer IPC directory." >&2
+        exit 1
+    }
+    chmod 700 "$CAELESTIA_IPC_DIR"
+    export CAELESTIA_IPC_DIR
+    mkfifo "$CAELESTIA_IPC_DIR/cmd" "$CAELESTIA_IPC_DIR/status"
+
     # Wrapper keeps the tmux pane alive after exit/crash for diagnostics.
-    WRAPPER_SCRIPT="/tmp/caelestia_tmux_wrapper.sh"
+    WRAPPER_SCRIPT="$CAELESTIA_IPC_DIR/tmux_wrapper.sh"
     printf -v args_str '%q ' "$0" "$@"
     cat > "$WRAPPER_SCRIPT" <<WRAPPER_EOF
 #!/usr/bin/env bash
@@ -424,9 +429,9 @@ WRAPPER_EOF
 
     # Surface inner-script diagnostics in the outer terminal.
     _needs_pause=0
-    if [[ -s /tmp/caelestia_installer_err.log ]]; then
+    if [[ -s "$CAELESTIA_IPC_DIR/installer_err.log" ]]; then
         _reached_done=0
-        if grep -q '\[installer\] done (success)' /tmp/caelestia_installer_err.log 2>/dev/null; then
+        if grep -q '\[installer\] done (success)' "$CAELESTIA_IPC_DIR/installer_err.log" 2>/dev/null; then
             _reached_done=1
         fi
         if [[ $_reached_done -eq 0 ]]; then
@@ -438,7 +443,7 @@ WRAPPER_EOF
             echo "============================================================"
             echo ""
             echo "--- stderr output from installer ---"
-            cat /tmp/caelestia_installer_err.log
+            cat "$CAELESTIA_IPC_DIR/installer_err.log"
             echo "--- end stderr ---------------------"
             echo ""
             _needs_pause=1
@@ -451,7 +456,7 @@ WRAPPER_EOF
         echo "  INSTALLER SESSION ENDED (exit code: $_tmux_exit)"
         echo "  No stderr log was produced — the binary may have crashed"
         echo "  or the tmux session may have failed to start entirely"
-        echo "  (check for a stale tmux server or /tmp/caelestia_cmd issues)."
+        echo "  (check for a stale tmux session or private installer IPC issues)."
         echo "============================================================"
         echo ""
         _needs_pause=1
@@ -479,12 +484,12 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 _installer_start=$(date +%s)
-"$BIN" "$@" 2>/tmp/caelestia_installer_err.log
+"$BIN" "$@" 2>"${CAELESTIA_IPC_DIR:-/tmp}/installer_err.log"
 _exit_code=$?
 _installer_elapsed=$(($(date +%s) - _installer_start))
 
 _reached_done=0
-if grep -q '\[installer\] done (success)' /tmp/caelestia_installer_err.log 2>/dev/null; then
+if grep -q '\[installer\] done (success)' "${CAELESTIA_IPC_DIR:-/tmp}/installer_err.log" 2>/dev/null; then
     _reached_done=1
 fi
 

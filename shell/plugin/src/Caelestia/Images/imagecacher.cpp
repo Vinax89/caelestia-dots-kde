@@ -67,8 +67,10 @@ QString ImageCacher::cachePathFor(const QString& sourcePath, const QSize& size, 
 }
 
 ImageCacher* ImageCacher::instance() {
-    static ImageCacher s_instance;
-    return &s_instance;
+    // Jobs run on Qt's global thread pool, which outlives QML objects during
+    // shutdown. Keep the shared state alive until process termination.
+    static auto* s_instance = new ImageCacher;
+    return s_instance;
 }
 
 ImageCacher::ImageCacher(QObject* parent)

@@ -7,6 +7,8 @@
 #include <qnetworkreply.h>
 #include <qnetworkrequest.h>
 
+#include <qtimer.h>
+#include <chrono>
 Q_LOGGING_CATEGORY(lcRequests, "caelestia.requests", QtInfoMsg)
 
 namespace caelestia {
@@ -37,6 +39,16 @@ void Requests::get(const QUrl& url, QJSValue onSuccess, QJSValue onError, QJSVal
     }
 
     auto reply = m_manager->get(request);
+    constexpr qint64 maxResponseBytes = 8 * 1024 * 1024;
+    reply->setReadBufferSize(maxResponseBytes);
+    QObject::connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
+        if (reply->bytesAvailable() > 8 * 1024 * 1024)
+            reply->abort();
+    });
+    QTimer::singleShot(std::chrono::seconds(30), reply, [reply]() {
+        if (reply->isRunning())
+            reply->abort();
+    });
 
     QObject::connect(reply, &QNetworkReply::finished, [reply, onSuccess, onError]() {
         if (reply->error() == QNetworkReply::NoError) {
