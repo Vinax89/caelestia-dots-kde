@@ -107,7 +107,7 @@ Item {
         var dateRegex = /<pubDate>(.*?)<\/pubDate>/;
         
         var match;
-        while ((match = itemRegex.exec(xmlString)) !== null) {
+        while ((match = itemRegex.exec(xmlString)) !== null && newsModel.count < 20) {
             var itemContent = match[1];
             
             var titleMatch = titleRegex.exec(itemContent);
@@ -124,9 +124,12 @@ Item {
                 var formattedDate = dateObj.toLocaleDateString();
                 if (formattedDate === "Invalid Date") formattedDate = dateStr;
                 
+                var link = linkMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1").trim();
+                if (!/^https:\/\//i.test(link))
+                    continue;
                 newsModel.append({
                     "title": title,
-                    "link": linkMatch[1],
+                    "link": link,
                     "date": formattedDate
                 });
             }
@@ -218,7 +221,10 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: Qt.openUrlExternally(delegateItem.link)
+                    onClicked: {
+                        if (/^https:\/\//i.test(delegateItem.link))
+                            Qt.openUrlExternally(delegateItem.link);
+                    }
                 }
 
                 ColumnLayout {

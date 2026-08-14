@@ -17,6 +17,11 @@ extern int g_term_width;
 extern int g_term_height;
 extern std::string g_base_distro;
 extern std::string g_bundle_dir;
+extern std::string g_installer_runtime_dir;
+extern std::string g_sudo_bin_dir;
+extern std::string g_sudo_askpass;
+
+void cleanup_installer_runtime();
 extern bool g_confirm_arg;
 
 void load_bundle_dir();

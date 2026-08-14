@@ -1,9 +1,10 @@
 name: Version Release
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: [Validate]
+    types: [completed]
+    branches: [main]
 
 jobs:
   version-release:
@@ -13,17 +14,25 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: write
+    env:
+      GIT_COMMIT: ${{ github.event.workflow_run.head_sha }}
     steps:
+      - name: Require successful validation
+        if: ${{ github.event.workflow_run.conclusion != 'success' }}
+        run: exit 1
+
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
+          submodules: recursive
 
       - name: Fetch main Branch
         run: |
           set -euo pipefail
-          git fetch origin main:refs/remotes/origin/main --force
+          git fetch origin main:refs/remotes/origin/main
 
       - name: Load Version from Config
         run: |
@@ -64,8 +73,12 @@ jobs:
 
           echo "PREVIOUS_VERSION_TAG=$PREVIOUS_VERSION_TAG" >> $GITHUB_ENV
 
-          git tag -f "$VERSION" "$GITHUB_SHA"
-          git push origin "refs/tags/$VERSION" --force
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag $VERSION already exists; refusing to move it."
+            exit 1
+          fi
+          git tag "$VERSION" "$GIT_COMMIT"
+          git push origin "refs/tags/$VERSION"
 
       - name: Create or Update Release
         env:
@@ -73,8 +86,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -n "$PREVIOUS_VERSION_TAG" ] && [ "$PREVIOUS_VERSION_TAG" != "$VERSION" ]; then
-            git log "$PREVIOUS_VERSION_TAG..$GITHUB_SHA" --no-merges --invert-grep --grep='\[skip ci\]' --pretty='- %s (%h)' > commit_notes.txt
+          if [ -n "$PREVIOUS_VERSION_TAG" ]; then
+            git log "$PREVIOUS_VERSION_TAG..$GIT_COMMIT" --no-merges --invert-grep --grep='\[skip ci\]' --pretty='- %s (%h)' > commit_notes.txt
           else
             git log origin/main -n 15 --no-merges --invert-grep --grep='\[skip ci\]' --pretty='- %s (%h)' > commit_notes.txt
           fi

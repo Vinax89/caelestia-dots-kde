@@ -1,6 +1,12 @@
 #include "Globals.hpp"
 #include <iostream>
 #include <fstream>
+#include <filesystem>
+#include <unistd.h>
+#include <cctype>
+#include <cstdlib>
+#include <algorithm>
+#include <signal.h>
 
 std::atomic<bool> g_resized{false};
 std::atomic<bool> g_quit{false};
@@ -8,6 +14,31 @@ int g_term_width = 80;
 int g_term_height = 24;
 std::string g_base_distro = "unknown";
 std::string g_bundle_dir = ".";
+std::string g_installer_runtime_dir;
+std::string g_sudo_bin_dir;
+std::string g_sudo_askpass;
+
+void cleanup_installer_runtime() {
+    if (g_installer_runtime_dir.empty())
+        return;
+
+    std::error_code error;
+    std::ifstream pidFile(g_installer_runtime_dir + "/inhibit.pid");
+    pid_t pid = 0;
+    if (pidFile >> pid && pid > 1)
+        kill(pid, SIGTERM);
+    std::ifstream cookieFile(g_installer_runtime_dir + "/inhibit.cookie");
+    std::string cookie;
+    if (cookieFile >> cookie && !cookie.empty()
+        && std::all_of(cookie.begin(), cookie.end(), [](unsigned char c) { return std::isdigit(c); })) {
+        std::system(("qdbus6 org.freedesktop.ScreenSaver /ScreenSaver "
+            "org.freedesktop.ScreenSaver.UnInhibit " + cookie + " >/dev/null 2>&1").c_str());
+    }
+    std::filesystem::remove_all(g_installer_runtime_dir, error);
+    g_installer_runtime_dir.clear();
+    g_sudo_bin_dir.clear();
+    g_sudo_askpass.clear();
+}
 bool g_confirm_arg = false;
 
 Config g_config;

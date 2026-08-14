@@ -260,6 +260,7 @@ void FileSystemModel::updateWatcher() {
 }
 
 void FileSystemModel::updateEntries() {
+    ++m_generation;
     if (m_path.isEmpty()) {
         if (!m_entries.isEmpty()) {
             beginResetModel();
@@ -281,6 +282,7 @@ void FileSystemModel::updateEntries() {
 }
 
 void FileSystemModel::updateEntriesForDir(const QString& dir) {
+    const auto generation = m_generation;
     const auto recursive = m_recursive;
     const auto showHidden = m_showHidden;
     const auto filter = m_filter;
@@ -377,14 +379,17 @@ void FileSystemModel::updateEntriesForDir(const QString& dir) {
 
     future
         .then(this,
-            [dir, this](QPair<QSet<QString>, QSet<QString>> result) {
+            [dir, generation, this](QPair<QSet<QString>, QSet<QString>> result) {
+                if (generation != m_generation)
+                    return;
                 m_futures.remove(dir);
                 if (!result.first.isEmpty() || !result.second.isEmpty()) {
                     applyChanges(result.first, result.second);
                 }
             })
-        .onCanceled(this, [dir, this]() {
-            m_futures.remove(dir);
+        .onCanceled(this, [dir, generation, this]() {
+            if (generation == m_generation)
+                m_futures.remove(dir);
         });
 }
 

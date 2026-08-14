@@ -19,11 +19,12 @@ SCRIPTS_DIR="$BUNDLE_DIR/scripts"
 export BUNDLE_DIR
 export INSTALL_START_EPOCH="$(date +%s)"
 
-# Prevent concurrent runs.
-if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
-    exec 9>"${XDG_RUNTIME_DIR:-/tmp}/caelestia-setup.lock"
-    flock -n 9 || { echo "Another Caelestia setup is already running."; exit 1; }
-fi
+# Prevent concurrent runs in a private directory.
+LOCK_DIR="${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/caelestia"
+mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
+exec 9>"$LOCK_DIR/setup.lock"
+flock -n 9 || { echo "Another Caelestia setup is already running."; exit 1; }
 
 detect_base_distro() {
     local detected="unknown"
@@ -131,7 +132,7 @@ silent_refresh_pacman_sources() {
         # Reflector: rank pacman mirrors by speed. Install on-the-fly if
         # missing (single -Sy, not -Syy).
         if ! command -v reflector >/dev/null 2>&1; then
-            as_root pacman -Sy --noconfirm reflector >/dev/null 2>&1 || true
+            as_root pacman -Syu --noconfirm reflector >/dev/null 2>&1 || true
         fi
 
         if command -v reflector >/dev/null 2>&1; then
@@ -156,10 +157,10 @@ silent_refresh_pacman_sources() {
 
         # Pre-install dos2unix for CRLF normalization later.
         if ! command -v dos2unix >/dev/null 2>&1; then
-            as_root pacman -Sy --noconfirm dos2unix >/dev/null 2>&1 || true
+            as_root pacman -Syu --noconfirm dos2unix >/dev/null 2>&1 || true
         fi
 
-        as_root pacman -Sy --noconfirm >/dev/null 2>&1 || echo "[WARN]  Failed to refresh pacman sources early. Continuing..."
+        as_root pacman -Syu --noconfirm >/dev/null 2>&1 || echo "[WARN]  Failed to refresh pacman sources early. Continuing..."
         unset -f as_root
     fi
 }
@@ -173,24 +174,36 @@ run_arch_pacman_install() {
     fi
 
     if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-        pacman -Sy --noconfirm >/dev/null 2>&1 || echo "[WARN]  Failed to refresh pacman sources before install. Continuing..."
+        pacman -Syu --noconfirm >/dev/null 2>&1 || echo "[WARN]  Failed to refresh pacman sources before install. Continuing..."
         pacman "${pacman_args[@]}" "${pkgs[@]}" && return 0
 
         echo "[WARN]  pacman install failed. Refreshing sources and retrying once..."
-        pacman -Sy --noconfirm >/dev/null 2>&1 || true
+        pacman -Syu --noconfirm >/dev/null 2>&1 || true
         pacman "${pacman_args[@]}" "${pkgs[@]}"
         return $?
     fi
 
-    sudo pacman -Sy --noconfirm >/dev/null 2>&1 || echo "[WARN]  Failed to refresh pacman sources before install. Continuing..."
+    sudo pacman -Syu --noconfirm >/dev/null 2>&1 || echo "[WARN]  Failed to refresh pacman sources before install. Continuing..."
     sudo pacman "${pacman_args[@]}" "${pkgs[@]}" && return 0
 
     echo "[WARN]  pacman install failed. Refreshing sources and retrying once..."
-    sudo pacman -Sy --noconfirm >/dev/null 2>&1 || true
+    sudo pacman -Syu --noconfirm >/dev/null 2>&1 || true
     sudo pacman "${pacman_args[@]}" "${pkgs[@]}"
 }
 
 export BASE_DISTRO="$(detect_base_distro)"
+
+PACKAGE_STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde"
+PACKAGE_BEFORE="$PACKAGE_STATE_DIR/packages.before"
+PACKAGE_MANIFEST="$PACKAGE_STATE_DIR/installed-packages.txt"
+mkdir -p "$PACKAGE_STATE_DIR"
+case "$BASE_DISTRO" in
+    arch) pacman -Qq 2>/dev/null | sort -u > "$PACKAGE_BEFORE" || true ;;
+    fedora) dnf repoquery --installed --qf '%{name}' 2>/dev/null | sort -u > "$PACKAGE_BEFORE" || true ;;
+    debian) dpkg-query -W -f='${binary:Package}\n' 2>/dev/null | sort -u > "$PACKAGE_BEFORE" || true ;;
+    *) : > "$PACKAGE_BEFORE" ;;
+esac
+export PACKAGE_STATE_DIR PACKAGE_BEFORE PACKAGE_MANIFEST
 
 # Only run in the outer (pre-tmux) invocation.
 if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
@@ -370,19 +383,13 @@ fi
 
 cleanup_install_state() {
     tput cnorm 2>/dev/null || true
-    if [[ -f /tmp/caelestia_inhibit.pid ]]; then
-        kill -9 "$(cat /tmp/caelestia_inhibit.pid)" 2>/dev/null || true
-    fi
-    if [[ -f /tmp/caelestia_kde_inhibit.cookie ]]; then
-        qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.UnInhibit "$(cat /tmp/caelestia_kde_inhibit.cookie)" 2>/dev/null || true
-    fi
-    rm -f /tmp/caelestia_inhibit.pid /tmp/caelestia_kde_inhibit.cookie
     
     if [[ -n "${TMUX:-}" && "${CAELESTIA_TMUX_MASTER:-0}" == "1" ]]; then
         tmux kill-session -t caelestia_install 2>/dev/null || true
-        rm -f /tmp/caelestia_cmd /tmp/caelestia_status
     fi
-    rm -f /tmp/caelestia_tmux_wrapper.sh
+    if [[ "${CAELESTIA_IPC_CLEANUP:-0}" == "1" && -n "${CAELESTIA_IPC_DIR:-}" ]]; then
+        rm -rf -- "$CAELESTIA_IPC_DIR"
+    fi
 }
 trap cleanup_install_state EXIT
 
@@ -391,17 +398,20 @@ if [[ -z "${TMUX:-}" && "${CAELESTIA_NO_TMUX:-0}" == "0" && "${CAELESTIA_USE_TMU
     tmux kill-session -t caelestia_install 2>/dev/null || true
     
     export CAELESTIA_TMUX_MASTER=1
-    rm -f /tmp/caelestia_cmd /tmp/caelestia_status
-    rm -f /tmp/caelestia_installer_err.log
-    mkfifo /tmp/caelestia_cmd
-    mkfifo /tmp/caelestia_status
-    
+    CAELESTIA_IPC_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-install-XXXXXX")" || {
+        echo "[FATAL] Failed to create private installer IPC directory." >&2
+        exit 1
+    }
+    chmod 700 "$CAELESTIA_IPC_DIR"
+    export CAELESTIA_IPC_DIR CAELESTIA_IPC_CLEANUP=1
+    mkfifo "$CAELESTIA_IPC_DIR/cmd" "$CAELESTIA_IPC_DIR/status"
+
     # Wrapper keeps the tmux pane alive after exit/crash for diagnostics.
-    WRAPPER_SCRIPT="/tmp/caelestia_tmux_wrapper.sh"
+    WRAPPER_SCRIPT="$CAELESTIA_IPC_DIR/tmux_wrapper.sh"
     printf -v args_str '%q ' "$0" "$@"
     cat > "$WRAPPER_SCRIPT" <<WRAPPER_EOF
 #!/usr/bin/env bash
-bash $args_str
+CAELESTIA_IPC_CLEANUP=0 bash $args_str
 ec=\$?
 echo ""
 echo "============================================================"
@@ -424,9 +434,9 @@ WRAPPER_EOF
 
     # Surface inner-script diagnostics in the outer terminal.
     _needs_pause=0
-    if [[ -s /tmp/caelestia_installer_err.log ]]; then
+    if [[ -s "$CAELESTIA_IPC_DIR/installer_err.log" ]]; then
         _reached_done=0
-        if grep -q '\[installer\] done (success)' /tmp/caelestia_installer_err.log 2>/dev/null; then
+        if grep -q '\[installer\] done (success)' "$CAELESTIA_IPC_DIR/installer_err.log" 2>/dev/null; then
             _reached_done=1
         fi
         if [[ $_reached_done -eq 0 ]]; then
@@ -438,7 +448,7 @@ WRAPPER_EOF
             echo "============================================================"
             echo ""
             echo "--- stderr output from installer ---"
-            cat /tmp/caelestia_installer_err.log
+            cat "$CAELESTIA_IPC_DIR/installer_err.log"
             echo "--- end stderr ---------------------"
             echo ""
             _needs_pause=1
@@ -451,7 +461,7 @@ WRAPPER_EOF
         echo "  INSTALLER SESSION ENDED (exit code: $_tmux_exit)"
         echo "  No stderr log was produced — the binary may have crashed"
         echo "  or the tmux session may have failed to start entirely"
-        echo "  (check for a stale tmux server or /tmp/caelestia_cmd issues)."
+        echo "  (check for a stale tmux session or private installer IPC issues)."
         echo "============================================================"
         echo ""
         _needs_pause=1
@@ -479,12 +489,26 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 _installer_start=$(date +%s)
-"$BIN" "$@" 2>/tmp/caelestia_installer_err.log
-_exit_code=$?
+_installer_err_log="${CAELESTIA_IPC_DIR:-/tmp}/installer_err.log"
+if "$BIN" "$@" 2>"$_installer_err_log"; then
+    _exit_code=0
+else
+    _exit_code=$?
+fi
 _installer_elapsed=$(($(date +%s) - _installer_start))
 
+if [[ $_exit_code -eq 0 && -s "$PACKAGE_BEFORE" ]]; then
+    case "$BASE_DISTRO" in
+        arch) pacman -Qq 2>/dev/null | sort -u > "$PACKAGE_STATE_DIR/packages.after" || true ;;
+        fedora) dnf repoquery --installed --qf '%{name}' 2>/dev/null | sort -u > "$PACKAGE_STATE_DIR/packages.after" || true ;;
+        debian) dpkg-query -W -f='${binary:Package}\n' 2>/dev/null | sort -u > "$PACKAGE_STATE_DIR/packages.after" || true ;;
+        *) : > "$PACKAGE_STATE_DIR/packages.after" ;;
+    esac
+    comm -13 "$PACKAGE_BEFORE" "$PACKAGE_STATE_DIR/packages.after" > "$PACKAGE_MANIFEST" || true
+fi
+
 _reached_done=0
-if grep -q '\[installer\] done (success)' /tmp/caelestia_installer_err.log 2>/dev/null; then
+if grep -q '\[installer\] done (success)' "${CAELESTIA_IPC_DIR:-/tmp}/installer_err.log" 2>/dev/null; then
     _reached_done=1
 fi
 
@@ -501,7 +525,7 @@ elif [[ $_reached_done -eq 0 ]]; then
     else
         _diag_title="INSTALLER EXITED UNEXPECTEDLY (no completion marker)"
     fi
-elif [[ -s /tmp/caelestia_installer_err.log ]]; then
+elif [[ -s "$_installer_err_log" ]]; then
     _show_diagnostic=1
     _diag_title="INSTALLER COMPLETED (stderr output captured below)"
 fi
@@ -518,9 +542,9 @@ if [[ $_show_diagnostic -eq 1 ]]; then
     echo "============================================================"
     echo ""
 
-    if [[ -s /tmp/caelestia_installer_err.log ]]; then
+    if [[ -s "$_installer_err_log" ]]; then
         echo "--- stderr output ---"
-        cat /tmp/caelestia_installer_err.log
+        cat "$_installer_err_log"
         echo "--- end stderr ------"
         echo ""
     else

@@ -22,11 +22,13 @@ Item {
 
         if (actionStr.startsWith("command(") && actionStr.endsWith(")")) {
             actionStr = actionStr.substring(8, actionStr.length - 1);
-            Quickshell.execDetached(["sh", "-c", actionStr]);
+            const command = actionStr.trim().split(/\s+/);
+            if (command.length > 0 && command[0] !== "")
+                Quickshell.execDetached(command);
         } else if (isKDE) {
             // Shortcut already active via kglobalaccel — nothing to dispatch.
         } else {
-            Quickshell.execDetached(["sh", "-c", "hyprctl dispatch " + actionStr]);
+            Quickshell.execDetached(["hyprctl", "dispatch", ...actionStr.trim().split(/\s+/)]);
         }
     }
 

@@ -20,10 +20,17 @@ section() {
 }
 
 export BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXPECTED_COMMIT="${CAELESTIA_UPDATE_COMMIT:-}"
+if [[ -z "$EXPECTED_COMMIT" && "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
+    die "Refusing mutable update: set CAELESTIA_UPDATE_COMMIT to a reviewed commit"
+fi
 cd "$BUNDLE_DIR" || die "Could not enter $BUNDLE_DIR"
 
-# Prevent concurrent update runs from racing on git/CMake/config writes.
-exec 9>"${XDG_RUNTIME_DIR:-/tmp}/caelestia-update.lock"
+# Prevent concurrent update runs in a private directory.
+LOCK_DIR="${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/caelestia"
+mkdir -p "$LOCK_DIR"
+chmod 700 "$LOCK_DIR"
+exec 9>"$LOCK_DIR/update.lock"
 flock -n 9 || { echo "Another Caelestia update is already running."; exit 1; }
 
 section "Step 1 - Source Code Update"
@@ -89,17 +96,23 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
         BRANCH="main"
     fi
 
-    info "Checking out $BRANCH..."
-    git -C "$BUNDLE_DIR" checkout "$BRANCH" || die "Failed to checkout $BRANCH"
-
-    info "Pulling latest changes for $BRANCH..."
-    git -C "$BUNDLE_DIR" pull origin "$BRANCH" || die "Failed to pull from origin/$BRANCH"
+    if [[ -n "$EXPECTED_COMMIT" ]]; then
+        [[ "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || die "CAELESTIA_UPDATE_COMMIT must be a full 40-character commit hash"
+        info "Checking out reviewed commit $EXPECTED_COMMIT..."
+        git -C "$BUNDLE_DIR" fetch --depth=1 origin "$EXPECTED_COMMIT" || die "Failed to fetch requested update commit"
+        git -C "$BUNDLE_DIR" checkout --detach "$EXPECTED_COMMIT" || die "Failed to checkout requested update commit"
+    else
+        info "Checking out $BRANCH..."
+        git -C "$BUNDLE_DIR" checkout "$BRANCH" || die "Failed to checkout $BRANCH"
+        info "Pulling latest changes for $BRANCH..."
+        git -C "$BUNDLE_DIR" pull --ff-only origin "$BRANCH" || die "Refusing non-fast-forward update for origin/$BRANCH"
+    fi
 
     if [[ -f "$BUNDLE_DIR/.gitmodules" ]]; then
-        info "Syncing src/dots submodule..."
-        git -C "$BUNDLE_DIR" submodule sync -- src/dots >/dev/null 2>&1 || true
-        git -C "$BUNDLE_DIR" submodule update --init --recursive src/dots || \
-            die "Failed to initialize src/dots submodule"
+        info "Syncing and updating submodules..."
+        git -C "$BUNDLE_DIR" submodule sync --recursive || die "Failed to sync submodules"
+        git -C "$BUNDLE_DIR" submodule update --init --recursive || \
+            die "Failed to initialize submodules"
     fi
 
     if [ "$STASHED" -eq 1 ]; then

@@ -15,6 +15,7 @@ Singleton {
 
     // User-configurable API key (NSFW content requires this)
     property string apiKey: GlobalConfig.services.wallhavenApiKey ?? ""
+    property int requestSerial: 0
 
     // Search state
     property bool loading: false
@@ -95,6 +96,9 @@ Singleton {
 
         return url + paramList.join("&");
     }
+    function redactedUrl(url: string): string {
+        return url.replace(/([?&]apikey=)[^&]*/i, "$1<redacted>");
+    }
 
     function search(query: string, page: int): void {
         if (!query || query.trim() === "")
@@ -125,10 +129,12 @@ Singleton {
         if (filters.colors)
             params.colors = filters.colors;
 
-        const url = buildUrl("/search", params);
-        Logger.log("Wallhaven search:", url);
+        const requestId = ++root.requestSerial;
+        Logger.log("Wallhaven search:", redactedUrl(url));
 
         Requests.get(url, text => {
+            if (requestId !== root.requestSerial)
+                return;
             try {
                 const json = JSON.parse(text);
                 results = json.data || [];
@@ -164,10 +170,12 @@ Singleton {
             "page": "1"
         };
 
-        const url = buildUrl("/search", params);
-        Logger.log("Wallhaven random:", url);
+        const requestId = ++root.requestSerial;
+        Logger.log("Wallhaven random:", redactedUrl(url));
 
         Requests.get(url, text => {
+            if (requestId !== root.requestSerial)
+                return;
             try {
                 const json = JSON.parse(text);
                 results = json.data || [];
@@ -208,7 +216,10 @@ Singleton {
     }
 
     function loadPage(url: string): void {
+        const requestId = ++root.requestSerial;
         Requests.get(url, text => {
+            if (requestId !== root.requestSerial)
+                return;
             try {
                 const json = JSON.parse(text);
                 results = json.data || [];

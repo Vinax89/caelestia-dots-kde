@@ -6,6 +6,7 @@
 #include <fstream>
 #include <csignal>
 #include <cstdlib>
+#include <filesystem>
 
 using namespace std;
 
@@ -32,7 +33,7 @@ void check_signals() {
     if (g_sigint_received || g_sigterm_received) {
         g_quit = true;
         Term::restore();
-        system("rm -rf /tmp/caelestia_pass.txt /tmp/caelestia_askpass.sh /tmp/caelestia_bin");
+        cleanup_installer_runtime();
         exit(130);
     }
 }
@@ -132,15 +133,16 @@ int main(int argc, char** argv) {
 
     if (g_answers["REMOVE_CACHE"] == "true") {
         string cache_dir = string(getenv("XDG_CACHE_HOME") ? getenv("XDG_CACHE_HOME") : (string(getenv("HOME")) + "/.cache")) + "/caelestia-kde";
-        system(("rm -rf \"" + cache_dir + "\"").c_str());
+        std::error_code error;
+        std::filesystem::remove_all(cache_dir, error);
     }
-    
-    // Secure cleanup of sudo credentials
-    system("rm -rf /tmp/caelestia_pass.txt /tmp/caelestia_askpass.sh /tmp/caelestia_bin");
 
-    // Cleanup cmake build cache as it contains absolute paths
-    string cmake_cleanup = "rm -rf " + g_bundle_dir + "/shell/build " + g_bundle_dir + "/shell/plugin/build";
-    system(cmake_cleanup.c_str());
+    cleanup_installer_runtime();
+
+    // Cleanup cmake build cache as it contains absolute paths.
+    std::error_code error;
+    std::filesystem::remove_all(g_bundle_dir + "/shell/build", error);
+    std::filesystem::remove_all(g_bundle_dir + "/shell/plugin/build", error);
 
     if (g_logout) {
         cout << "\n\n\nLogging out...\n";

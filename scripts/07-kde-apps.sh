@@ -66,14 +66,8 @@ fi
 
 #  uv (required for kde-material-you-colors on fedora) 
 if ! command -v uv >/dev/null 2>&1; then
-    echo "  Installing uv..."
- #   if [[ "$BASE_DISTRO" == "arch" ]]; then
-    install_if_missing uv || curl -LsSf https://astral.sh/uv/install.sh | sh  # ci:allow-curl-pipe
-    #else
-     #   curl -LsSf https://astral.sh/uv/install.sh | sh
-    #fi
-    # Add uv to path for current session if installed via script
-    export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+    echo "  [WARN] uv is not installed; skipping automatic remote installer."
+    echo "         Install uv from your distribution package or https://docs.astral.sh/uv/"
 fi
 
 #  kde-material-you-colors 

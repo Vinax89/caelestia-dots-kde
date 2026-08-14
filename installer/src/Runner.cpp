@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fcntl.h>
+#include <filesystem>
 #include <iostream>
 #include <pty.h>
 #include <sys/wait.h>
@@ -19,6 +20,14 @@
 using namespace std;
 
 namespace {
+
+string shell_single_quote(string s);
+
+string ipc_path(const char* name) {
+  const char* dir = getenv("CAELESTIA_IPC_DIR");
+  return string(dir && *dir ? dir : "/tmp") + "/" + name;
+}
+
 bool tmux_has_worker_pane() {
   int rc = system("tmux list-panes -t caelestia_install -F '#{pane_index}' "
                   "2>/dev/null | grep -qx '1'");
@@ -33,11 +42,14 @@ bool ensure_tmux_worker_pane() {
     return true;
   }
 
-  system("tmux split-window -h -p 68 -t caelestia_install \"bash -c 'trap "
-         "\\\":\\\" SIGINT SIGQUIT SIGTSTP; clear; echo \\\"Waiting for "
-         "installer...\\\"; exec 3<> /tmp/caelestia_cmd; while read -u 3 -r "
-         "cmd; do if [[ \\\"\\$cmd\\\" == \\\"EXIT\\\" ]]; then break; fi; "
-         "eval \\\"\\$cmd\\\"; echo \\$? > /tmp/caelestia_status; done'\"");
+  const string workerCommand =
+      "tmux split-window -h -p 68 -t caelestia_install \"bash -c 'trap "
+      "\\\":\\\" SIGINT SIGQUIT SIGTSTP; clear; echo \\\"Waiting for "
+      "installer...\\\"; exec 3<> " + shell_single_quote(ipc_path("cmd"))
+      + "; while read -u 3 -r cmd; do if [[ \\\"\\$cmd\\\" == \\\"EXIT\\\" ]]; then break; fi; "
+        "eval \\\"\\$cmd\\\"; echo \\$? > "
+      + shell_single_quote(ipc_path("status")) + "; done'\"";
+  system(workerCommand.c_str());
   system("tmux select-pane -t caelestia_install:0.0");
   this_thread::sleep_for(
       chrono::milliseconds(50)); // tiny wait for terminal resize propagation
@@ -306,19 +318,26 @@ void execute() {
   setenv("SRCDEST", (cache_dir + "/makepkg-sources").c_str(), 1);
   setenv("SRCPKGDEST", (cache_dir + "/makepkg-srcpackages").c_str(), 1);
 
-  system(("mkdir -p \"" + cache_dir +
-          "\" \"$BUILDDIR\" \"$PKGDEST\" \"$SRCDEST\" \"$SRCPKGDEST\"")
-             .c_str());
-  system(("rm -f \"" + cache_dir + "/failed_steps.txt\" \"" + cache_dir +
-          "/failed_packages.txt\"")
-             .c_str());
+  std::error_code cache_error;
+  for (const auto& directory : {cache_dir, cache_dir + "/makepkg-build",
+                                cache_dir + "/makepkg-packages",
+                                cache_dir + "/makepkg-sources",
+                                cache_dir + "/makepkg-srcpackages"}) {
+    std::filesystem::create_directories(directory, cache_error);
+    if (cache_error) {
+      std::cerr << "Failed to create installer cache directory: " << directory << "\\n";
+      return;
+    }
+  }
+  std::filesystem::remove(cache_dir + "/failed_steps.txt", cache_error);
+  std::filesystem::remove(cache_dir + "/failed_packages.txt", cache_error);
 
   setenv("BASE_DISTRO", g_base_distro.c_str(), 1);
   setenv("BUNDLE_DIR", g_bundle_dir.c_str(), 1);
 
   // Inject our sudo wrapper into the PATH
   string current_path = getenv("PATH") ? getenv("PATH") : "/usr/bin";
-  setenv("PATH", ("/tmp/caelestia_bin:" + current_path).c_str(), 1);
+  setenv("PATH", (g_sudo_bin_dir + ":" + current_path).c_str(), 1);
 
   // CONFIRM_ARG is special because pacman/yay need an empty string or something
   // like --noconfirm Actually pacman uses --noconfirm, but some other places
@@ -347,12 +366,12 @@ void execute() {
     steps[i].status = "RUNNING";
     draw_progress_ui(i);
 
-    string cmd = "bash " + g_bundle_dir + "/" + steps[i].script_path;
+    string cmd = "bash " + shell_single_quote(g_bundle_dir + "/" + steps[i].script_path);
 
     // Forward command to the right pane
     if (getenv("CAELESTIA_TMUX_MASTER") != nullptr) {
       // Fail-safe: check if the right pane is dead (no reader on FIFO)
-      int test_fd = open("/tmp/caelestia_cmd", O_WRONLY | O_NONBLOCK);
+      int test_fd = open(ipc_path("cmd").c_str(), O_WRONLY | O_NONBLOCK);
       if (test_fd == -1 && errno == ENXIO) {
         // Recreate worker pane only if it's actually missing.
         ensure_tmux_worker_pane();
@@ -360,14 +379,14 @@ void execute() {
         close(test_fd);
       }
 
-      FILE *cmd_fifo = fopen("/tmp/caelestia_cmd", "w");
+      FILE *cmd_fifo = fopen(ipc_path("cmd").c_str(), "w");
       if (cmd_fifo) {
         auto safe_env = [](const char *name) {
           const char *val = getenv(name);
           return val ? string(val) : "";
         };
-        string exports = "export PATH=\"/tmp/caelestia_bin:$PATH\" "
-                         "SUDO_ASKPASS=\"/tmp/caelestia_askpass.sh\"";
+        string exports = "export PATH=" + shell_single_quote(g_sudo_bin_dir + ":$PATH")
+                         + " SUDO_ASKPASS=" + shell_single_quote(g_sudo_askpass);
         exports += " CACHE_DIR=" + shell_single_quote(safe_env("CACHE_DIR"));
         exports += " BUILDDIR=" + shell_single_quote(safe_env("BUILDDIR"));
         exports += " PKGDEST=" + shell_single_quote(safe_env("PKGDEST"));
@@ -396,7 +415,7 @@ void execute() {
 
       // Continuously check for status or terminal resizes
       int exit_code = -1;
-      int status_fd = open("/tmp/caelestia_status", O_RDONLY | O_NONBLOCK);
+      int status_fd = open(ipc_path("status").c_str(), O_RDONLY | O_NONBLOCK);
       int poll_iterations = 0;
       const int MAX_POLL_ITERATIONS = 3600; // ~30 minutes at 500ms — safety timeout
       while (true) {
@@ -415,7 +434,7 @@ void execute() {
         }
 
         // Fail-safe check: did the tmux pane crash while we were waiting?
-        int test_fd = open("/tmp/caelestia_cmd", O_WRONLY | O_NONBLOCK);
+        int test_fd = open(ipc_path("cmd").c_str(), O_WRONLY | O_NONBLOCK);
         if (test_fd == -1 && errno == ENXIO) {
           exit_code = 1; // treat as failure
           if (status_fd >= 0) {
@@ -455,8 +474,7 @@ void execute() {
           if (read(STDIN_FILENO, &c, 1) > 0 && c == 3) { // Ctrl+C
             if (status_fd >= 0) close(status_fd);
             Term::restore();
-            system("rm -rf /tmp/caelestia_pass.txt /tmp/caelestia_askpass.sh "
-                   "/tmp/caelestia_bin");
+            cleanup_installer_runtime();
             exit(130);
           }
         }

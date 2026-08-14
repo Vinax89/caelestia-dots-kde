@@ -17,7 +17,11 @@ enum class Opcode : int32_t {
 };
 
 DiscordIpc::DiscordIpc(QObject* parent)
-    : QObject(parent), m_socket(new QLocalSocket(this)), m_reconnectTimer(new QTimer(this)), m_connected(false)
+    : QObject(parent)
+    , m_socket(new QLocalSocket(this))
+    , m_reconnectTimer(new QTimer(this))
+    , m_connectTimeout(new QTimer(this))
+    , m_connected(false)
 {
     connect(m_socket, &QLocalSocket::connected, this, &DiscordIpc::onSocketConnected);
     connect(m_socket, &QLocalSocket::disconnected, this, &DiscordIpc::onSocketDisconnected);
@@ -30,6 +34,11 @@ DiscordIpc::DiscordIpc(QObject* parent)
 
     m_reconnectTimer->setInterval(5000);
     connect(m_reconnectTimer, &QTimer::timeout, this, &DiscordIpc::checkReconnect);
+    m_connectTimeout->setSingleShot(true);
+    connect(m_connectTimeout, &QTimer::timeout, this, [this]() {
+        if (m_socket->state() == QLocalSocket::ConnectingState)
+            m_socket->abort();
+    });
 }
 
 DiscordIpc::~DiscordIpc() {
@@ -42,6 +51,8 @@ bool DiscordIpc::connected() const {
 
 void DiscordIpc::connectIpc(const QString& clientId) {
     m_clientId = clientId;
+    m_socketIndex = 0;
+    m_socketPaths.clear();
     if (m_socket->state() != QLocalSocket::UnconnectedState) {
         m_socket->abort();
     }
@@ -51,7 +62,10 @@ void DiscordIpc::connectIpc(const QString& clientId) {
 
 void DiscordIpc::disconnectIpc() {
     m_reconnectTimer->stop();
+    m_connectTimeout->stop();
     m_clientId.clear();
+    m_socketPaths.clear();
+    m_socketIndex = 0;
     m_socket->abort();
     if (m_connected) {
         m_connected = false;
@@ -60,37 +74,39 @@ void DiscordIpc::disconnectIpc() {
 }
 
 void DiscordIpc::checkReconnect() {
-    if (m_clientId.isEmpty()) return;
-    if (m_socket->state() == QLocalSocket::ConnectedState || m_socket->state() == QLocalSocket::ConnectingState) return;
-
-    QString runtimeDir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
-
-    // Try native Discord IPC paths first: discord-ipc-0 through discord-ipc-9
-    // (multiple concurrent Discord-protocol clients occupy successive slots).
-    for (int slot = 0; slot <= 9; ++slot) {
-        QString pipePath = runtimeDir + "/discord-ipc-" + QString::number(slot);
-        m_socket->connectToServer(pipePath);
-        if (m_socket->waitForConnected(500))
-            return;
+    if (m_clientId.isEmpty())
+        return;
+    if (m_socket->state() == QLocalSocket::ConnectedState
+        || m_socket->state() == QLocalSocket::ConnectingState) {
+        return;
     }
 
-    // Flatpak-packaged Discord / Vesktop sandbox the runtime directory.
-    // Try the well-known Flatpak app-ids.
-    static const QStringList flatpakIds = {
-        "com.discordapp.Discord",
-        "dev.vencord.Vesktop",
-    };
-    for (const auto& id : flatpakIds) {
-        for (int slot = 0; slot <= 9; ++slot) {
-            QString pipePath = runtimeDir + "/app/" + id + "/discord-ipc-" + QString::number(slot);
-            m_socket->connectToServer(pipePath);
-            if (m_socket->waitForConnected(500))
-                return;
+    if (m_socketPaths.isEmpty()) {
+        const QString runtimeDir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+        for (int slot = 0; slot <= 9; ++slot)
+            m_socketPaths << runtimeDir + "/discord-ipc-" + QString::number(slot);
+
+        static const QStringList flatpakIds = {
+            "com.discordapp.Discord",
+            "dev.vencord.Vesktop",
+        };
+        for (const auto& id : flatpakIds) {
+            for (int slot = 0; slot <= 9; ++slot)
+                m_socketPaths << runtimeDir + "/app/" + id + "/discord-ipc-" + QString::number(slot);
         }
     }
+
+    if (m_socketIndex >= m_socketPaths.size()) {
+        m_socketIndex = 0;
+        return;
+    }
+
+    m_socket->connectToServer(m_socketPaths.at(m_socketIndex++));
+    m_connectTimeout->start(500);
 }
 
 void DiscordIpc::onSocketConnected() {
+    m_connectTimeout->stop();
     // Send Handshake
     QJsonObject payload;
     payload["v"] = 1;
@@ -107,10 +123,12 @@ void DiscordIpc::onSocketDisconnected() {
 }
 
 void DiscordIpc::onError(QLocalSocket::LocalSocketError) {
+    m_connectTimeout->stop();
     emit errorOccurred(m_socket->errorString());
     onSocketDisconnected();
-}
+    QTimer::singleShot(0, this, &DiscordIpc::checkReconnect);
 
+}
 void DiscordIpc::onReadyRead() {
     m_buffer.append(m_socket->readAll());
 

@@ -320,6 +320,38 @@ class ScriptNumberingTests(unittest.TestCase):
             )
 
 
+class SafetyContractTests(unittest.TestCase):
+    def read(self, name: str) -> str:
+        return (ROOT / name).read_text()
+
+    def test_updater_requires_reviewed_commit_by_default(self) -> None:
+        updater = self.read("update.sh")
+        self.assertIn("CAELESTIA_UPDATE_COMMIT", updater)
+        self.assertIn("git -C \"$BUNDLE_DIR\" pull --ff-only", updater)
+
+    def test_uninstaller_requires_ownership_manifest(self) -> None:
+        uninstaller = self.read("uninstall.sh")
+        self.assertIn("PACKAGE_MANIFEST", uninstaller)
+        self.assertIn("-s \"$PACKAGE_MANIFEST\"", uninstaller)
+
+    def test_third_party_patching_is_opt_in(self) -> None:
+        builder = self.read("scripts/08-build-shell.sh")
+        self.assertIn("CAELESTIA_ENABLE_THIRDPARTY_PATCHES", builder)
+        self.assertIn("Skipping unsupported third-party Python patches", builder)
+
+    def test_updater_rejects_unreviewed_updates(self) -> None:
+        result = subprocess.run(
+            [str(ROOT / "update.sh")],
+            cwd=ROOT,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(ROOT / ".test-home")},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Refusing mutable update", result.stderr)
+
+
 if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=2).run(suite)

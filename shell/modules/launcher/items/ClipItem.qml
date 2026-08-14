@@ -27,7 +27,7 @@ Item {
         if (root.isPinned)
             Clipboard.copyPinned(root.modelData.pinId);
         else
-            Quickshell.execDetached(["sh", "-c", "cliphist decode " + root.modelData.id + " | wl-copy"]);
+            Quickshell.execDetached(["sh", "-c", "cliphist decode -- \"$1\" | wl-copy", "cliphist", String(root.modelData.id)]);
 
         if (GlobalConfig.utilities.toasts.clipboardChanged)
             Toaster.toast(qsTr("Copied to clipboard"), preview, "content_paste");

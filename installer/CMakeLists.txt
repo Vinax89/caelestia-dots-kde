@@ -14,8 +14,15 @@ endif()
 # Set compile flags
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
-# Find all source files
-file(GLOB SOURCES "src/*.cpp")
+set(SOURCES
+    src/Draw.cpp
+    src/Globals.cpp
+    src/Input.cpp
+    src/main.cpp
+    src/Runner.cpp
+    src/Term.cpp
+    src/UI.cpp
+)
 include_directories(src)
 
 # Define executable

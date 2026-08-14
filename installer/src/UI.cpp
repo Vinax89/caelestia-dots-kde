@@ -5,13 +5,18 @@
 #include "Input.hpp"
 #include "Draw.hpp"
 #include "Runner.hpp"
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdlib>
 #include <iostream>
 #include <fstream>
 #include <thread>
 #include <chrono>
 #include <unordered_map>
 #include <vector>
-#include <fcntl.h>
+#include <cerrno>
+#include <cstring>
 #include <unistd.h>
 
 using namespace std;
@@ -20,43 +25,72 @@ std::map<std::string, std::string> g_answers;
 
 namespace {
 
-// Writes password to a file with secure permissions (0600) atomically at
-// creation time — avoids the TOCTOU race of creating with default umask then
-// chmod'ing afterwards.
-bool write_password_file_secure(const string& path, const string& password) {
-    // Mode 0600 ensures only the owner can read, from the moment of creation.
-    // This avoids the TOCTOU window of creating with default umask then chmod.
-    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
-    if (fd == -1) {
+bool write_secure_file(const string& path, const string& contents, mode_t mode) {
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, mode);
+    if (fd == -1)
         return false;
-    }
-    string data = password + "\n";
-    ssize_t written = write(fd, data.c_str(), data.size());
+
+    const ssize_t written = write(fd, contents.data(), contents.size());
+    const bool ok = written == static_cast<ssize_t>(contents.size());
     close(fd);
-    return written == static_cast<ssize_t>(data.size());
+    if (!ok)
+        unlink(path.c_str());
+    return ok;
 }
 
-// Sets up the sudo askpass environment after a successful password
-// verification. Creates the password file, askpass helper, sudo wrapper,
-// screen inhibitor, and exports SUDO_PASS.
-void setup_sudo_environment(const string& pw) {
-    system("mkdir -p /tmp/caelestia_bin");
+string shell_quote(const string& value) {
+    string quoted = "'";
+    for (char c : value) {
+        if (c == '\'') quoted += "'\\''";
+        else quoted += c;
+    }
+    return quoted + "'";
+}
 
-    // Write password with secure permissions from the start (no TOCTOU window)
-    write_password_file_secure("/tmp/caelestia_pass.txt", pw);
+bool setup_sudo_environment(const string& pw) {
+    const char* runtimeBase = getenv("XDG_RUNTIME_DIR");
+    string templatePath = string(runtimeBase && *runtimeBase ? runtimeBase : "/tmp")
+        + "/caelestia-installer-XXXXXX";
+    vector<char> mutablePath(templatePath.begin(), templatePath.end());
+    mutablePath.push_back('\0');
 
-    // Askpass script
-    system("echo '#!/bin/bash\ncat /tmp/caelestia_pass.txt' > /tmp/caelestia_askpass.sh && chmod 700 /tmp/caelestia_askpass.sh");
+    char* runtimeDir = mkdtemp(mutablePath.data());
+    if (!runtimeDir)
+        return false;
 
-    // Sudo wrapper to force -A
-    system("echo '#!/bin/bash\nexport SUDO_ASKPASS=/tmp/caelestia_askpass.sh\nexec /usr/bin/sudo -A \"$@\"' > /tmp/caelestia_bin/sudo && chmod 700 /tmp/caelestia_bin/sudo");
+    g_installer_runtime_dir = runtimeDir;
+    g_sudo_bin_dir = g_installer_runtime_dir + "/bin";
+    g_sudo_askpass = g_installer_runtime_dir + "/askpass";
+    if (mkdir(g_sudo_bin_dir.c_str(), 0700) != 0) {
+        cleanup_installer_runtime();
+        return false;
+    }
 
-    // Also export SUDO_PASS for some scripts (like 09-system-tweaks.sh) that might rely on it
-    setenv("SUDO_PASS", pw.c_str(), 1);
+    const string passwordPath = g_installer_runtime_dir + "/password";
+    if (!write_secure_file(passwordPath, pw + "\n", 0600)
+        || !write_secure_file(g_sudo_askpass, "#!/bin/sh\nexec /bin/cat \""
+                + passwordPath + "\"\n", 0700)
+        || !write_secure_file(g_sudo_bin_dir + "/sudo",
+                "#!/bin/sh\nexport SUDO_ASKPASS=\"" + g_sudo_askpass
+                + "\"\nexec /usr/bin/sudo -A \"$@\"\n", 0700)) {
+        cleanup_installer_runtime();
+        return false;
+    }
 
-    // Start background keep-awake for display (sleep inhibitor)
-    system("systemd-inhibit --what=idle:sleep --who=\"Caelestia Installer\" --why=\"Installation in progress\" bash -c 'while :; do sleep 600; done' >/dev/null 2>&1 & echo $! > /tmp/caelestia_inhibit.pid");
-    system("qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.Inhibit \"Caelestia Installer\" \"Installation in progress\" > /tmp/caelestia_kde_inhibit.cookie 2>/dev/null");
+    setenv("SUDO_ASKPASS", g_sudo_askpass.c_str(), 1);
+
+    // Start background keep-awake for display (sleep inhibitor) in the private runtime dir.
+    const string inhibitPid = g_installer_runtime_dir + "/inhibit.pid";
+    const string inhibitCookie = g_installer_runtime_dir + "/inhibit.cookie";
+    const string pidCommand = "systemd-inhibit --what=idle:sleep --who='Caelestia Installer' "
+        "--why='Installation in progress' sleep 86400 >/dev/null 2>&1 & echo $! > "
+        + shell_quote(inhibitPid);
+    system(pidCommand.c_str());
+    const string cookieCommand = "qdbus6 org.freedesktop.ScreenSaver /ScreenSaver "
+        "org.freedesktop.ScreenSaver.Inhibit 'Caelestia Installer' 'Installation in progress' >"
+        + shell_quote(inhibitCookie) + " 2>/dev/null";
+    system(cookieCommand.c_str());
+    return true;
 }
 
 } // anonymous namespace
@@ -212,14 +246,15 @@ while (!g_quit) {
                 Draw::text(left + 2, top + 5, "Verifying...                             ", Draw::color("yellow"));
                 cout << Draw::sync_end() << flush;
                 
-                FILE* pipe = popen("sudo -S true 2>/dev/null", "w");
+                FILE* pipe = popen("/usr/bin/sudo -S true 2>/dev/null", "w");
                 if (pipe) {
                     fprintf(pipe, "%s\n", pw.c_str());
                     fflush(pipe);
                     int status = pclose(pipe);
                     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                        setup_sudo_environment(pw);
-                        return true;
+                        if (setup_sudo_environment(pw))
+                            return true;
+                        error_msg = "Failed to create secure sudo runtime.";
                     } else {
                         attempts++;
                         if (attempts >= 3) {
@@ -259,14 +294,15 @@ while (!g_quit) {
                         cout << Draw::sync_start();
                         Draw::text(left + 2, top + 5, "Verifying...                             ", Draw::color("yellow"));
                         cout << Draw::sync_end() << flush;
-                        FILE* pipe = popen("sudo -S true 2>/dev/null", "w");
+                        FILE* pipe = popen("/usr/bin/sudo -S true 2>/dev/null", "w");
                         if (pipe) {
                             fprintf(pipe, "%s\n", pw.c_str());
                             fflush(pipe);
                             int status = pclose(pipe);
                             if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                                setup_sudo_environment(pw);
-                                return true;
+                                if (setup_sudo_environment(pw))
+                                    return true;
+                                error_msg = "Failed to create secure sudo runtime.";
                             } else {
                                 attempts++;
                                 if (attempts >= 3) {
