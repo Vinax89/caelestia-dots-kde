@@ -296,16 +296,16 @@ PageBase {
             id: statusProc
 
             running: true
-            command: ["sh", "-c", "test -x " + JSON.stringify(root.claudeBin()) + " && " + JSON.stringify(root.claudeBin()) + " --version 2>/dev/null || echo NOT_INSTALLED"]
+            command: [root.claudeBin(), "--version"]
             stdout: StdioCollector {
-                onStreamFinished: root.claudeVersion = (text || "").trim()
+                onStreamFinished: root.claudeVersion = (text || "").trim() || "NOT_INSTALLED"
             }
         }
 
         Process {
             id: installProc
 
-            command: ["sh", "-c", "tmp=$(mktemp) && trap 'rm -f \"$tmp\"' EXIT && curl -fsSL --proto '=https' --tlsv1.2 -o \"$tmp\" https://claude.ai/install.sh && bash \"$tmp\""]
+            command: ["xdg-open", "https://claude.ai/download"]
             stdout: SplitParser {
                 onRead: line => root.installStatus = line
             }
@@ -314,7 +314,7 @@ PageBase {
             }
             onExited: code => {
                 root.installing = false;
-                root.installStatus = code === 0 ? qsTr("Installed.") : (qsTr("Failed") + " (" + code + ")");
+                root.installStatus = code === 0 ? qsTr("Opened the official download page.") : (qsTr("Could not open the download page") + " (" + code + ")");
                 root.refreshStatus();
                 // Re-read both versions so the button settles on "Check for
                 // updates" instead of still offering the update just applied.
@@ -504,7 +504,7 @@ PageBase {
                     return;
                 }
                 root.installing = true;
-                root.installStatus = qsTr("Installing…");
+                root.installStatus = qsTr("Opening the official download page…");
                 installProc.running = true;
             }
         }

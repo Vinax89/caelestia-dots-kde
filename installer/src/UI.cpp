@@ -38,6 +38,15 @@ bool write_secure_file(const string& path, const string& contents, mode_t mode) 
     return ok;
 }
 
+string shell_quote(const string& value) {
+    string quoted = "'";
+    for (char c : value) {
+        if (c == '\'') quoted += "'\\''";
+        else quoted += c;
+    }
+    return quoted + "'";
+}
+
 bool setup_sudo_environment(const string& pw) {
     const char* runtimeBase = getenv("XDG_RUNTIME_DIR");
     string templatePath = string(runtimeBase && *runtimeBase ? runtimeBase : "/tmp")
@@ -70,9 +79,17 @@ bool setup_sudo_environment(const string& pw) {
 
     setenv("SUDO_ASKPASS", g_sudo_askpass.c_str(), 1);
 
-    // Start background keep-awake for display (sleep inhibitor).
-    system("systemd-inhibit --what=idle:sleep --who=\"Caelestia Installer\" --why=\"Installation in progress\" bash -c 'while :; do sleep 600; done' >/dev/null 2>&1 & echo $! > /tmp/caelestia_inhibit.pid");
-    system("qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.Inhibit \"Caelestia Installer\" \"Installation in progress\" >/tmp/caelestia_kde_inhibit.cookie 2>/dev/null");
+    // Start background keep-awake for display (sleep inhibitor) in the private runtime dir.
+    const string inhibitPid = g_installer_runtime_dir + "/inhibit.pid";
+    const string inhibitCookie = g_installer_runtime_dir + "/inhibit.cookie";
+    const string pidCommand = "systemd-inhibit --what=idle:sleep --who='Caelestia Installer' "
+        "--why='Installation in progress' sleep 86400 >/dev/null 2>&1 & echo $! > "
+        + shell_quote(inhibitPid);
+    system(pidCommand.c_str());
+    const string cookieCommand = "qdbus6 org.freedesktop.ScreenSaver /ScreenSaver "
+        "org.freedesktop.ScreenSaver.Inhibit 'Caelestia Installer' 'Installation in progress' >"
+        + shell_quote(inhibitCookie) + " 2>/dev/null";
+    system(cookieCommand.c_str());
     return true;
 }
 

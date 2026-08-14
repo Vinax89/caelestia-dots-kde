@@ -80,13 +80,24 @@ backup_shell_rc "$HOME/.bashrc" "bashrc"
 backup_shell_rc "$HOME/.zshrc" "zshrc"
 backup_shell_rc "$HOME/.config/fish/config.fish" "fish_config"
 
+deploy_config_dir() {
+    local source="$1" target="$2" parent staging
+    parent="$(dirname "$target")"
+    mkdir -p "$parent"
+    staging="$(mktemp -d "$parent/.caelestia-deploy.XXXXXX")"
+    if ! cp -a "$source" "$staging/$(basename "$target")"; then
+        rm -rf -- "$staging"
+        return 1
+    fi
+    rm -rf -- "$target"
+    mv -- "$staging/$(basename "$target")" "$target"
+    rmdir -- "$staging"
+}
+
 echo "  Deploying Caelestia configs..."
 for config in btop fastfetch foot kitty micro thunar; do
     if [[ -d "$DOTS_DIR/$config" ]]; then
-        # Remove
-        rm -rf "$HOME/.config/$config"
-        # Deploy
-        cp -r "$DOTS_DIR/$config" "$HOME/.config/$config"
+        deploy_config_dir "$DOTS_DIR/$config" "$HOME/.config/$config"
         echo "    Deployed: $config"
     fi
 done
@@ -99,10 +110,7 @@ for config in fish fastfetch; do
     fi
 
     if [[ -d "$FISH_DIR/$config" ]]; then
-        # Remove
-        rm -rf "$HOME/.config/$config"
-        # Deploy
-        cp -r "$FISH_DIR/$config" "$HOME/.config/$config"
+        deploy_config_dir "$FISH_DIR/$config" "$HOME/.config/$config"
         echo "    Deployed: $config"
     fi
 done
@@ -137,6 +145,13 @@ if [[ -d "$SRC_DIR/bin" ]]; then
         fi
     done
 fi
+
+# User systemd units
+for unit in "$BUNDLE_DIR/src/systemd/"*.service "$BUNDLE_DIR/src/systemd/"*.timer; do
+    [[ -f "$unit" ]] || continue
+    install -m 0644 "$unit" "$HOME/.config/systemd/user/$(basename "$unit")"
+done
+systemctl --user daemon-reload 2>/dev/null || true
 
 # Update desktop database
 update-desktop-database "$HOME/.local/share/applications/" 2>/dev/null || true

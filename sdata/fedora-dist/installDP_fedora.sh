@@ -217,12 +217,8 @@ for pkg in "${COPR_PKGS[@]}"; do
             rm -rf "$tmpdir"
             ;;
         starship)
-            if curl -sS https://starship.rs/install.sh | sh -s -- -y; then  # ci:allow-curl-pipe
-                log "starship installed successfully."
-            else
-                err "Manual build for $pkg failed."
-                FAILED_PKGS+=("$pkg")
-            fi
+            err "starship is unavailable from configured repositories; install it from a signed distribution package."
+            FAILED_PKGS+=("$pkg")
             ;;
         *)
             err "No manual fallback defined for $pkg."
@@ -245,23 +241,25 @@ if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "themes" ]]; then
 
 log "Downloading and installing required custom fonts (parallel)..."
 mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/fonts"
+font_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/caelestia-fonts.XXXXXX")"
+trap 'rm -rf -- "$font_tmp_dir"' EXIT
 
 # Download all fonts in parallel
 curl -sL "https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsRounded%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf" -o "${XDG_DATA_HOME:-$HOME/.local/share}/fonts/MaterialSymbolsRounded.ttf" &
 _pid_ms=$!
 
-curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/CascadiaCode.zip" -o "/tmp/CascadiaCode.zip" &
+curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/CascadiaCode.zip" -o "$font_tmp_dir/CascadiaCode.zip" &
 _pid_cc=$!
 
-curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/JetBrainsMono.zip" -o "/tmp/JetBrainsMono.zip" &
+curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/JetBrainsMono.zip" -o "$font_tmp_dir/JetBrainsMono.zip" &
 _pid_jb=$!
 
 # Wait for all downloads to finish
 wait $_pid_ms $_pid_cc $_pid_jb
 
 # Extract zip files
-unzip -qo "/tmp/CascadiaCode.zip" -d "${XDG_DATA_HOME:-$HOME/.local/share}/fonts" 2>/dev/null && rm -f "/tmp/CascadiaCode.zip" || { err "Failed to extract CascadiaCode font."; echo "CascadiaCode font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
-unzip -qo "/tmp/JetBrainsMono.zip" -d "${XDG_DATA_HOME:-$HOME/.local/share}/fonts" 2>/dev/null && rm -f "/tmp/JetBrainsMono.zip" || { err "Failed to extract JetBrains Mono Nerd Font."; echo "JetBrains Mono Nerd Font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
+unzip -qo "$font_tmp_dir/CascadiaCode.zip" -d "${XDG_DATA_HOME:-$HOME/.local/share}/fonts" 2>/dev/null && rm -f "/tmp/CascadiaCode.zip" || { err "Failed to extract CascadiaCode font."; echo "CascadiaCode font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
+unzip -qo "$font_tmp_dir/JetBrainsMono.zip" -d "${XDG_DATA_HOME:-$HOME/.local/share}/fonts" 2>/dev/null && rm -f "/tmp/JetBrainsMono.zip" || { err "Failed to extract JetBrains Mono Nerd Font."; echo "JetBrains Mono Nerd Font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
 # Material Symbols is a single .ttf, no extraction needed
 [[ -f "${XDG_DATA_HOME:-$HOME/.local/share}/fonts/MaterialSymbolsRounded.ttf" ]] || { err "Failed to download Material Symbols font."; echo "Material Symbols font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
 

@@ -92,9 +92,7 @@ fi
 
 # UPDATER ONLY BLOCK END
 
-info "Patching Recorder.qml to wait for portal selection..."
-sed -i 's/command: \["pidof", "gpu-screen-recorder"\]/command: \["sh", "-c", "pidof gpu-screen-recorder >\\\/dev\\\/null \&\& test -f $HOME\\\/.local\\\/state\\\/caelestia\\\/record\\\/recording.mp4"\]/g' "$HOME/.local/share/caelestia-shell/services/Recorder.qml" 2>/dev/null || true
-sed -i 's/command: \["pidof", "gpu-screen-recorder"\]/command: \["sh", "-c", "pidof gpu-screen-recorder >\\\/dev\\\/null \&\& test -f $HOME\\\/.local\\\/state\\\/caelestia\\\/record\\\/recording.mp4"\]/g' "shell/services/Recorder.qml" 2>/dev/null || true
+info "Recorder.qml already uses direct process arguments; no runtime patch required."
 
 info "Building Caelestia Shell..."
 
@@ -153,6 +151,7 @@ fi
 
 mkdir -p ~/.local/bin ~/.config/systemd/user
 
+if [[ "${CAELESTIA_ENABLE_THIRDPARTY_PATCHES:-false}" == "true" ]]; then
 info "Patching caelestia-cli record/screenshot (requires root)..."
 sudo bash -s -- "$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" << 'EOF'
 USER_HOME="$1"
@@ -256,7 +255,16 @@ try:
     code = code.replace(old_dbus, new_xdg)
     code = code.replace("[\"dolphin\", \"--select\", str(new_path)]", "[\"xdg-open\", str(new_path.parent)]")
     
-    with open(file_path, "w") as f: f.write(code)
+    import shutil, tempfile
+    backup_path = file_path + ".caelestia-original"
+    if not os.path.exists(backup_path):
+        shutil.copy2(file_path, backup_path)
+    fd, patched_path = tempfile.mkstemp(prefix=".caelestia-patch-", dir=os.path.dirname(file_path))
+    try:
+        with os.fdopen(fd, "w") as f: f.write(code)
+        os.replace(patched_path, file_path)
+    finally:
+        if os.path.exists(patched_path): os.unlink(patched_path)
         
     screenshot_path = None
     for p in search_paths:
@@ -269,7 +277,15 @@ try:
         scode = scode.replace("cmd = [\"grim\"]", "cmd = [\"spectacle\", \"-b\", \"-f\", \"-n\", \"-o\"]")
         scode = scode.replace("if focused_monitor:\n            cmd += [\"-o\", focused_monitor[\"name\"]]", "")
         scode = scode.replace("cmd += [\"-\"]\n        sc_data = subprocess.check_output(cmd)", "tmp_file = \"/tmp/qs-screenshot.png\"\n        cmd += [tmp_file]\n        subprocess.run(cmd)\n        try:\n            with open(tmp_file, \"rb\") as f:\n                sc_data = f.read()\n        except Exception:\n            sc_data = b\"\"")
-        with open(screenshot_path, "w") as f: f.write(scode)
+        backup_path = screenshot_path + ".caelestia-original"
+        if not os.path.exists(backup_path):
+            shutil.copy2(screenshot_path, backup_path)
+        fd, patched_path = tempfile.mkstemp(prefix=".caelestia-patch-", dir=os.path.dirname(screenshot_path))
+        try:
+            with os.fdopen(fd, "w") as f: f.write(scode)
+            os.replace(patched_path, screenshot_path)
+        finally:
+            if os.path.exists(patched_path): os.unlink(patched_path)
 except Exception as e:
     print(f"Failed to patch record.py: {e}")
     sys.exit(1)
@@ -388,7 +404,16 @@ try:
     new_wall_cache = "wall_cache = convert_animated(wall) if wall.suffix.lower() in [\".gif\", \".mp4\", \".webm\", \".mkv\", \".avi\", \".mov\", \".wmv\", \".flv\"] else wall"
     code = code.replace(old_wall_cache, new_wall_cache)
 
-    with open(file_path, "w") as f: f.write(code)
+    import shutil, tempfile
+    backup_path = file_path + ".caelestia-original"
+    if not os.path.exists(backup_path):
+        shutil.copy2(file_path, backup_path)
+    fd, patched_path = tempfile.mkstemp(prefix=".caelestia-patch-", dir=os.path.dirname(file_path))
+    try:
+        with os.fdopen(fd, "w") as f: f.write(code)
+        os.replace(patched_path, file_path)
+    finally:
+        if os.path.exists(patched_path): os.unlink(patched_path)
 except Exception as e:
     print(f"Failed to patch wallpaper.py: {e}")
     sys.exit(1)
@@ -396,7 +421,9 @@ except Exception as e:
     echo "Caelestia CLI Wallpaper Patch" >> "$USER_CACHE/caelestia-kde/failed_patches.txt"
 fi
 EOF
-
+else
+    warn "Skipping unsupported third-party Python patches. Set CAELESTIA_ENABLE_THIRDPARTY_PATCHES=true to opt in."
+fi
 
 # Copying mono icon theme
 DEST_DIR="$HOME/.config/quickshell/caelestia/assets/icons/yet-another-monochrome-icon-set"

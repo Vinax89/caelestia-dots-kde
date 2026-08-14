@@ -2047,8 +2047,7 @@ Item {
                                     } else if (toolName === "open_app") {
                                         currentActionText = "Opening app...";
                                         var app = String(args.app_name || "");
-                                        var safeApp = shellQuote("Name=.*" + app);
-                                        runAgentCommand(["sh", "-c", 'grep -i -m 1 "^Exec=" $(find /usr/share/applications ~/.local/share/applications -name "*.desktop" -exec grep -il "$1" {} + 2>/dev/null) | cut -d "=" -f 2- | sed "s/ %[a-zA-Z]//g" | xargs -I {} sh -c "setsid {} >/dev/null 2>&1 &"', "--", safeApp], "exec_" + toolName);
+                                        runAgentCommand(["python3", Quickshell.shellDir + "/scripts/open_app.py", app], "exec_" + toolName);
 
                                     } else if (toolName === "set_timer") {
                                         currentActionText = "Setting timer...";

@@ -245,10 +245,15 @@ else
     skip "keyd not active"
 fi
 
-# Kill any running Caelestia / Quickshell processes
-pkill -f "caelestia shell" 2>/dev/null || true
-pkill -f "quickshell"      2>/dev/null || true
-ok "Stopped any running shell processes"
+# Stop only processes launched from this checkout/configuration.
+while read -r pid; do
+    [[ "$pid" == "$$" || -z "$pid" ]] && continue
+    cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+    if [[ "$cmdline" == *"$HOME/.config/quickshell/caelestia"* || "$cmdline" == *"$BUNDLE_DIR/shell"* ]]; then
+        kill "$pid" 2>/dev/null || true
+    fi
+done < <(pgrep -u "${USER}" -f '(^|/)(caelestia|quickshell)( |$)' 2>/dev/null || true)
+ok "Stopped Caelestia shell processes"
 
 section "Step 2 - Remove Service and Autostart Files"
 
@@ -579,9 +584,16 @@ fi
 
 # Compatibility symlinks and manually installed binaries
 for link in /usr/local/bin/sass /usr/local/bin/qdbus6 /usr/local/bin/caelestia /usr/local/bin/wl-clip-persist /usr/local/bin/gpu-screen-recorder; do
-    if [[ -L "$link" || -f "$link" ]]; then
-        sudo rm -f "$link"
-        ok "Removed: $link"
+    if [[ -L "$link" ]]; then
+        target=$(readlink -f -- "$link" 2>/dev/null || true)
+        if [[ "$target" == "$BUNDLE_DIR"/* || "$target" == "$HOME/.local"/* ]]; then
+            sudo rm -f -- "$link"
+            ok "Removed owned symlink: $link"
+        else
+            warn "Leaving unrelated symlink untouched: $link"
+        fi
+    elif [[ -f "$link" ]]; then
+        warn "Leaving regular file untouched (ownership unknown): $link"
     fi
 done
 
@@ -597,7 +609,8 @@ if groups "$USER" | grep -q '\binput\b'; then
     ok "Removed $USER from 'input' group (takes effect on next login)"
 fi
 
-if [[ "$REMOVE_PACKAGES" == "true" ]]; then
+PACKAGE_MANIFEST="${CAELESTIA_PACKAGE_MANIFEST:-$HOME/.cache/caelestia-kde/installed-packages.txt}"
+if [[ "$REMOVE_PACKAGES" == "true" && -s "$PACKAGE_MANIFEST" ]]; then
     section "Step 9 - Remove Packages (Optional)"
 
     ARCH_PACKAGES=(
@@ -650,6 +663,12 @@ if [[ "$REMOVE_PACKAGES" == "true" ]]; then
         qt6-style-kvantum kvantum quickshell
         libxi-dev libdrm-dev libx11-dev libxcomposite-dev libxdamage-dev libxrender-dev libxrandr-dev libpulse-dev libva-dev libcap-dev libavfilter-dev libvulkan-dev
     )
+
+    # Only remove packages recorded as installed by Caelestia.
+    mapfile -t OWNED_PACKAGES < "$PACKAGE_MANIFEST"
+    ARCH_PACKAGES=("${OWNED_PACKAGES[@]}")
+    FEDORA_PACKAGES=("${OWNED_PACKAGES[@]}")
+    DEBIAN_PACKAGES=("${OWNED_PACKAGES[@]}")
 
     if [[ "$BASE_DISTRO" == "arch" ]]; then
         warn "The following packages will be removed:"
@@ -715,7 +734,11 @@ if [[ "$REMOVE_PACKAGES" == "true" ]]; then
         fi
     fi
 else
-    skip "Package removal skipped (user chose to keep packages)"
+    if [[ "$REMOVE_PACKAGES" == "true" ]]; then
+        warn "Skipping package removal: ownership manifest not found at $PACKAGE_MANIFEST"
+    else
+        skip "Package removal skipped (user chose to keep packages)"
+    fi
 fi
 
 section "Step 10 - Clean Up Cache and Build Artifacts"

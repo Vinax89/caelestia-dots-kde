@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fcntl.h>
+#include <filesystem>
 #include <iostream>
 #include <pty.h>
 #include <sys/wait.h>
@@ -317,12 +318,19 @@ void execute() {
   setenv("SRCDEST", (cache_dir + "/makepkg-sources").c_str(), 1);
   setenv("SRCPKGDEST", (cache_dir + "/makepkg-srcpackages").c_str(), 1);
 
-  system(("mkdir -p \"" + cache_dir +
-          "\" \"$BUILDDIR\" \"$PKGDEST\" \"$SRCDEST\" \"$SRCPKGDEST\"")
-             .c_str());
-  system(("rm -f \"" + cache_dir + "/failed_steps.txt\" \"" + cache_dir +
-          "/failed_packages.txt\"")
-             .c_str());
+  std::error_code cache_error;
+  for (const auto& directory : {cache_dir, cache_dir + "/makepkg-build",
+                                cache_dir + "/makepkg-packages",
+                                cache_dir + "/makepkg-sources",
+                                cache_dir + "/makepkg-srcpackages"}) {
+    std::filesystem::create_directories(directory, cache_error);
+    if (cache_error) {
+      std::cerr << "Failed to create installer cache directory: " << directory << "\\n";
+      return;
+    }
+  }
+  std::filesystem::remove(cache_dir + "/failed_steps.txt", cache_error);
+  std::filesystem::remove(cache_dir + "/failed_packages.txt", cache_error);
 
   setenv("BASE_DISTRO", g_base_distro.c_str(), 1);
   setenv("BUNDLE_DIR", g_bundle_dir.c_str(), 1);
