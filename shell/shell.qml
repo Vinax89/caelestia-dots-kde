@@ -28,8 +28,6 @@ import qs.services
 import qs.utils
 
 ShellRoot {
-    settings.watchFiles: false
-
     // Several QtCore.Settings {} elements throughout the codebase (BlurOffsets,
     // ContentWindow, UpdateChecker) rely on QCoreApplication's organization/app
     // identifiers to build their QSettings storage path. Quickshell's host
@@ -46,6 +44,11 @@ ShellRoot {
         Qt.application.name = "caelestia-shell";
         return true;
     })()
+
+    // Reading _appIdentifiersSet here forces the lazy binding above to run
+    // while ShellRoot itself is being constructed. This happens before child
+    // Settings objects complete and try to open their QSettings backends.
+    settings.watchFiles: _appIdentifiersSet && false
 
     GSFLoader {}
 
