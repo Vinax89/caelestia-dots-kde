@@ -6,8 +6,11 @@ update checker are installed into ~/.local/bin and run before any checkout
 exists, so they carry a compiled-in default. That default is only safe if
 something keeps it in sync with the canonical value, which is this script.
 
-Every occurrence of a "<owner>/caelestia-dots-kde" slug in a tracked text file
+Every occurrence of an owner-plus-repository-name slug in a tracked text file
 must equal REPO from .github/version.env.
+
+This file is excluded from its own scan: it describes the pattern it matches,
+the same way check_shell_quality.sh skips itself in the curl-pipe check.
 """
 
 import re
@@ -34,7 +37,8 @@ SKIP_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".mp4", ".wav",
                  ".ttf", ".pyc", ".knsv")
 
 # json.hpp is vendored; check_repo_identity has nothing to say about it.
-SKIP_NAMES = ("json.hpp",)
+# This script is skipped too -- it documents the slug pattern it looks for.
+SKIP_NAMES = ("json.hpp", "check_repo_identity.py")
 
 
 def canonical_repo() -> str:

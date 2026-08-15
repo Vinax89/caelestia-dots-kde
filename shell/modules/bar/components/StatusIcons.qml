@@ -204,7 +204,7 @@ StyledRect {
 
         Repeater {
             model: iconModel
-            
+
             delegate: Item {
                 id: delegateContainer
 
@@ -235,7 +235,7 @@ StyledRect {
                         root.saveOrder();
                     }
                 }
-            
+
                 Item {
                     id: dragItem
 
@@ -243,7 +243,7 @@ StyledRect {
 
                     width: delegateContainer.width
                     height: delegateContainer.height
-                    
+
                     Drag.active: dragArea.held
                     Drag.source: dragItem
                     Drag.hotSpot.x: width / 2
@@ -298,7 +298,7 @@ StyledRect {
                         drag.axis: root.isHorizontal ? Drag.XAxis : Drag.YAxis
                         cursorShape: Qt.PointingHandCursor
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    
+
                         onPressed: mouse => {
                             console.log("StatusIcons Drag onPressed");
                             if (mouse.button === Qt.LeftButton) {
