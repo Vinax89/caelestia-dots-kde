@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <iostream>
 #include <pty.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <thread>
@@ -23,13 +24,52 @@ namespace {
 
 string shell_single_quote(string s);
 
-string ipc_path(const char* name) {
-  const char* dir = getenv("CAELESTIA_IPC_DIR");
-  return string(dir && *dir ? dir : "/tmp") + "/" + name;
+// The tmux worker pane executes, via `bash -c`, whatever arrives on the `cmd`
+// FIFO -- with the installer's primed sudo timestamp. That channel is only
+// safe inside a private, user-owned directory.
+//
+// This used to fall back to "/tmp" when CAELESTIA_IPC_DIR was unset, which is
+// exactly what happens when the binary is run directly rather than through
+// setup.sh (the documented recovery path after a TUI crash). A local user
+// could then pre-create /tmp/cmd and inject commands. setup.sh always creates
+// a 0700 mkdtemp directory and states the invariant in a comment; this
+// validates it instead of silently degrading.
+const string& ipc_dir() {
+  static const string dir = []() -> string {
+    const char* raw = getenv("CAELESTIA_IPC_DIR");
+    if (!raw || !*raw) {
+      return {};
+    }
+    struct stat st {};
+    if (lstat(raw, &st) != 0) {
+      return {};
+    }
+    if (!S_ISDIR(st.st_mode)) {
+      return {};
+    }
+    if (st.st_uid != getuid()) {
+      return {};
+    }
+    // Must not be group- or world-accessible.
+    if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+      return {};
+    }
+    return string(raw);
+  }();
+  return dir;
+}
+
+string ipc_path(const char* name) { return ipc_dir() + "/" + name; }
+
+// The split-pane worker is only used when tmux asked for it AND the IPC
+// directory passed validation. Otherwise we fall through to the in-process
+// system() path, which needs no command channel at all.
+bool use_tmux_worker() {
+  return getenv("CAELESTIA_TMUX_MASTER") != nullptr && !ipc_dir().empty();
 }
 
 bool tmux_has_worker_pane() {
-  int rc = system("tmux list-panes -t caelestia_install -F '#{pane_index}' "
+  int rc = run_shell("tmux list-panes -t caelestia_install -F '#{pane_index}' "
                   "2>/dev/null | grep -qx '1'");
   if (rc == -1) {
     return false;
@@ -49,8 +89,8 @@ bool ensure_tmux_worker_pane() {
       + "; while read -u 3 -r cmd; do if [[ \\\"\\$cmd\\\" == \\\"EXIT\\\" ]]; then break; fi; "
         "bash -c \\\"\\$cmd\\\"; echo \\$? > "
       + shell_single_quote(ipc_path("status")) + "; done'\"";
-  system(workerCommand.c_str());
-  system("tmux select-pane -t caelestia_install:0.0");
+  run_shell(workerCommand);
+  run_shell("tmux select-pane -t caelestia_install:0.0");
   this_thread::sleep_for(
       chrono::milliseconds(50)); // tiny wait for terminal resize propagation
   g_resized = true;              // force UI redraw after split
@@ -90,6 +130,8 @@ string shell_single_quote(string s) {
 } // namespace
 
 namespace Runner {
+vector<std::string> ignored_steps;
+
 vector<Step> steps = {
     {"System update", "scripts/00a-system-update.sh", "PENDING"},
     {"Ensure prerequisites", "scripts/01-ensure-prereqs.sh", "PENDING"},
@@ -154,7 +196,7 @@ string show_error_dialog(const string &step_name, const string &script_path,
       if (selected > 0)
         selected--;
     } else if (key == "KEY_right") {
-      if (selected < opts.size() - 1)
+      if (selected + 1 < static_cast<int>(opts.size()))
         selected++;
     } else if (key == "enter") {
       return opts[selected];
@@ -180,7 +222,6 @@ void draw_progress_ui(int current_step) {
   string list_title_color = "default";
   int list_offset_y = 3;
   int list_offset_x = 2;
-  int list_spacing_x = 10;
 
   if (!g_theme.is_null() && g_theme.contains("layout")) {
     auto &l = g_theme["layout"];
@@ -209,8 +250,6 @@ void draw_progress_ui(int current_step) {
         list_offset_y = l["step_list"]["offset_y"].get<int>();
       if (l["step_list"].contains("offset_x"))
         list_offset_x = l["step_list"]["offset_x"].get<int>();
-      if (l["step_list"].contains("spacing_x"))
-        list_spacing_x = l["step_list"]["spacing_x"].get<int>();
     }
   }
 
@@ -266,8 +305,8 @@ void draw_progress_ui(int current_step) {
     if (current_step > max_items / 2) {
       scroll = current_step - (max_items / 2);
     }
-    if (scroll + max_items > steps.size()) {
-      scroll = steps.size() - max_items;
+    if (scroll + max_items > static_cast<int>(steps.size())) {
+      scroll = static_cast<int>(steps.size()) - max_items;
     }
   }
 
@@ -325,7 +364,7 @@ bool execute() {
                                 cache_dir + "/makepkg-srcpackages"}) {
     std::filesystem::create_directories(directory, cache_error);
     if (cache_error) {
-      std::cerr << "Failed to create installer cache directory: " << directory << "\\n";
+      std::cerr << "Failed to create installer cache directory: " << directory << '\n';
       return false;
     }
   }
@@ -357,7 +396,13 @@ bool execute() {
   // APPLY_MATERIAL_YOU, APPLY_FONTS) are already exported correctly as "true"
   // or "false" by the dynamic UI!
 
-  if (getenv("CAELESTIA_TMUX_MASTER") != nullptr) {
+  if (getenv("CAELESTIA_TMUX_MASTER") != nullptr && ipc_dir().empty()) {
+    std::cerr << "[installer] CAELESTIA_IPC_DIR is unset or not a private "
+                 "0700 directory owned by this user; running steps in-process "
+                 "instead of the tmux worker pane.\n";
+  }
+
+  if (use_tmux_worker()) {
     ensure_tmux_worker_pane();
   }
 
@@ -369,7 +414,7 @@ bool execute() {
     string cmd = "bash " + shell_single_quote(g_bundle_dir + "/" + steps[i].script_path);
 
     // Forward command to the right pane
-    if (getenv("CAELESTIA_TMUX_MASTER") != nullptr) {
+    if (use_tmux_worker()) {
       // Fail-safe: check if the right pane is dead (no reader on FIFO)
       int test_fd = open(ipc_path("cmd").c_str(), O_WRONLY | O_NONBLOCK);
       if (test_fd == -1 && errno == ENXIO) {
@@ -412,11 +457,19 @@ bool execute() {
         fclose(cmd_fifo);
       }
 
-      // Continuously check for status or terminal resizes
+      // Continuously check for status or terminal resizes.
+      //
+      // The budget is wall-clock, not an iteration count: the old
+      // MAX_POLL_ITERATIONS of 3600 worked out to roughly 30 minutes, but
+      // 08-build-shell.sh compiles the Qt plugin, libcava and the shell, and
+      // caelestia-update budgets a full hour for the same script. A slow
+      // machine tripped the cap while the build was still running.
       int exit_code = -1;
       int status_fd = open(ipc_path("status").c_str(), O_RDONLY | O_NONBLOCK);
       int poll_iterations = 0;
-      const int MAX_POLL_ITERATIONS = 3600; // ~30 minutes at 500ms — safety timeout
+      constexpr auto STEP_BUDGET = chrono::seconds(3600);
+      const auto step_deadline = chrono::steady_clock::now() + STEP_BUDGET;
+      bool timed_out = false;
       while (true) {
         if (g_resized)
           draw_progress_ui(i);
@@ -446,9 +499,14 @@ bool execute() {
         }
 
         // Safety timeout: if the worker pane hangs without producing output,
-        // bail out rather than hanging the installer forever.
-        if (poll_iterations >= MAX_POLL_ITERATIONS) {
+        // bail out rather than hanging the installer forever. Interrupt the
+        // command still running in the worker first -- otherwise it keeps
+        // going, and a subsequent "Retry" would queue a second copy behind it.
+        if (chrono::steady_clock::now() >= step_deadline) {
+          timed_out = true;
           exit_code = 1;
+          run_shell("tmux send-keys -t caelestia_install:0.1 C-c 2>/dev/null");
+          this_thread::sleep_for(chrono::milliseconds(500));
           if (status_fd >= 0) {
             close(status_fd);
             status_fd = -1;
@@ -485,13 +543,28 @@ bool execute() {
         steps[i].status = "FAILED";
         draw_progress_ui(i);
 
+        if (timed_out) {
+          // Discard the exit status of the interrupted command so it cannot be
+          // read as the result of a retry.
+          int drain_fd = open(ipc_path("status").c_str(), O_RDONLY | O_NONBLOCK);
+          if (drain_fd >= 0) {
+            char discard[64];
+            while (read(drain_fd, discard, sizeof(discard)) > 0) {
+            }
+            close(drain_fd);
+          }
+        }
+
         string action = show_error_dialog(steps[i].name, steps[i].script_path,
                                           g_term_width, g_term_height);
         if (action == "Retry") {
           goto retry_step;
         } else if (action == "Ignore") {
+          // "Ignore" means skip this step and carry on. It used to return
+          // false, which ended the run and reported failure -- so the button
+          // behaved identically to "Exit".
           steps[i].status = "IGNORED";
-          return false;
+          ignored_steps.push_back(steps[i].name);
         } else {
           Term::restore();
           exit(1);
@@ -499,7 +572,7 @@ bool execute() {
       }
     } else {
       // Fallback if not in tmux
-      int status = system(cmd.c_str());
+      int status = run_shell(cmd);
       if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
         steps[i].status = "OK";
       } else {
@@ -512,7 +585,7 @@ bool execute() {
           goto retry_step;
         } else if (action == "Ignore") {
           steps[i].status = "IGNORED";
-          return false;
+          ignored_steps.push_back(steps[i].name);
         } else {
           Term::restore();
           exit(1);

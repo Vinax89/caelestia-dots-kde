@@ -40,10 +40,20 @@ void Requests::get(const QUrl& url, QJSValue onSuccess, QJSValue onError, QJSVal
 
     auto reply = m_manager->get(request);
     constexpr qint64 maxResponseBytes = 8 * 1024 * 1024;
-    reply->setReadBufferSize(maxResponseBytes);
+
+    // The response is only consumed in the finished handler, so nothing drains
+    // the buffer while it fills and bytesAvailable() is the total received so
+    // far. The old code set the read buffer to exactly the limit it then tested
+    // against, which capped bytesAvailable() at that same value and made the
+    // comparison unreachable: an oversized response was throttled by
+    // backpressure and held the connection open until the 30s timer fired.
+    // Giving the buffer headroom above the limit makes the check fire.
+    reply->setReadBufferSize(maxResponseBytes + 64 * 1024);
     QObject::connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
-        if (reply->bytesAvailable() > 8 * 1024 * 1024)
+        if (reply->bytesAvailable() > maxResponseBytes) {
+            qCWarning(lcRequests) << "get: aborting response larger than" << maxResponseBytes << "bytes";
             reply->abort();
+        }
     });
     QTimer::singleShot(std::chrono::seconds(30), reply, [reply]() {
         if (reply->isRunning())

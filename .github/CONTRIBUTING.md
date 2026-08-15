@@ -6,7 +6,7 @@ contributing.
 ## Quick start
 
 ```bash
-git clone https://github.com/ladybug-me/caelestia-dots-kde ~/caelestia-dots-kde
+git clone https://github.com/Vinax89/caelestia-dots-kde ~/caelestia-dots-kde
 cd ~/caelestia-dots-kde
 bash setup.sh          # Full install - do this at least once
 ```
@@ -115,5 +115,5 @@ cmake -B build && cmake --build build   # Compile
 ## Stuck?
 
 Open a
-[Discussion](https://github.com/ladybug-me/caelestia-dots-kde/discussions)
+[Discussion](https://github.com/Vinax89/caelestia-dots-kde/discussions)
 or ask in an issue. We are happy to help.

@@ -39,19 +39,24 @@ run_stage() {
     fi
 }
 
+# Canonical repository. Keep the default in sync with REPO in
+# .github/version.env; check_repo_identity.py gates that in CI.
+CAELESTIA_REPO="${CAELESTIA_REPO:-Vinax89/caelestia-dots-kde}"
+CAELESTIA_REPO_URL="https://github.com/${CAELESTIA_REPO}.git"
+
 BRANCH="${1:-main}"
 TARGET_REF="${2:-}"
 if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "dev" ]; then
     echo "Warning: Branch '$BRANCH' is not allowed. Falling back to 'main'."
     BRANCH="main"
 fi
-if ! git ls-remote --exit-code --heads https://github.com/ladybug-me/caelestia-dots-kde.git "$BRANCH" >/dev/null 2>&1; then
+if ! git ls-remote --exit-code --heads "$CAELESTIA_REPO_URL" "$BRANCH" >/dev/null 2>&1; then
     echo "Warning: Branch '$BRANCH' does not exist on remote. Falling back to 'main'."
     BRANCH="main"
 fi
 
 if [ -n "$TARGET_REF" ]; then
-    if git ls-remote --exit-code --tags https://github.com/ladybug-me/caelestia-dots-kde.git "$TARGET_REF" >/dev/null 2>&1; then
+    if git ls-remote --exit-code --tags "$CAELESTIA_REPO_URL" "$TARGET_REF" >/dev/null 2>&1; then
         TARGET_KIND="tag"
     elif [ "$BRANCH" = "dev" ] && [[ "$TARGET_REF" =~ ^[0-9a-f]{7,40}$ ]]; then
         # Dev branch supports installing/reverting to a specific commit from the
@@ -153,7 +158,8 @@ if [ "$EUID" -ne 0 ]; then
     # (or the wrapper above) can resolve the askpass helper without needing
     # to re-discover it in a non-tty child.
     if command -v ksshaskpass &> /dev/null; then
-        export SUDO_ASKPASS="$(command -v ksshaskpass)"
+        SUDO_ASKPASS="$(command -v ksshaskpass)"
+        export SUDO_ASKPASS
     fi
 
     # Background keepalive: refresh the sudo timestamp every 30 seconds
@@ -180,19 +186,20 @@ echo "PROGRESS: 1/5: Fetching updates from GitHub..."
 info "Checking for local repository cache..."
 
 # --- Safe Backup Directory outside of the git repo ---
-export BACKUP_DIR="$UPD_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="$UPD_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+export BACKUP_DIR
 mkdir -p "$BACKUP_DIR"
 
 if [[ ! -d "$UPD_DIR/repo/.git" ]]; then
     mkdir -p "$UPD_DIR/repo"
-    cd "$UPD_DIR/repo"
+    cd "$UPD_DIR/repo" || die "Could not enter $UPD_DIR/repo"
     git init -q
-    git remote add origin https://github.com/ladybug-me/caelestia-dots-kde.git
+    git remote add origin "$CAELESTIA_REPO_URL"
 else
-    cd "$UPD_DIR/repo"
+    cd "$UPD_DIR/repo" || die "Could not enter $UPD_DIR/repo"
     git reset --hard -q HEAD || die "Failed to reset repository state"
     git clean -fdx -q
-    git remote set-url origin https://github.com/ladybug-me/caelestia-dots-kde.git
+    git remote set-url origin "$CAELESTIA_REPO_URL"
 fi
 
 # Always enforce sparse-checkout rules
@@ -230,13 +237,21 @@ else
     git reset --hard -q origin/"$BRANCH" || die "Failed to apply updates"
 fi
 
+# Verify the superproject BEFORE touching submodules.
+#
+# Submodule init reads .gitmodules from the checkout and fetches from three
+# third-party hosts. Doing that before the signature check meant acting on an
+# unverified .gitmodules -- writing content from URLs an unverified commit
+# chose. Nothing was executed, but the verification gap was real, and update.sh
+# already gets this order right.
+verify_checkout
+
 # Initialize submodules
 if [[ -f "$UPD_DIR/repo/.gitmodules" ]]; then
     info "Initializing all submodule..."
     git submodule sync --recursive >/dev/null 2>&1 || true
     git submodule update --init --recursive --force >/dev/null 2>&1 || die "Failed to initialize all submodules"
 fi
-verify_checkout
 
 [[ -f "$UPD_DIR/repo/src/dots/starship.toml" ]] || die "Missing src/dots content after update"
 

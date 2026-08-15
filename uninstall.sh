@@ -83,19 +83,21 @@ echo -e " ${YELLOW}This will remove Caelestia KDE shell files and configs.${RST}
 echo -e " ${BLUE}Backups in $BUNDLE_DIR/backups/ can be restored during uninstall.${RST}"
 echo
 
+# -- Confirmation ---------------------------------------------------------------
+# Asked before requesting root: cancelling here should not have cost the user a
+# password prompt.
+echo
+echo -e "${RED}Are you sure you want to uninstall Caelestia KDE? [y/N]:${RST} "
+read -r _confirm
+[[ "${_confirm,,}" == "y" || "${_confirm,,}" == "yes" ]] || die "Uninstall cancelled."
+
 # -- Sudo setup ----------------------------------------------------------------
 sudo -v || die "Failed to obtain sudo privileges."
 
 # Keepalive loop
 (while true; do sudo -v 2>/dev/null || break; sleep 55; done) 2>/dev/null &
 _SUDO_LOOP=$!
-trap 'kill $_SUDO_LOOP 2>/dev/null; true' EXIT
-
-# -- Confirmation ---------------------------------------------------------------
-echo
-echo -e "${RED}Are you sure you want to uninstall Caelestia KDE? [y/N]:${RST} "
-read -r _confirm
-[[ "${_confirm,,}" == "y" || "${_confirm,,}" == "yes" ]] || die "Uninstall cancelled."
+trap 'kill "$_SUDO_LOOP" 2>/dev/null; true' EXIT
 
 echo
 echo -e "${YELLOW}Remove installed packages as well? This will uninstall${RST}"
@@ -203,18 +205,36 @@ restore_or_remove() {
     local target="$2"         # full destination path
     local backup_subdir="$3"  # "config" or "local"
     local backup_dir="$SELECTED_BACKUP"
+    local source="$backup_dir/$backup_subdir/$name"
 
-    rm -rf "$target"
-
-    if [[ -n "$backup_dir" ]] && [[ -e "$backup_dir/$backup_subdir/$name" ]]; then
-        if cp -r "$backup_dir/$backup_subdir/$name" "$target"; then
-            ok "Restored $name from backup"
-        else
-            warn "Failed to restore $name from backup - $target is now missing"
-        fi
-    else
-        skip "No backup for $name - removed without restore"
+    # Deleting first and asking questions afterwards meant that with no backup
+    # selected -- or a backup that predates this config -- the user's own
+    # ~/.config/fish, foot, btop and friends were removed outright, with only a
+    # [SKIP] line to show for it. Restore into a staging copy and swap, so a
+    # failed copy never leaves the target missing.
+    if [[ -z "$backup_dir" || ! -e "$source" ]]; then
+        skip "No backup for $name - leaving $target untouched"
+        return 0
     fi
+
+    local parent staging
+    parent="$(dirname "$target")"
+    mkdir -p "$parent"
+    if ! staging="$(mktemp -d "$parent/.caelestia-restore.XXXXXX")"; then
+        warn "Could not stage restore for $name - leaving $target untouched"
+        return 1
+    fi
+
+    if ! cp -a "$source" "$staging/$(basename "$target")"; then
+        rm -rf -- "$staging"
+        warn "Failed to restore $name from backup - $target left untouched"
+        return 1
+    fi
+
+    rm -rf -- "$target"
+    mv -- "$staging/$(basename "$target")" "$target"
+    rmdir -- "$staging" 2>/dev/null || true
+    ok "Restored $name from backup"
 }
 
 section "Step 1 - Stop and Disable Services"
@@ -542,22 +562,57 @@ fi
 if [[ "$SHELL_RC_RESTORED" == "true" ]]; then
     info "Skipped shell rc line cleanup because original rc files were restored exactly from backup."
 else
-    # Legacy fallback for old backups without shellrc snapshots
-    if [[ -f "$HOME/.bashrc" ]]; then
-        sed -i '/export QML2_IMPORT_PATH=.*caelestia\|export CAELESTIA_LIB_DIR=/d' "$HOME/.bashrc" 2>/dev/null || true
-        ok "Removed Caelestia env vars from ~/.bashrc"
-    fi
+    # Legacy fallback for old backups without shellrc snapshots.
+    #
+    # Removes both the marker-delimited block written by 08-build-shell.sh and
+    # the bare lines older installs appended. The previous pattern here was
+    # '/export QML2_IMPORT_PATH=.*caelestia/', which never matched the line
+    # actually written -- so every accumulated QML2_IMPORT_PATH export survived
+    # the uninstall.
+    strip_caelestia_rc() {
+        local rc_file="$1"
+        [[ -f "$rc_file" ]] || return 0
+        sed -i \
+            -e '\|^# >>> caelestia shell environment >>>$|,\|^# <<< caelestia shell environment <<<$|d' \
+            -e '/^export QML2_IMPORT_PATH="\$HOME\/\.local\/lib\/qt6\/qml"$/d' \
+            -e '/^export CAELESTIA_LIB_DIR=/d' \
+            -e '/^export CAELESTIA_COMPAT_LIB_DIR=/d' \
+            -e '/^set -gx QML2_IMPORT_PATH "\$HOME\/\.local\/lib\/qt6\/qml"$/d' \
+            -e '/^set -gx CAELESTIA_LIB_DIR /d' \
+            -e '/^set -gx CAELESTIA_COMPAT_LIB_DIR /d' \
+            "$rc_file" 2>/dev/null || true
+    }
 
-    if [[ -f "$HOME/.config/fish/config.fish" ]]; then
-        sed -i '/QML2_IMPORT_PATH\|CAELESTIA_LIB_DIR/d' "$HOME/.config/fish/config.fish" 2>/dev/null || true
-        ok "Removed Caelestia env vars from fish config"
-    fi
-
-    if [[ -f "$HOME/.zshrc" ]]; then
-        sed -i '/QML2_IMPORT_PATH\|CAELESTIA_LIB_DIR/d' "$HOME/.zshrc" 2>/dev/null || true
-        ok "Removed Caelestia env vars from ~/.zshrc"
-    fi
+    for rc in "$HOME/.bashrc" "$HOME/.config/fish/config.fish" "$HOME/.zshrc"; do
+        if [[ -f "$rc" ]]; then
+            strip_caelestia_rc "$rc"
+            ok "Removed Caelestia env vars from ${rc/#$HOME/\~}"
+        fi
+    done
 fi
+
+# Remove the system-wide OpenCV compat symlinks older installs created in
+# /usr/lib. They alias one ABI version onto another for every process on the
+# machine and belong to no package, so nothing else will ever clean them up.
+# Only unlink symlinks that actually point at an OpenCV library.
+for stale in /usr/lib/libopencv_imgproc.so.413 /usr/lib/libopencv_core.so.413 \
+             /usr/lib64/libopencv_imgproc.so.413 /usr/lib64/libopencv_core.so.413; do
+    if [[ -L "$stale" ]]; then
+        target="$(readlink -f "$stale" 2>/dev/null || true)"
+        case "$target" in
+            *libopencv_*)
+                if sudo rm -f "$stale" 2>/dev/null; then
+                    ok "Removed stale OpenCV compat symlink: $stale"
+                else
+                    warn "Could not remove $stale - delete it manually with: sudo rm -f $stale"
+                fi
+                ;;
+            *)
+                warn "Skipping $stale - it does not point at an OpenCV library"
+                ;;
+        esac
+    fi
+done
 
 section "Step 8 - Remove System-level Files"
 

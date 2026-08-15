@@ -49,12 +49,13 @@ jobs:
             exit 1
           fi
 
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Validate Version Sync (Release-Only)
         run: |
           set -euo pipefail
 
+          # shellcheck disable=SC2016  # the ${...} below is QML source matched literally
           ABOUT_BINDING=$(grep -F 'text: CUtils.version ? `v${CUtils.version}` : "…"' shell/modules/nexus/pages/AboutPage.qml | head -n 1 || true)
 
           echo "Config VERSION: $VERSION"
@@ -82,11 +83,11 @@ jobs:
 
           PREVIOUS_VERSION_TAG=$(git rev-parse -q --verify "refs/tags/$VERSION" || true)
 
-          echo "PREVIOUS_VERSION_TAG=$PREVIOUS_VERSION_TAG" >> $GITHUB_ENV
+          echo "PREVIOUS_VERSION_TAG=$PREVIOUS_VERSION_TAG" >> "$GITHUB_ENV"
 
           if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
             echo "Tag $VERSION already exists; leaving it unchanged."
-            echo "RELEASE_CREATED=false" >> $GITHUB_ENV
+            echo "RELEASE_CREATED=false" >> "$GITHUB_ENV"
             exit 0
           fi
           # Lightweight tags deliberately inherit the verified commit signature.
@@ -94,7 +95,7 @@ jobs:
           # pinned signer fingerprint before executing any checked-out code.
           git tag "$VERSION" "$GIT_COMMIT"
           git push origin "refs/tags/$VERSION"
-          echo "RELEASE_CREATED=true" >> $GITHUB_ENV
+          echo "RELEASE_CREATED=true" >> "$GITHUB_ENV"
 
       - name: Create or Update Release
         if: ${{ env.RELEASE_CREATED == 'true' }}
@@ -139,17 +140,34 @@ jobs:
 
       - name: Update README Contributor Stats
         if: ${{ env.RELEASE_CREATED == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
 
           python3 .github/scripts/contributors.py --update-readme
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .github/README.md
-          if git diff --cached --quiet; then
+          if git diff --quiet -- .github/README.md; then
             echo "No contributor changes to commit."
-          else
-            git commit -m "[skip ci] Update contributor stats for $VERSION"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
+            exit 0
           fi
+
+          # Commit through the Contents API rather than `git commit && git push`.
+          #
+          # A local commit made by the runner is unsigned. The updater trusts
+          # commits signed by GitHub's web-flow key, so pushing an unsigned
+          # commit to the branch tip breaks verification for anyone who
+          # verifies the branch head. Commits created through the API are
+          # web-flow signed, which keeps the chain intact.
+          branch="${TARGET_BRANCH:-main}"
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/.github/README.md?ref=${branch}" --jq .sha)"
+
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/.github/README.md" \
+            -f message="[skip ci] Update contributor stats for $VERSION" \
+            -f content="$(base64 -w0 .github/README.md)" \
+            -f sha="$current_sha" \
+            -f branch="$branch" >/dev/null
+
+          echo "Committed contributor stats to $branch via the API (web-flow signed)."

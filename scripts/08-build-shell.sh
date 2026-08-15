@@ -137,19 +137,66 @@ if [[ ${#CONFIG_PLUGIN_FILES[@]} -eq 0 ]]; then
     exit 1
 fi
 
-# Add wrapper config to bashrc/fish
-if ! grep -q "QML2_IMPORT_PATH=.*caelestia" ~/.bashrc; then
-    echo 'export QML2_IMPORT_PATH="$HOME/.local/lib/qt6/qml"' >> ~/.bashrc
-    echo 'export CAELESTIA_LIB_DIR="$HOME/.local/lib/caelestia"' >> ~/.bashrc
-fi
-if [ -f "$HOME/.config/fish/config.fish" ]; then
-    if ! grep -q "QML2_IMPORT_PATH" ~/.config/fish/config.fish; then
-        echo 'set -gx QML2_IMPORT_PATH "$HOME/.local/lib/qt6/qml"' >> ~/.config/fish/config.fish
-        echo 'set -gx CAELESTIA_LIB_DIR "$HOME/.local/lib/caelestia"' >> ~/.config/fish/config.fish
+# Add wrapper config to bashrc/fish.
+#
+# Guard on a sentinel we actually write. The previous guard looked for
+# "QML2_IMPORT_PATH=.*caelestia", but the line written is
+# `export QML2_IMPORT_PATH="$HOME/.local/lib/qt6/qml"` -- no "caelestia" after
+# the '='. The grep never matched, so every install, update and rebuild
+# appended another copy, and uninstall.sh (which reused the same broken
+# pattern) could never remove them.
+CAELESTIA_RC_MARKER="# >>> caelestia shell environment >>>"
+CAELESTIA_RC_END="# <<< caelestia shell environment <<<"
+
+append_rc_block() {
+    local rc_file="$1" style="$2"
+
+    # Drop any previous block, including ones written before the markers
+    # existed, so repeated runs converge on exactly one copy.
+    if [[ -f "$rc_file" ]]; then
+        if grep -qF "$CAELESTIA_RC_MARKER" "$rc_file"; then
+            sed -i "\\|^${CAELESTIA_RC_MARKER}\$|,\\|^${CAELESTIA_RC_END}\$|d" "$rc_file"
+        fi
+        sed -i '/^export QML2_IMPORT_PATH="\$HOME\/\.local\/lib\/qt6\/qml"$/d;/^export CAELESTIA_LIB_DIR="\$HOME\/\.local\/lib\/caelestia"$/d' "$rc_file"
+        sed -i '/^set -gx QML2_IMPORT_PATH "\$HOME\/\.local\/lib\/qt6\/qml"$/d;/^set -gx CAELESTIA_LIB_DIR "\$HOME\/\.local\/lib\/caelestia"$/d' "$rc_file"
     fi
+
+    {
+        printf '%s\n' "$CAELESTIA_RC_MARKER"
+        if [[ "$style" == "fish" ]]; then
+            printf '%s\n' 'set -gx QML2_IMPORT_PATH "$HOME/.local/lib/qt6/qml"'
+            printf '%s\n' 'set -gx CAELESTIA_LIB_DIR "$HOME/.local/lib/caelestia"'
+            printf '%s\n' 'set -gx CAELESTIA_COMPAT_LIB_DIR "$HOME/.local/lib/caelestia/compat"'
+        else
+            printf '%s\n' 'export QML2_IMPORT_PATH="$HOME/.local/lib/qt6/qml"'
+            printf '%s\n' 'export CAELESTIA_LIB_DIR="$HOME/.local/lib/caelestia"'
+            printf '%s\n' 'export CAELESTIA_COMPAT_LIB_DIR="$HOME/.local/lib/caelestia/compat"'
+        fi
+        printf '%s\n' "$CAELESTIA_RC_END"
+    } >> "$rc_file"
+}
+
+append_rc_block "$HOME/.bashrc" posix
+if [ -f "$HOME/.config/fish/config.fish" ]; then
+    append_rc_block "$HOME/.config/fish/config.fish" fish
 fi
 
 mkdir -p ~/.local/bin ~/.config/systemd/user
+
+# Private OpenCV compat links for gpu-screen-recorder. Scoped to this directory
+# and applied via LD_LIBRARY_PATH by the recorder only -- never installed into
+# a system library path, and removed with ~/.local/lib/caelestia on uninstall.
+caelestia_compat_lib_dir="$HOME/.local/lib/caelestia/compat"
+mkdir -p "$caelestia_compat_lib_dir"
+opencv_imgproc=$(ldconfig -p 2>/dev/null | awk '/libopencv_imgproc\.so\.5/ {print $NF; exit}')
+opencv_core=$(ldconfig -p 2>/dev/null | awk '/libopencv_core\.so\.5/ {print $NF; exit}')
+if [ -n "$opencv_imgproc" ] && [ -n "$opencv_core" ]; then
+    ln -sfn "$opencv_imgproc" "$caelestia_compat_lib_dir/libopencv_imgproc.so.413"
+    ln -sfn "$opencv_core" "$caelestia_compat_lib_dir/libopencv_core.so.413"
+    info "Installed private OpenCV compat links in $caelestia_compat_lib_dir"
+else
+    warn "libopencv_{imgproc,core}.so.5 not found via ldconfig - screen recording may not work"
+fi
 
 if [[ "${CAELESTIA_ENABLE_THIRDPARTY_PATCHES:-false}" == "true" ]]; then
 info "Patching caelestia-cli record/screenshot (requires root)..."
@@ -157,22 +204,25 @@ sudo bash -s -- "$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" << 'EOF'
 USER_HOME="$1"
 USER_CACHE="$2"
 
-OPENCV_IMGPROC=$(ldconfig -p 2>/dev/null | awk '/libopencv_imgproc\.so\.5/ {print $NF; exit}')
-OPENCV_CORE=$(ldconfig -p 2>/dev/null | awk '/libopencv_core\.so\.5/ {print $NF; exit}')
-if [ -n "$OPENCV_IMGPROC" ]; then
-    ln -sf "$OPENCV_IMGPROC" "$(dirname "$OPENCV_IMGPROC")/libopencv_imgproc.so.413" 2>/dev/null || echo "[WARN] Failed to link opencv imgproc"
-else
-    echo "[WARN] libopencv_imgproc.so.5 not found via ldconfig - recording may not work"
-fi
-if [ -n "$OPENCV_CORE" ]; then
-    ln -sf "$OPENCV_CORE" "$(dirname "$OPENCV_CORE")/libopencv_core.so.413" 2>/dev/null || echo "[WARN] Failed to link opencv core"
-else
-    echo "[WARN] libopencv_core.so.5 not found via ldconfig - recording may not work"
-fi
+# Older revisions of this script created libopencv_*.so.413 symlinks next to
+# the real libraries in /usr/lib. That aliases one ABI version onto another
+# system-wide, for every process on the machine, in files no package manager
+# owns. The compat links now live in a private directory and are applied only
+# to the recorder via LD_LIBRARY_PATH (see caelestia_compat_lib_dir below), so
+# nothing here needs root. Warn about leftovers from the old approach.
+for stale in /usr/lib/libopencv_imgproc.so.413 /usr/lib/libopencv_core.so.413 \
+             /usr/lib64/libopencv_imgproc.so.413 /usr/lib64/libopencv_core.so.413; do
+    if [ -L "$stale" ]; then
+        echo "[WARN] Leftover system-wide OpenCV compat symlink: $stale"
+        echo "[WARN] It was created by an older Caelestia install and is not owned by any package."
+        echo "[WARN] 'uninstall.sh' removes it, or delete it manually: sudo rm -f $stale"
+    fi
+done
 
-if ! python3 -c '
+if ! python3 - "$USER_HOME" <<'PYEOF'
 import sys, os, glob, re
-search_paths = sys.path + glob.glob("'"$USER_HOME"'/.local/lib/python*/site-packages")
+user_home = sys.argv[1]
+search_paths = sys.path + glob.glob(os.path.join(user_home, ".local/lib/python*/site-packages"))
 file_path = None
 for p in search_paths:
     candidate = os.path.join(p, "caelestia", "subcommands", "record.py")
@@ -289,7 +339,8 @@ try:
 except Exception as e:
     print(f"Failed to patch record.py: {e}")
     sys.exit(1)
-'; then
+PYEOF
+then
     echo "Caelestia CLI Record/Dolphin Patch" >> "$USER_CACHE/caelestia-kde/failed_patches.txt"
 fi
 EOF
@@ -299,12 +350,12 @@ sudo bash -s -- "$HOME" << 'EOF'
 USER_HOME="$1"
 SHELL_CONFIG="$USER_HOME/.config/quickshell/caelestia/shell.qml"
 
-if ! python3 -c '
+if ! python3 - "$USER_HOME" "$SHELL_CONFIG" <<'PYEOF'
 import sys, os, glob
 
-user_home = "'"$USER_HOME"'"
-shell_cfg  = "'"$SHELL_CONFIG"'"
-search_paths = sys.path + glob.glob(user_home + "/.local/lib/python*/site-packages")
+user_home = sys.argv[1]
+shell_cfg = sys.argv[2]
+search_paths = sys.path + glob.glob(os.path.join(user_home, ".local/lib/python*/site-packages"))
 
 # All subcommand files that use qs -c caelestia for IPC / lifecycle management
 sub_files = ["shell.py", "emoji.py", "clipboard.py", "screenshot.py", "search.py"]
@@ -336,7 +387,8 @@ if patched == 0:
     print("  No caelestia-cli subcommand files needed patching (already done or not found)")
 else:
     print(f"  Successfully patched {patched} file(s)")
-'; then
+PYEOF
+then
     echo "Caelestia CLI path-based config resolution patch applied successfully"
 else
     mkdir -p "$USER_HOME/.cache/caelestia-kde" 2>/dev/null || true
@@ -349,9 +401,10 @@ sudo bash -s -- "$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" << 'EOF'
 USER_HOME="$1"
 USER_CACHE="$2"
 
-if ! python3 -c '
+if ! python3 - "$USER_HOME" <<'PYEOF'
 import sys, os, glob
-search_paths = sys.path + glob.glob("'"$USER_HOME"'/.local/lib/python*/site-packages")
+user_home = sys.argv[1]
+search_paths = sys.path + glob.glob(os.path.join(user_home, ".local/lib/python*/site-packages"))
 file_path = None
 for p in search_paths:
     candidate = os.path.join(p, "caelestia", "utils", "wallpaper.py")
@@ -417,7 +470,8 @@ try:
 except Exception as e:
     print(f"Failed to patch wallpaper.py: {e}")
     sys.exit(1)
-'; then
+PYEOF
+then
     echo "Caelestia CLI Wallpaper Patch" >> "$USER_CACHE/caelestia-kde/failed_patches.txt"
 fi
 EOF

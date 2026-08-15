@@ -52,7 +52,29 @@ Searcher {
         if (target === "")
             return;
 
-        Quickshell.execDetached(["sh", "-c", 'qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "var allDesktops = desktops();for (i=0;i<allDesktops.length;i++) {d = allDesktops[i];d.wallpaperPlugin = \\"org.kde.image\\";d.currentConfigGroup = Array(\\"Wallpaper\\", \\"org.kde.image\\", \\"General\\");d.writeConfig(\\"Image\\", \\"file://$1\\")}"', "--", target]);
+        // The path is interpolated into JavaScript that plasmashell evaluates,
+        // so it must be a JS string *literal*, not raw text spliced into the
+        // program. A wallpaper filename containing a double quote used to close
+        // the literal and run the remainder as Plasma script -- and filenames
+        // come from Wallhaven downloads and arbitrary user directories.
+        //
+        // JSON.stringify produces exactly the escaped literal we need; the
+        // shell still receives it as a positional argument, so the shell layer
+        // is quoted independently.
+        const imageLiteral = JSON.stringify("file://" + target);
+        const plasmaScript = 'var allDesktops = desktops();'
+            + 'for (i=0;i<allDesktops.length;i++) {'
+            + 'd = allDesktops[i];'
+            + 'd.wallpaperPlugin = "org.kde.image";'
+            + 'd.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");'
+            + 'd.writeConfig("Image", ' + imageLiteral + ')}';
+        Quickshell.execDetached([
+            "qdbus6",
+            "org.kde.plasmashell",
+            "/PlasmaShell",
+            "org.kde.PlasmaShell.evaluateScript",
+            plasmaScript
+        ]);
     }
 
     readonly property var categories: {

@@ -112,7 +112,14 @@ StyledRect {
         }
 
         root.iconsOrderStr = newOrder.join(",");
-        saveProcess.command = ["bash", "-c", "mkdir -p ~/.config/caelestia && printf '%s' '" + root.iconsOrderStr + "' > ~/.config/caelestia/status_icons_order.txt"];
+        // Pass the order as a positional argument instead of splicing it into
+        // a single-quoted shell word. Written via a temp file + mv so a crash
+        // mid-write cannot leave a truncated order file behind.
+        saveProcess.command = ["bash", "-c",
+            'dir="$HOME/.config/caelestia"; mkdir -p "$dir"; '
+            + 'tmp="$(mktemp "$dir/.status_icons_order.XXXXXX")" || exit 1; '
+            + 'printf %s "$1" > "$tmp" && mv -- "$tmp" "$dir/status_icons_order.txt"',
+            "--", root.iconsOrderStr];
         saveProcess.running = true;
     }
 

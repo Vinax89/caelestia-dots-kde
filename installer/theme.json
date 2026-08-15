@@ -42,8 +42,7 @@
       "color": "cyan",
       "title_color": "default",
       "offset_y": 3,
-      "offset_x": 2,
-      "spacing_x": 10
+      "offset_x": 2
     },
     "sudo_prompt": {
       "title": "PRIVILEGE ESCALATION",

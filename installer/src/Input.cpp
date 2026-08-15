@@ -22,7 +22,13 @@ namespace Input {
     string get() {
         char buf[256];
         ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
-        if (n <= 0) return "";
+        if (n == 0) {
+            // EOF: the terminal went away. Callers loop until they see a key,
+            // so without this the UI spins forever on an unreadable stdin.
+            g_quit = true;
+            return "";
+        }
+        if (n < 0) return "";
         string key(buf, n);
         
         if (key.length() == 1 && key[0] == 3) { // Ctrl+C
@@ -62,6 +68,10 @@ namespace Input {
                     // Spurious EINTR — retry
                     continue;
                 }
+                // Any other select() error (EBADF, ENOMEM, ...) is not
+                // recoverable by retrying; looping here burned a core.
+                g_quit = true;
+                return "";
             }
         }
         return "";

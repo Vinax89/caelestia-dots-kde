@@ -18,6 +18,14 @@ std::string g_installer_runtime_dir;
 std::string g_sudo_bin_dir;
 std::string g_sudo_askpass;
 
+int run_shell(const std::string& command) {
+    const int status = std::system(command.c_str());
+    if (status == -1) {
+        std::cerr << "Failed to run: " << command << '\n';
+    }
+    return status;
+}
+
 void cleanup_installer_runtime() {
     if (g_installer_runtime_dir.empty())
         return;
@@ -31,8 +39,8 @@ void cleanup_installer_runtime() {
     std::string cookie;
     if (cookieFile >> cookie && !cookie.empty()
         && std::all_of(cookie.begin(), cookie.end(), [](unsigned char c) { return std::isdigit(c); })) {
-        std::system(("qdbus6 org.freedesktop.ScreenSaver /ScreenSaver "
-            "org.freedesktop.ScreenSaver.UnInhibit " + cookie + " >/dev/null 2>&1").c_str());
+        run_shell("qdbus6 org.freedesktop.ScreenSaver /ScreenSaver "
+            "org.freedesktop.ScreenSaver.UnInhibit " + cookie + " >/dev/null 2>&1");
     }
     std::filesystem::remove_all(g_installer_runtime_dir, error);
     g_installer_runtime_dir.clear();

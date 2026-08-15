@@ -68,8 +68,19 @@ detect_base_distro() {
     echo "$detected"
 }
 
-# Race geo-IP services in parallel, cache result for 24h.
+# Look up the country for pacman mirror ranking.
+#
+# This sends the machine's IP address to a third-party geo-IP service, which is
+# not something an installer should do silently, so it is opt-in. Without it,
+# reflector still ranks mirrors by measured download rate -- just against the
+# global pool instead of a country-filtered one.
+#
+# Opt in with CAELESTIA_GEOIP_MIRRORS=1.
 detect_country() {
+    if [[ "${CAELESTIA_GEOIP_MIRRORS:-0}" != "1" ]]; then
+        return 1
+    fi
+
     local cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-country"
     local cache_ttl=86400
 
@@ -82,15 +93,24 @@ detect_country() {
         fi
     fi
 
-    local country=""
-    country=$(
-        {
-            curl -fsSL --max-time 2 'https://am.i.mullvad.net/country'                     2>/dev/null &
-            curl -fsSL --max-time 2 'https://ipinfo.io/country'                            2>/dev/null &
-            curl -fsSL --max-time 2 'https://ifconfig.co/json'                             2>/dev/null | grep -oP '"country"\s*:\s*"\K[^"]+' &
-            wait
-        } 2>/dev/null | grep -m1 -E '^[A-Za-z]{2,3}$' || true
-    )
+    # Each probe writes to its own file. Sharing one pipe between three
+    # concurrent curls let partial writes interleave into a corrupted line.
+    local probe_dir country=""
+    probe_dir="$(mktemp -d)" || return 1
+
+    curl -fsSL --max-time 2 'https://am.i.mullvad.net/country' >"$probe_dir/1" 2>/dev/null &
+    curl -fsSL --max-time 2 'https://ipinfo.io/country' >"$probe_dir/2" 2>/dev/null &
+    curl -fsSL --max-time 2 'https://ifconfig.co/json' 2>/dev/null \
+        | grep -oP '"country_iso"\s*:\s*"\K[^"]+' >"$probe_dir/3" 2>/dev/null &
+    wait
+
+    local probe
+    for probe in "$probe_dir"/1 "$probe_dir"/2 "$probe_dir"/3; do
+        [[ -s "$probe" ]] || continue
+        country="$(tr -d '[:space:]' < "$probe" | grep -E '^[A-Za-z]{2,3}$' || true)"
+        [[ -n "$country" ]] && break
+    done
+    rm -rf -- "$probe_dir"
 
     if [[ -n "$country" ]]; then
         mkdir -p "$(dirname "$cache_file")"
@@ -138,13 +158,21 @@ silent_refresh_pacman_sources() {
 
         if command -v reflector >/dev/null 2>&1; then
             local reflector_country
-            reflector_country=$(detect_country)
+            # `|| true` matters under `set -e`: detect_country returns non-zero
+            # whenever the geo-IP lookup is disabled or fails, and a bare
+            # assignment from a failing substitution aborts the installer.
+            reflector_country="$(detect_country || true)"
             local -a reflector_args=(--latest 20 --protocol https --sort rate)
             if [[ -n "$reflector_country" ]]; then
                 echo "[INFO]  Ranking pacman mirrors by download speed (country: $reflector_country)..."
                 reflector_args+=(--country "$reflector_country")
             else
-                echo "[INFO]  Ranking pacman mirrors by download speed (country detection failed, using global pool)..."
+                if [[ "${CAELESTIA_GEOIP_MIRRORS:-0}" == "1" ]]; then
+                    echo "[INFO]  Ranking pacman mirrors by download speed (country detection failed, using global pool)..."
+                else
+                    echo "[INFO]  Ranking pacman mirrors by download speed (global pool)."
+                    echo "[INFO]  Set CAELESTIA_GEOIP_MIRRORS=1 to narrow this by country via a third-party geo-IP lookup."
+                fi
             fi
 
             as_root reflector "${reflector_args[@]}" --save /etc/pacman.d/mirrorlist >/dev/null 2>&1 || echo "[WARN]  reflector failed, continuing with current mirrors."
@@ -282,6 +310,15 @@ fi
 
 BIN="$BUNDLE_DIR/caelestia-install"
 
+stop_spinner() {
+    if [[ -n "${SPINNER_PID:-}" ]]; then
+        kill "$SPINNER_PID" 2>/dev/null || true
+        wait "$SPINNER_PID" 2>/dev/null || true
+        SPINNER_PID=""
+    fi
+}
+trap stop_spinner EXIT
+
 if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
     echo -n "Compiling Caelestia installer"
     {
@@ -314,7 +351,7 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
     fi
 
     if [ ${#MISSING_PKGS[@]} -ne 0 ]; then
-        kill $SPINNER_PID 2>/dev/null || true
+        stop_spinner
         echo ""
         echo "Missing build tools: ${MISSING_PKGS[*]}. Installing..."
         if [[ "$BASE_DISTRO" == "arch" ]]; then
@@ -363,7 +400,7 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         cmake -DCMAKE_BUILD_TYPE=Release .. >"$BUILD_LOG" 2>&1 || exit 1
         make -j"$(nproc 2>/dev/null || echo 1)" >>"$BUILD_LOG" 2>&1 || exit 1
     ) || {
-        kill $SPINNER_PID 2>/dev/null || true
+        stop_spinner
         echo ""
         echo "[FATAL] Failed to build the Caelestia installer." >&2
         echo "--- build log (last 60 lines) ---"
@@ -373,8 +410,7 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         exit 1
     }
 
-    kill $SPINNER_PID 2>/dev/null || true
-    wait $SPINNER_PID 2>/dev/null || true
+    stop_spinner
     echo ""
 
     rm -f "$BIN"
@@ -385,6 +421,9 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
 fi
 
 cleanup_install_state() {
+    # This trap replaces the spinner-only trap installed above, so it has to
+    # take over that responsibility too.
+    stop_spinner
     tput cnorm 2>/dev/null || true
 
     if [[ -n "${TMUX:-}" && "${CAELESTIA_TMUX_MASTER:-0}" == "1" ]]; then
@@ -427,7 +466,8 @@ exit \$ec
 WRAPPER_EOF
     chmod +x "$WRAPPER_SCRIPT"
 
-    tmux new-session -d -s caelestia_install "bash $WRAPPER_SCRIPT"
+    printf -v _wrapper_cmd 'bash %q' "$WRAPPER_SCRIPT"
+    tmux new-session -d -s caelestia_install "$_wrapper_cmd"
     # Keep pane visible on failure; close normally on success.
     tmux set-option -t caelestia_install remain-on-exit failed
     tmux set-option -t caelestia_install mouse on

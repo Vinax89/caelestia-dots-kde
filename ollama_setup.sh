@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Exit on error
-set -e
+set -euo pipefail
 
 # Harmonious HSL colors for elegant premium styling output
 BLUE='\033[0;34m'
@@ -19,21 +19,58 @@ section() {
 
 section "Ollama AI Setup for Caelestia"
 
-# 1. Install Ollama from a downloaded temporary script. The upstream
-# installer remains remote code; pin and verify it before production use.
+# 1. Install Ollama.
+#
+# This runs a script written by a third party, with root, and there is no way
+# around that short of packaging Ollama ourselves. Be honest about it rather
+# than dressing it up.
+#
+# The previous version demanded OLLAMA_INSTALL_SHA256 with no published value
+# to compare against, which left two options: not run the script at all, or
+# compute the hash from the same download it was meant to authenticate. Neither
+# verifies anything. Now the script is downloaded, the user is shown what they
+# are about to run, and they confirm -- with an optional pin for anyone who has
+# obtained a hash out of band.
 section "Step 1/4 - Install Ollama"
 tmp_installer="$(mktemp)"
 trap 'rm -f "$tmp_installer"' EXIT
 curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp_installer" https://ollama.com/install.sh
-: "${OLLAMA_INSTALL_SHA256:?Set OLLAMA_INSTALL_SHA256 to the vendor-published SHA-256 before running this installer}"
-if ! command -v sha256sum >/dev/null 2>&1; then
-    echo "sha256sum is required to verify the Ollama installer." >&2
-    exit 1
+
+actual_sha=""
+if command -v sha256sum >/dev/null 2>&1; then
+    actual_sha="$(sha256sum "$tmp_installer" | cut -d' ' -f1)"
 fi
-printf '%s  %s\n' "$OLLAMA_INSTALL_SHA256" "$tmp_installer" | sha256sum --check --status || {
-    echo "Ollama installer checksum verification failed." >&2
-    exit 1
-}
+
+if [ -n "${OLLAMA_INSTALL_SHA256:-}" ]; then
+    if [ -z "$actual_sha" ]; then
+        echo -e "${RED}sha256sum is required to verify OLLAMA_INSTALL_SHA256.${NC}" >&2
+        exit 1
+    fi
+    if [ "$actual_sha" != "$OLLAMA_INSTALL_SHA256" ]; then
+        echo -e "${RED}Ollama installer checksum mismatch.${NC}" >&2
+        echo "  expected: $OLLAMA_INSTALL_SHA256" >&2
+        echo "  actual:   $actual_sha" >&2
+        exit 1
+    fi
+    echo -e "${GREEN}Installer matches the pinned checksum.${NC}"
+else
+    echo -e "${YELLOW}About to run the official Ollama install script as root.${NC}"
+    echo -e "  source:   https://ollama.com/install.sh"
+    echo -e "  saved to: $tmp_installer"
+    echo -e "  sha256:   ${actual_sha:-<sha256sum unavailable>}"
+    echo -e "  size:     $(wc -c < "$tmp_installer") bytes"
+    echo
+    echo -e "Review it first if you like:  ${BLUE}less $tmp_installer${NC}"
+    echo -e "To skip this prompt in future, pin the hash above:"
+    echo -e "  ${BLUE}OLLAMA_INSTALL_SHA256=${actual_sha:-<hash>} ./ollama_setup.sh${NC}"
+    echo
+    read -r -p "Run the Ollama install script now? [y/N]: " _ollama_confirm
+    case "${_ollama_confirm,,}" in
+        y|yes) ;;
+        *) echo -e "${YELLOW}Skipping Ollama installation.${NC}"; exit 0 ;;
+    esac
+fi
+
 sh "$tmp_installer"
 
 # 2. Enable and start the systemd service

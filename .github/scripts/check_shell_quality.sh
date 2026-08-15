@@ -2,13 +2,17 @@
 # check_shell_quality.sh - Shell script quality checks for CI.
 #
 # Checks performed:
-#   1. All .sh files parse with `bash -n` (syntax check)
-#   2. All executable .sh files pass shellcheck (if installed)
-#   3. All .sh files inside scripts/ and src/bin/ use `set -euo pipefail`
-#   4. No bare `sudo` usage in scripts/ (should use the privilege wrapper)
+#   1. All shell scripts parse with `bash -n` (syntax check)
+#   2. All shell scripts pass shellcheck at warning severity
+#   3. All .sh files inside scripts/ use `set -euo pipefail`
+#   4. Scripts in scripts/ do not bypass the PATH sudo wrapper
 #   5. No hardcoded insecure patterns (e.g. curl | bash)
 #
-# Usage: bash .github/scripts/check_shell_quality.sh [--fix]
+# "Shell script" means a tracked *.sh file OR a tracked extensionless file
+# whose shebang names sh/bash -- the src/bin/caelestia-* entrypoints are the
+# latter, and they carry the updater, so they must not be skipped.
+#
+# Usage: bash .github/scripts/check_shell_quality.sh
 
 set -euo pipefail
 
@@ -28,38 +32,38 @@ log_ok()    { echo -e "${GREEN}[OK]${RESET}    $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${RESET}  $*"; }
 log_err()   { echo -e "${RED}[ERR]${RESET}   $*"; VIOLATIONS+=("$*"); EXIT_CODE=1; }
 
-is_in_git() {
-    git ls-files --error-unmatch "$1" &>/dev/null
-}
-
-# Returns 0 if file has a shebang indicating it's meant to be executed directly
-is_executable_script() {
+# Returns 0 if the file's shebang names a POSIX shell or bash.
+#
+# The previous pattern was '^#!.*/(ba)?sh', which requires a literal "/sh" or
+# "/bash" and therefore never matched "#!/usr/bin/env bash" -- the shebang every
+# script in this repository actually uses. That silently excluded setup.sh,
+# update.sh, uninstall.sh, the sdata installers and all of src/bin.
+is_shell_script() {
     local file="$1"
-    head -c 30 "$file" 2>/dev/null | grep -qE '^#!.*/(ba)?sh'
+    head -c 64 "$file" 2>/dev/null | head -n 1 | grep -qE '^#!.*\b(ba)?sh\b'
 }
 
-# Every tracked shell script: *.sh files plus extensionless files with a shell
-# shebang (e.g. src/bin/caelestia-update, src/bin/caelestia-shell-ipc). The
-# extensionless ones are easy to forget, so we enumerate them by shebang.
+# Every tracked shell script, NUL-delimited so paths with spaces survive.
 get_shell_files() {
-    git ls-files '*.sh'
-    git ls-files | while IFS= read -r f; do
-        case "$f" in
-            *.sh) ;;
-            *)
-                if is_executable_script "$f"; then
-                    echo "$f"
-                fi
-                ;;
-        esac
-    done
+    {
+        git ls-files -z '*.sh'
+        git ls-files -z | while IFS= read -r -d '' f; do
+            case "$f" in
+                *.sh) ;;
+                *) if [[ -f "$f" ]] && is_shell_script "$f"; then printf '%s\0' "$f"; fi ;;
+            esac
+        done
+    } | sort -zu
 }
+
+mapfile -t -d '' SHELL_FILES < <(get_shell_files)
+echo -e "${BOLD}Discovered ${#SHELL_FILES[@]} shell script(s).${RESET}"
 
 # ─── 1. Syntax check: bash -n on every shell script ───
+echo ""
 echo -e "${BOLD}=== Shell Syntax Check (bash -n) ===${RESET}"
-for f in $(get_shell_files); do
-    if ! bash -n "$f" 2>/dev/null; then
-        err_output="$(bash -n "$f" 2>&1 || true)"
+for f in "${SHELL_FILES[@]}"; do
+    if ! err_output="$(bash -n "$f" 2>&1)"; then
         log_err "Syntax error in $f: $err_output"
     fi
 done
@@ -71,18 +75,18 @@ fi
 echo ""
 echo -e "${BOLD}=== ShellCheck Lint ===${RESET}"
 if command -v shellcheck &>/dev/null; then
-    for f in $(get_shell_files); do
-        if is_executable_script "$f" || [[ "$f" == scripts/* ]]; then
-            if ! shellcheck -S error "$f" 2>/dev/null; then
-                log_err "shellcheck violations in $f"
-            fi
+    shellcheck_failed=0
+    for f in "${SHELL_FILES[@]}"; do
+        if ! shellcheck -S warning "$f"; then
+            log_err "shellcheck violations in $f"
+            shellcheck_failed=1
         fi
     done
-    if [[ "$EXIT_CODE" -eq 0 ]]; then
-        log_ok "shellcheck passed on all scripts"
+    if [[ "$shellcheck_failed" -eq 0 ]]; then
+        log_ok "shellcheck passed on all ${#SHELL_FILES[@]} scripts"
     fi
 else
-    log_warn "shellcheck not installed - skipping (install with: apt install shellcheck)"
+    log_err "shellcheck is not installed - the lint gate cannot run"
 fi
 
 # ─── 3. Strict mode check (set -euo pipefail) ───
@@ -92,20 +96,41 @@ echo -e "${BOLD}=== Strict Mode Check ===${RESET}"
 # are covered by syntax + shellcheck above but deliberately vary their `set`
 # flags (e.g. caelestia-check-updates relies on explicit exits), so they are
 # not forced to -euo here.
-for f in $(git ls-files 'scripts/*.sh' 2>/dev/null || true); do
+strict_failed=0
+while IFS= read -r -d '' f; do
     if ! grep -qE 'set\s+-euo\s+pipefail|set\s+-eu\s+-o\s+pipefail' "$f" 2>/dev/null; then
         log_err "$f is missing 'set -euo pipefail' (required for scripts in scripts/)"
+        strict_failed=1
     fi
-done
-if [[ "$EXIT_CODE" -eq 0 ]]; then
+done < <(git ls-files -z 'scripts/*.sh')
+if [[ "$strict_failed" -eq 0 ]]; then
     log_ok "All scripts in scripts/ use strict mode"
 fi
 
-# ─── 4. No curl-pipe-bash patterns ───
+# ─── 4. Privilege wrapper bypass ───
+echo ""
+echo -e "${BOLD}=== Privilege Wrapper Check ===${RESET}"
+# The installer and the updater both prepend a private bin/ containing a `sudo`
+# shim to PATH, so plain `sudo` resolves to the wrapper. Calling sudo by
+# absolute path bypasses it, defeating the non-interactive credential handling.
+# src/bin/caelestia-update is exempt: it *writes* the wrapper and must call the
+# real binary to avoid recursing into itself.
+wrapper_failed=0
+while IFS= read -r -d '' f; do
+    if grep -nE '(^|[^[:alnum:]_/])/(usr/)?bin/sudo\b' "$f" >/dev/null 2>&1; then
+        log_err "$f calls sudo by absolute path, bypassing the PATH privilege wrapper"
+        wrapper_failed=1
+    fi
+done < <(git ls-files -z 'scripts/*.sh')
+if [[ "$wrapper_failed" -eq 0 ]]; then
+    log_ok "No scripts bypass the privilege wrapper"
+fi
+
+# ─── 5. No curl-pipe-bash patterns ───
 echo ""
 echo -e "${BOLD}=== Unsafe Pattern Detection ===${RESET}"
 CURL_PIPE_FOUND=0
-for f in $(git ls-files '*.sh'); do
+for f in "${SHELL_FILES[@]}"; do
     # Skip this checker itself — it describes patterns, not uses them.
     [[ "$f" == ".github/scripts/check_shell_quality.sh" ]] && continue
     # Skip comment-only lines so doc strings don't self-match.

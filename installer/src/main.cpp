@@ -7,8 +7,29 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <sys/prctl.h>
+#include <sys/resource.h>
+#include <unistd.h>
 
 using namespace std;
+
+namespace {
+
+// The sudo password lives in this process's heap while the prompt is open.
+// setup.sh has a dedicated branch explaining exit code 139 to the user, so
+// crashes here are not hypothetical -- make sure one cannot write the password
+// to a core file.
+void forbid_core_dumps() {
+    const rlimit no_core{0, 0};
+    if (setrlimit(RLIMIT_CORE, &no_core) != 0) {
+        std::cerr << "[installer] WARNING: could not disable core dumps" << std::endl;
+    }
+#ifdef PR_SET_DUMPABLE
+    prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+#endif
+}
+
+} // namespace
 
 // sig_atomic_t is the only type guaranteed to be safe for cross-thread/
 // signal-handler access. We use flags to defer all cleanup to the main loop.
@@ -39,6 +60,16 @@ void check_signals() {
 }
 
 int main(int argc, char** argv) {
+    forbid_core_dumps();
+
+    // Every screen in this program waits on a key. Without a terminal, reads
+    // return EOF immediately and the splash loop spins at 100% CPU forever.
+    if (!isatty(STDIN_FILENO)) {
+        std::cerr << "[installer] stdin is not a terminal; the installer needs "
+                     "an interactive TTY. Run it via setup.sh." << std::endl;
+        return 2;
+    }
+
     // Detect bundle dir from arg or exe path
     if (argc > 1) {
         g_bundle_dir = argv[1];
@@ -137,6 +168,10 @@ int main(int argc, char** argv) {
     UI::summary_screen();
     Term::restore();
 
+    for (const auto& skipped : Runner::ignored_steps) {
+        std::cerr << "[installer] step skipped by user: " << skipped << std::endl;
+    }
+
     if (g_answers["REMOVE_CACHE"] == "true") {
         string cache_dir = string(getenv("XDG_CACHE_HOME") ? getenv("XDG_CACHE_HOME") : (string(getenv("HOME")) + "/.cache")) + "/caelestia-kde";
         std::error_code error;
@@ -152,7 +187,7 @@ int main(int argc, char** argv) {
 
     if (g_logout) {
         cout << "\n\n\nLogging out...\n";
-        system("qdbus6 org.kde.Shutdown /Shutdown org.kde.Shutdown.logout 2>/dev/null");
+        run_shell("qdbus6 org.kde.Shutdown /Shutdown org.kde.Shutdown.logout 2>/dev/null");
     } else {
         cout << "\n\n\nExiting installer. Please remember to log out manually later.\n";
     }

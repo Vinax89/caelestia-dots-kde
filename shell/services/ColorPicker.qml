@@ -37,7 +37,7 @@ Item {
                     let colorCode = "#" + hex.toUpperCase();
                     
                     // Copy to clipboard using wl-copy
-                    Quickshell.execDetached(["bash", "-c", `echo -n '${colorCode}' | wl-copy`]);
+                    Quickshell.execDetached(["bash", "-c", 'printf %s "$1" | wl-copy', "--", colorCode]);
                     
                     // Notify user
                     Quickshell.execDetached(["notify-send", "Color Picker", `Color ${colorCode} copied to clipboard!`]);

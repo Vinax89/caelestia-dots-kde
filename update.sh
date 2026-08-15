@@ -38,7 +38,22 @@ BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export BUNDLE_DIR
 EXPECTED_COMMIT="${CAELESTIA_UPDATE_COMMIT:-}"
 if [[ -z "$EXPECTED_COMMIT" && "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
-    die "Refusing mutable update: set CAELESTIA_UPDATE_COMMIT to a reviewed commit"
+    cat >&2 <<'USAGE'
+[FATAL] Refusing mutable update: set CAELESTIA_UPDATE_COMMIT to a reviewed commit.
+
+This script updates an existing git checkout to one specific, reviewed commit.
+It deliberately will not follow a moving branch head.
+
+  For normal updates, use the release-tracking updater instead:
+      caelestia-update main
+
+  To pin this checkout to a commit you have reviewed:
+      CAELESTIA_UPDATE_COMMIT=<40-char-sha> ./update.sh
+
+  To list candidate commits:
+      git fetch origin && git log --oneline -20 origin/main
+USAGE
+    exit 1
 fi
 cd "$BUNDLE_DIR" || die "Could not enter $BUNDLE_DIR"
 
@@ -71,19 +86,23 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
         STASHED=1
     fi
 
-    if [ -n "${1:-}" ]; then
-        BRANCH="$1"
-        if [[ "$BRANCH" != "main" && "$BRANCH" != "dev" ]]; then
-            warn "Branch '$BRANCH' is not allowed. Falling back to main."
-            BRANCH="main"
-        fi
-        info "Using provided branch: $BRANCH"
+    # Branch selection only matters on the unverified/mutable path. When
+    # CAELESTIA_UPDATE_COMMIT is set -- which the guard at the top of this
+    # script makes the normal case -- the commit fully determines what is
+    # checked out, and asking the user to pick a branch first was dead UI.
+    if [[ -n "$EXPECTED_COMMIT" ]]; then
+        [[ "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || die "CAELESTIA_UPDATE_COMMIT must be a full 40-character commit hash"
+        info "Checking out reviewed commit $EXPECTED_COMMIT..."
+        git -C "$BUNDLE_DIR" fetch --depth=1 origin "$EXPECTED_COMMIT" || die "Failed to fetch requested update commit"
+        git -C "$BUNDLE_DIR" checkout --detach "$EXPECTED_COMMIT" || die "Failed to checkout requested update commit"
     else
-        if [ -t 1 ]; then
-            BRANCHES="main dev"
+        if [ -n "${1:-}" ]; then
+            BRANCH="$1"
+            info "Using provided branch: $BRANCH"
+        elif [ -t 1 ]; then
             echo
             info "Available remote branches (default: main):"
-            select BRANCH in $BRANCHES; do
+            select BRANCH in main dev; do
                 if [ -z "$REPLY" ]; then
                     BRANCH="main"
                     info "Defaulted to branch: $BRANCH"
@@ -102,22 +121,15 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
             fi
             info "Auto-detected branch: $BRANCH (GUI Mode)"
         fi
-    fi
 
-    if [[ "$BRANCH" != "main" && "$BRANCH" != "dev" ]]; then
-        warn "Branch '$BRANCH' is not allowed. Falling back to main."
-        BRANCH="main"
-    elif ! git -C "$BUNDLE_DIR" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-        warn "Remote branch '$BRANCH' not found. Falling back to main."
-        BRANCH="main"
-    fi
+        if [[ "$BRANCH" != "main" && "$BRANCH" != "dev" ]]; then
+            warn "Branch '$BRANCH' is not allowed. Falling back to main."
+            BRANCH="main"
+        elif ! git -C "$BUNDLE_DIR" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            warn "Remote branch '$BRANCH' not found. Falling back to main."
+            BRANCH="main"
+        fi
 
-    if [[ -n "$EXPECTED_COMMIT" ]]; then
-        [[ "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || die "CAELESTIA_UPDATE_COMMIT must be a full 40-character commit hash"
-        info "Checking out reviewed commit $EXPECTED_COMMIT..."
-        git -C "$BUNDLE_DIR" fetch --depth=1 origin "$EXPECTED_COMMIT" || die "Failed to fetch requested update commit"
-        git -C "$BUNDLE_DIR" checkout --detach "$EXPECTED_COMMIT" || die "Failed to checkout requested update commit"
-    else
         info "Checking out $BRANCH..."
         git -C "$BUNDLE_DIR" checkout "$BRANCH" || die "Failed to checkout $BRANCH"
         info "Pulling latest changes for $BRANCH..."
