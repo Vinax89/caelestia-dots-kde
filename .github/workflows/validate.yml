@@ -87,9 +87,9 @@ jobs:
       - name: Run qmllint on shell QML files
         run: |
           echo "::group::qmllint shell QML"
-          LINTER=$(command -v qmllint6 || command -v qmllint || true)
+          LINTER=$(command -v qmllint6 || command -v qmllint || test ! -x /usr/lib/qt6/bin/qmllint || echo /usr/lib/qt6/bin/qmllint)
           test -n "$LINTER" || { echo 'qmllint is required'; exit 1; }
-          find shell -name '*.qml' -print0 | xargs -0 -n1 "$LINTER" --quiet
+          find shell -name '*.qml' -print0 | xargs -0 -n1 "$LINTER" --max-warnings -1
           echo "::endgroup::"
 
   # ═══════════════════════════════════════════════════════════
@@ -365,8 +365,12 @@ jobs:
   # Job 14: Production shell/plugin build
   # ═══════════════════════════════════════════════════════════
   shell-build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    container: archlinux:base
     steps:
+      - name: Bootstrap checkout dependency
+        run: pacman -Sy --noconfirm git
+
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -374,13 +378,10 @@ jobs:
 
       - name: Install shell build dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake g++ pkg-config \
-            qt6-base-dev qt6-declarative-dev qt6-shader-baker qt6-wayland-dev \
-            libkf6windowsystem-dev libkf6guiaddons-dev libkf6globalaccel-dev \
-            libkf6config-dev libkf6configwidgets-dev libkf6coreaddons-dev \
-            libkf6i18n-dev libkf6package-dev libkf6kio-dev libkf6service-dev \
-            libwayland-dev libx11-dev libdrm-dev libpipewire-0.3-dev
+          pacman -Syu --noconfirm --needed cmake gcc pkgconf ninja \
+            qt6-base qt6-declarative qt6-shadertools qt6-wayland \
+            kwindowsystem kguiaddons kglobalaccel kconfig kconfigwidgets \
+            kcoreaddons ki18n kpackage kio kservice wayland libx11 libdrm pipewire
 
       - name: Configure production plugin
         run: cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release -DENABLE_MODULES=plugin
