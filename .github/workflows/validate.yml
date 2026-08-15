@@ -80,7 +80,7 @@ jobs:
           submodules: recursive
 
       - name: Install QML parser
-        run: pacman -Syu --noconfirm --needed qt6-declarative
+        run: pacman -Syu --noconfirm --needed qt6-declarative diffutils
 
       - name: Parse shell QML files
         run: |
