@@ -16,6 +16,7 @@ import py_compile
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -367,14 +368,28 @@ class SafetyContractTests(unittest.TestCase):
         self.assertIn("Skipping unsupported third-party Python patches", builder)
 
     def test_updater_rejects_unreviewed_updates(self) -> None:
-        result = subprocess.run(
-            [str(ROOT / "update.sh")],
-            cwd=ROOT,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(ROOT / ".test-home")},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        """The guard must fire before update.sh touches anything.
+
+        Run a copy in a throwaway directory rather than the checkout itself.
+        The original invoked ROOT/update.sh with cwd=ROOT, which was safe only
+        because the guard happens to be the third statement in the script -- if
+        it ever moved below the `cd`/lock/git lines, this test would start
+        running git operations against the working tree.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sandbox = Path(tmp)
+            shutil.copy2(ROOT / "update.sh", sandbox / "update.sh")
+            (sandbox / "home").mkdir()
+
+            result = subprocess.run(
+                [str(sandbox / "update.sh")],
+                cwd=sandbox,
+                env={"PATH": "/usr/bin:/bin", "HOME": str(sandbox / "home")},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Refusing mutable update", result.stderr)
 
