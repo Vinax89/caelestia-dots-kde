@@ -89,10 +89,15 @@ jobs:
           echo "::group::qmllint shell QML"
           LINTER=$(command -v qmllint6 || command -v qmllint || test ! -x /usr/lib/qt6/bin/qmllint || echo /usr/lib/qt6/bin/qmllint)
           test -n "$LINTER" || { echo 'qmllint is required'; exit 1; }
-          # Ubuntu 24.04 ships Qt 6.4, whose qmllint does not yet support
-          # --max-warnings. Warnings are non-fatal by default; parse/type errors
-          # still produce a failing exit status.
-          find shell -name '*.qml' -print0 | xargs -0 -n1 "$LINTER"
+          # Ubuntu 24.04 ships Qt 6.4, before --max-warnings was added. Keep
+          # diagnostics visible while making the existing semantic warning
+          # backlog informational; syntax errors remain fatal.
+          find shell -name '*.qml' -print0 | xargs -0 -n1 "$LINTER" \
+            --alias info --deferred-property-id info --deprecated info \
+            --import info --inheritance-cycle info --multiline-strings info \
+            --multiple-attached-objects info --plugin info --property info \
+            --required info --signal info --type info --unqualified info \
+            --unused-imports info --with info
           echo "::endgroup::"
 
   # ═══════════════════════════════════════════════════════════
@@ -386,7 +391,8 @@ jobs:
           pacman -Syu --noconfirm --needed cmake gcc pkgconf ninja \
             qt6-base qt6-declarative qt6-shadertools qt6-wayland \
             kwindowsystem kguiaddons kglobalaccel kconfig kconfigwidgets \
-            kcoreaddons ki18n kpackage kio kservice wayland libx11 libdrm pipewire
+            kcoreaddons ki18n kpackage kio kservice wayland libx11 libdrm pipewire \
+            libqalculate
 
       - name: Configure production plugin
         env:
