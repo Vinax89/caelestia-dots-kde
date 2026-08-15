@@ -65,39 +65,37 @@ jobs:
         run: bash .github/scripts/check_shell_quality.sh
 
   # ═══════════════════════════════════════════════════════════
-  # Job 2: QML lint - syntax, unused imports, property binding issues
+  # Job 2: QML syntax validation
   # ═══════════════════════════════════════════════════════════
   qml-lint:
     runs-on: ubuntu-latest
+    container: archlinux:base
     steps:
+      - name: Bootstrap checkout dependency
+        run: pacman -Sy --noconfirm git
+
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
-      - name: Install qmllint
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qml6-modules-qtquick-controls qml6-modules-qtquick-layouts \
-            qml6-modules-qtquick-window qml6-modules-qtqml-workerscript \
-            qml6-modules-qtquick-templates || true
-          # qmllint comes with qt6-declarative-dev on Ubuntu 24.04+
-          sudo apt-get install -y -qq qt6-declarative-dev 2>/dev/null || true
+      - name: Install QML parser
+        run: pacman -Syu --noconfirm --needed qt6-declarative diffutils
 
-      - name: Run qmllint on shell QML files
+      - name: Parse shell QML files
         run: |
-          echo "::group::qmllint shell QML"
-          LINTER=$(command -v qmllint6 || command -v qmllint || test ! -x /usr/lib/qt6/bin/qmllint || echo /usr/lib/qt6/bin/qmllint)
-          test -n "$LINTER" || { echo 'qmllint is required'; exit 1; }
-          # Ubuntu 24.04 ships Qt 6.4, before --max-warnings was added. Keep
-          # diagnostics visible while making the existing semantic warning
-          # backlog informational; syntax errors remain fatal.
-          find shell -name '*.qml' -print0 | xargs -0 -n1 "$LINTER" \
-            --alias info --deferred-property-id info --deprecated info \
-            --import info --inheritance-cycle info --multiline-strings info \
-            --multiple-attached-objects info --plugin info --property info \
-            --required info --signal info --type info --unqualified info \
-            --unused-imports info --with info
+          echo "::group::QML validation"
+          FORMATTER=$(command -v qmlformat6 || command -v qmlformat || test ! -x /usr/lib/qt6/bin/qmlformat || echo /usr/lib/qt6/bin/qmlformat)
+          test -n "$FORMATTER" || { echo 'qmlformat is required'; exit 1; }
+          failures=$(mktemp)
+          while IFS= read -r -d '' file; do
+            "$FORMATTER" --ignore-settings "$file" >/dev/null 2>&1 || echo "$file" >> "$failures"
+          done < <(find shell -name '*.qml' -print0)
+          sort -o "$failures" "$failures"
+          if ! diff -u .github/ci-baselines/qml-parse.txt "$failures"; then
+            echo 'QML parser failure set changed; inspect new failures and update the baseline only for confirmed parser limitations.'
+            exit 1
+          fi
           echo "::endgroup::"
 
   # ═══════════════════════════════════════════════════════════
@@ -389,15 +387,25 @@ jobs:
       - name: Install shell build dependencies
         run: |
           pacman -Syu --noconfirm --needed cmake gcc pkgconf ninja \
+            meson fftw iniparser \
             qt6-base qt6-declarative qt6-shadertools qt6-wayland \
             kwindowsystem kguiaddons kglobalaccel kconfig kconfigwidgets \
             kcoreaddons ki18n kpackage kio kservice wayland libx11 libdrm pipewire \
-            libqalculate
+            libqalculate aubio
+
+      - name: Build pinned libcava
+        run: |
+          git clone --filter=blob:none https://github.com/LukashonakV/cava.git /tmp/libcava
+          git -C /tmp/libcava checkout --detach f03278ef9e5e7948fb206453d2f02758f8db216c
+          meson setup /tmp/libcava/build /tmp/libcava
+          meson compile -C /tmp/libcava/build
+          meson install -C /tmp/libcava/build
 
       - name: Configure production plugin
         env:
           CC: /usr/bin/gcc
           CXX: /usr/bin/g++
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
         run: cmake -G Ninja -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release -DENABLE_MODULES=plugin
 
       - name: Build production plugin

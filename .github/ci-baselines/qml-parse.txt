@@ -1,0 +1,2 @@
+shell/modules/bar/Bar.qml
+shell/services/NotifData.qml
