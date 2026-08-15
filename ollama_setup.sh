@@ -21,17 +21,71 @@ section "Ollama AI Setup for Caelestia"
 
 # 1. Install Ollama.
 #
-# This runs a script written by a third party, with root, and there is no way
-# around that short of packaging Ollama ourselves. Be honest about it rather
-# than dressing it up.
+# Prefer the distribution package: it is signed by the distro, tracked by the
+# package manager, and removable. Only when no package exists do we fall back
+# to piping the vendor's install script into a root shell, and then only with
+# explicit confirmation.
 #
-# The previous version demanded OLLAMA_INSTALL_SHA256 with no published value
-# to compare against, which left two options: not run the script at all, or
-# compute the hash from the same download it was meant to authenticate. Neither
-# verifies anything. Now the script is downloaded, the user is shown what they
-# are about to run, and they confirm -- with an optional pin for anyone who has
-# obtained a hash out of band.
+# The previous version had no packaged path at all, and demanded
+# OLLAMA_INSTALL_SHA256 with no published value to compare against -- leaving
+# two options: don't run it, or hash the same download it was meant to
+# authenticate. Neither verifies anything.
 section "Step 1/4 - Install Ollama"
+
+detect_base_distro() {
+    if [ -f /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        case "$ID" in
+            arch|cachyos|endeavouros|manjaro|artix) echo arch; return ;;
+            fedora|nobara|bazzite|rhel|centos|almalinux|rocky) echo fedora; return ;;
+            debian|ubuntu|pop|mint|kali|raspbian|elementary|zorin|deepin|devuan) echo debian; return ;;
+        esac
+        case "${ID_LIKE:-}" in
+            *arch*) echo arch; return ;;
+            *fedora*|*rhel*) echo fedora; return ;;
+            *debian*|*ubuntu*) echo debian; return ;;
+        esac
+    fi
+    if command -v pacman >/dev/null 2>&1; then echo arch
+    elif command -v dnf >/dev/null 2>&1; then echo fedora
+    elif command -v apt-get >/dev/null 2>&1; then echo debian
+    else echo unknown
+    fi
+}
+
+install_ollama_from_repo() {
+    case "$(detect_base_distro)" in
+        arch)
+            pacman -Si ollama >/dev/null 2>&1 || return 1
+            echo -e "${BLUE}Installing ollama from the Arch repositories...${NC}"
+            sudo pacman -S --needed --noconfirm ollama
+            ;;
+        fedora)
+            dnf info ollama >/dev/null 2>&1 || return 1
+            echo -e "${BLUE}Installing ollama from the Fedora repositories...${NC}"
+            sudo dnf install -y ollama
+            ;;
+        debian)
+            apt-cache show ollama >/dev/null 2>&1 || return 1
+            echo -e "${BLUE}Installing ollama from the APT repositories...${NC}"
+            sudo apt-get update && sudo apt-get install -y ollama
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+if command -v ollama >/dev/null 2>&1; then
+    echo -e "${GREEN}Ollama is already installed ($(command -v ollama)).${NC}"
+elif install_ollama_from_repo; then
+    echo -e "${GREEN}Ollama installed from your distribution's repositories.${NC}"
+else
+
+echo -e "${YELLOW}No packaged Ollama found for this distribution.${NC}"
+echo -e "${YELLOW}The only remaining option is the vendor's install script, run as root.${NC}"
+echo
 tmp_installer="$(mktemp)"
 trap 'rm -f "$tmp_installer"' EXIT
 curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp_installer" https://ollama.com/install.sh
@@ -72,6 +126,8 @@ else
 fi
 
 sh "$tmp_installer"
+
+fi  # end: packaged install unavailable
 
 # 2. Enable and start the systemd service
 section "Step 2/4 - Enable and Start Ollama Daemon"

@@ -38,15 +38,28 @@ influences the next tool call. The mitigations are:
 * API keys live in the system keyring via `secret-tool`, passed on stdin, and
   never appear in the process list or in `shell.json`.
 
-## What is deliberately not mitigated
+## System actions are off by default
 
-There is no per-command confirmation prompt. The assistant is a local tool
-acting for the user who opened it, and confirming every tool call would make it
-unusable. Treat the assistant as running with your user's privileges, because
-it does.
+`open_app` and `caelestia_command` — the two tools that act on the machine
+rather than read — are gated behind `ai.allowSystemActions`, which ships
+**disabled**. When it is off, `systemActionsAllowed()` in `AiAssistant.qml`
+refuses the call and reports back to the model so it can tell the user what to
+enable, instead of silently retrying. Read-only tools are unaffected.
+
+This is a default-deny switch rather than a per-call dialog on purpose. A
+prompt on every tool call is a prompt users learn to click through, and it would
+make the assistant tiring to use; a single informed decision in
+Settings → Utilities is both safer out of the box and harder to grant by
+accident.
+
+## What is still not mitigated
+
+With `allowSystemActions` enabled, there is no per-call confirmation — that is
+what enabling it means. Treat the assistant as running with your user's
+privileges, because it does.
 
 If you point the assistant at an untrusted model endpoint, that endpoint can
-run any of the tools above as you.
+run any of the enabled tools as you.
 
 ## When adding a tool
 

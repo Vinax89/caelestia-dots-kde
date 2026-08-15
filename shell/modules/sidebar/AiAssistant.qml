@@ -862,6 +862,28 @@ Item {
         return result.replace(/\s+$/, '');
     }
 
+    // System-acting tools are opt-in. The assistant reads web pages, and a page
+    // can contain text aimed at the model, so a prompt injection would
+    // otherwise reach a tool that starts processes. Refusing here (rather than
+    // prompting per call) means the default is safe without a dialog users
+    // would learn to click through; the user turns it on once, knowingly, in
+    // Settings -> Utilities.
+    //
+    // The refusal is reported back to the model so it can tell the user what to
+    // enable instead of silently retrying.
+    function systemActionsAllowed(toolName, description) {
+        if (GlobalConfig.ai.allowSystemActions)
+            return true;
+
+        Logger.log("[AI] blocked system action (" + toolName + "): " + description);
+        accumulatedToolResults += "Tool: " + toolName + "\nResult: Refused. "
+            + "System actions are disabled. The user must enable "
+            + "\"Allow system actions\" in Settings -> Utilities before this tool can run. "
+            + "Do not retry; tell the user.\n\n";
+        currentActionText = "Blocked a system action";
+        return false;
+    }
+
     function runAgentCommand(cmd, type) {
         var commandStr = Array.isArray(cmd) ? JSON.stringify(cmd) : '["sh", "-c", ' + JSON.stringify("exec </dev/null; " + cmd) + ']';
         var processQml = "import QtQuick\n" +
@@ -2045,9 +2067,13 @@ Item {
                                         runAgentCommand(["env", "PYTHONIOENCODING=utf8", "python3", Quickshell.shellDir + "/scripts/orion_search.py", "--mode", "read", "--url", url], "exec_" + toolName);
 
                                     } else if (toolName === "open_app") {
-                                        currentActionText = "Opening app...";
                                         var app = String(args.app_name || "");
-                                        runAgentCommand(["python3", Quickshell.shellDir + "/scripts/open_app.py", app], "exec_" + toolName);
+                                        if (!root.systemActionsAllowed(toolName, "open " + app)) {
+                                            runningToolsCount--;
+                                        } else {
+                                            currentActionText = "Opening app...";
+                                            runAgentCommand(["python3", Quickshell.shellDir + "/scripts/open_app.py", app], "exec_" + toolName);
+                                        }
 
                                     } else if (toolName === "set_timer") {
                                         currentActionText = "Setting timer...";
@@ -2063,12 +2089,16 @@ Item {
                                         accumulatedToolResults += "Tool: get_weather\nResult: Local weather from system dashboard: " + weatherStr + "\n\n";
 
                                     } else if (toolName === "caelestia_command") {
-                                        currentActionText = "Running caelestia...";
                                         var subcmd = String(args.subcommand || "");
                                         var subargs = String(args.args || "").trim();
-                                        var cmdArr = ["caelestia", subcmd];
-                                        if (subargs) cmdArr = cmdArr.concat(subargs.split(/\s+/));
-                                        runAgentCommand(cmdArr, "exec_" + toolName);
+                                        if (!root.systemActionsAllowed(toolName, ("caelestia " + subcmd + " " + subargs).trim())) {
+                                            runningToolsCount--;
+                                        } else {
+                                            currentActionText = "Running caelestia...";
+                                            var cmdArr = ["caelestia", subcmd];
+                                            if (subargs) cmdArr = cmdArr.concat(subargs.split(/\s+/));
+                                            runAgentCommand(cmdArr, "exec_" + toolName);
+                                        }
 
                                     } else {
                                         Logger.log("[AI] Unknown tool: " + toolName);

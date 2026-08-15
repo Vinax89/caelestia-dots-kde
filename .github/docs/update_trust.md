@@ -37,10 +37,39 @@ the signature but repository write access and branch protection. The signature
 closes a narrower hole: it prevents a tampered checkout, a hostile mirror, or a
 MITM from substituting commit content that the updater would then execute.
 
-Accepting this trade is deliberate. The alternative — a maintainer-held signing
-key — means key custody, rotation, and a revocation story, and it breaks every
-release made through the GitHub UI. If that changes, sign release tags as
-annotated signed tags with a maintainer key and pin that fingerprint instead.
+## Using a maintainer key instead
+
+The verifier supports a stronger anchor, and prefers it when one is pinned.
+Setting it up is three steps:
+
+1. Create a signing key and commit its public half:
+
+   ```bash
+   gpg --quick-generate-key "Your Name <you@example.com>" ed25519 sign never
+   gpg --armor --export <FINGERPRINT> > .github/release-signing-key.asc
+   ```
+
+2. Sign release tags with it: `git tag -s vX.Y.Z -m "..."`. The verifier checks
+   an annotated signed tag first and falls back to the commit.
+
+3. Pin the fingerprint. Where you pin it decides how much it is worth:
+
+   * `CAELESTIA_RELEASE_SIGNER` in the environment, or the constant of the same
+     name in `src/bin/caelestia-update` — **authoritative**, because the updater
+     is installed in `~/.local/bin`, outside the repository it verifies.
+   * `RELEASE_SIGNER` in `.github/version.env` — **advisory only**, and the
+     standalone verifier warns when it falls back to this. An anchor read out of
+     the thing being verified is worth nothing against someone who controls that
+     repository; it still detects tampering after a known-good checkout.
+
+Only the fingerprint has to be trusted. The key material is fetched and then
+rejected unless it contains that exact fingerprint, so committing the public key
+to the repository is safe: swapping it for an attacker's key fails the check.
+
+Until a key is pinned, the web-flow fallback above remains in force. That trade
+is deliberate — key custody, rotation and revocation are real costs, and
+web-flow still prevents a tampered checkout, a hostile mirror or a MITM from
+substituting content the updater would execute.
 
 ## Consequences for automation
 
