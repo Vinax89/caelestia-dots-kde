@@ -194,8 +194,15 @@ mkdir -p ~/.local/bin ~/.config/systemd/user
 # a system library path, and removed with ~/.local/lib/caelestia on uninstall.
 caelestia_compat_lib_dir="$HOME/.local/lib/caelestia/compat"
 mkdir -p "$caelestia_compat_lib_dir"
-opencv_imgproc=$(ldconfig -p 2>/dev/null | awk '/libopencv_imgproc\.so\.5/ {print $NF; exit}')
-opencv_core=$(ldconfig -p 2>/dev/null | awk '/libopencv_core\.so\.5/ {print $NF; exit}')
+# No `exit` inside awk: it closes the pipe, ldconfig dies of SIGPIPE, and under
+# `set -euo pipefail` the 141 status aborts the whole script at this line --
+# silently skipping every remaining step. Let awk drain its input and take the
+# first match with head instead.
+find_lib() {
+    ldconfig -p 2>/dev/null | awk -v pat="$1" '$0 ~ pat { print $NF }' | head -n1
+}
+opencv_imgproc="$(find_lib 'libopencv_imgproc\.so\.5')"
+opencv_core="$(find_lib 'libopencv_core\.so\.5')"
 if [ -n "$opencv_imgproc" ] && [ -n "$opencv_core" ]; then
     ln -sfn "$opencv_imgproc" "$caelestia_compat_lib_dir/libopencv_imgproc.so.413"
     ln -sfn "$opencv_core" "$caelestia_compat_lib_dir/libopencv_core.so.413"
