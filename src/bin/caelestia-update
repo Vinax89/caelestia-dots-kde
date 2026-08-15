@@ -8,6 +8,26 @@ info() { echo "[INFO]  $*"; }
 ok()   { echo "[OK]    $*"; }
 warn() { echo "[WARN]  $*"; }
 
+verify_checkout() {
+    [[ "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-0}" == "1" ]] && {
+        warn "Skipping Git signature verification by explicit request."
+        return
+    }
+    local trusted_fingerprint="968479A1AFF927E37D1A566BB5690EEEBB952194"
+    local verify_home fingerprints status valid_fingerprint
+    verify_home="$(mktemp -d "${TMPDIR:-/tmp}/caelestia-verify.XXXXXX")" || die "Could not create verification directory"
+    chmod 700 "$verify_home"
+    curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$verify_home/trusted.asc" || die "Could not download trusted public key"
+    fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$verify_home/trusted.asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
+    grep -Fxq "$trusted_fingerprint" <<< "$fingerprints" || die "Trusted signer fingerprint mismatch"
+    gpg --homedir "$verify_home" --batch --import "$verify_home/trusted.asc" >/dev/null 2>&1 || die "Could not import trusted public key"
+    status="$(GNUPGHOME="$verify_home" git -C "$UPD_DIR/repo" -c gpg.program=gpg verify-commit --raw HEAD 2>&1 || true)"
+    valid_fingerprint="$(printf '%s\n' "$status" | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
+    rm -rf -- "$verify_home"
+    [[ "$valid_fingerprint" == "$trusted_fingerprint" ]] || \
+        die "Refusing untrusted update commit. Set CAELESTIA_ALLOW_UNVERIFIED_UPDATE=1 only for a trusted local test."
+}
+
 run_stage() {
     local timeout_seconds="$1"
     shift
@@ -198,6 +218,13 @@ if [ -n "$TARGET_REF" ] && [ "${TARGET_KIND:-}" = "commit" ]; then
 elif [ -n "$TARGET_REF" ]; then
     git fetch -q --depth 1 origin "refs/tags/$TARGET_REF:refs/tags/$TARGET_REF" || die "Failed to fetch version tag"
     git reset --hard -q "$TARGET_REF" || die "Failed to apply version $TARGET_REF"
+elif [ "$BRANCH" = "main" ]; then
+    # Stable updates follow the newest release tag, never a mutable branch head.
+    git fetch -q --depth=1 --tags origin || die "Failed to fetch release tags"
+    TARGET_REF="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n1)"
+    [ -n "$TARGET_REF" ] || die "No stable release tag is available"
+    TARGET_KIND="tag"
+    git reset --hard -q "$TARGET_REF" || die "Failed to apply release $TARGET_REF"
 else
     git fetch -q --depth 1 origin "$BRANCH" || die "Failed to fetch repository"
     git reset --hard -q origin/"$BRANCH" || die "Failed to apply updates"
@@ -209,6 +236,7 @@ if [[ -f "$UPD_DIR/repo/.gitmodules" ]]; then
     git submodule sync --recursive >/dev/null 2>&1 || true
     git submodule update --init --recursive --force >/dev/null 2>&1 || die "Failed to initialize all submodules"
 fi
+verify_checkout
 
 [[ -f "$UPD_DIR/repo/src/dots/starship.toml" ]] || die "Missing src/dots content after update"
 

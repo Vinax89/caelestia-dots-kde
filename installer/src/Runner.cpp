@@ -47,7 +47,7 @@ bool ensure_tmux_worker_pane() {
       "\\\":\\\" SIGINT SIGQUIT SIGTSTP; clear; echo \\\"Waiting for "
       "installer...\\\"; exec 3<> " + shell_single_quote(ipc_path("cmd"))
       + "; while read -u 3 -r cmd; do if [[ \\\"\\$cmd\\\" == \\\"EXIT\\\" ]]; then break; fi; "
-        "eval \\\"\\$cmd\\\"; echo \\$? > "
+        "bash -c \\\"\\$cmd\\\"; echo \\$? > "
       + shell_single_quote(ipc_path("status")) + "; done'\"";
   system(workerCommand.c_str());
   system("tmux select-pane -t caelestia_install:0.0");
@@ -307,7 +307,7 @@ void draw_progress_ui(int current_step) {
   cout << Draw::sync_end() << flush;
 }
 
-void execute() {
+bool execute() {
   string cache_dir =
       string(getenv("XDG_CACHE_HOME") ? getenv("XDG_CACHE_HOME")
                                       : (string(getenv("HOME")) + "/.cache")) +
@@ -326,7 +326,7 @@ void execute() {
     std::filesystem::create_directories(directory, cache_error);
     if (cache_error) {
       std::cerr << "Failed to create installer cache directory: " << directory << "\\n";
-      return;
+      return false;
     }
   }
   std::filesystem::remove(cache_dir + "/failed_steps.txt", cache_error);
@@ -385,8 +385,7 @@ void execute() {
           const char *val = getenv(name);
           return val ? string(val) : "";
         };
-        string exports = "export PATH=" + shell_single_quote(g_sudo_bin_dir + ":$PATH")
-                         + " SUDO_ASKPASS=" + shell_single_quote(g_sudo_askpass);
+        string exports = "export PATH=" + shell_single_quote(g_sudo_bin_dir + ":$PATH");
         exports += " CACHE_DIR=" + shell_single_quote(safe_env("CACHE_DIR"));
         exports += " BUILDDIR=" + shell_single_quote(safe_env("BUILDDIR"));
         exports += " PKGDEST=" + shell_single_quote(safe_env("PKGDEST"));
@@ -492,6 +491,7 @@ void execute() {
           goto retry_step;
         } else if (action == "Ignore") {
           steps[i].status = "IGNORED";
+          return false;
         } else {
           Term::restore();
           exit(1);
@@ -512,6 +512,7 @@ void execute() {
           goto retry_step;
         } else if (action == "Ignore") {
           steps[i].status = "IGNORED";
+          return false;
         } else {
           Term::restore();
           exit(1);
@@ -522,5 +523,6 @@ void execute() {
 
   draw_progress_ui(steps.size());
   this_thread::sleep_for(chrono::seconds(2));
+  return true;
 }
 } // namespace Runner

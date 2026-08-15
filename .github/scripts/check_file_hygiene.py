@@ -95,9 +95,18 @@ def get_changed_files() -> list[str]:
             print(f"Checking {len(files)} changed file(s) against {base_ref}")
             return files
 
-    # On push to main/dev with no diff context, skip to avoid flagging pre-existing issues
-    print("No diff context available - skipping file hygiene check")
-    return []
+    # Push events may not have origin/main available in shallow checkouts.
+    # Check the commit itself instead of silently turning the quality gate off.
+    result = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    if result.returncode == 0:
+        files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
+        print(f"Checking {len(files)} file(s) changed by HEAD")
+        return files
+
+    raise RuntimeError("Unable to determine changed files for hygiene check")
 
 
 TEXT_FILE_EXTS = {".qml", ".py", ".cpp", ".hpp", ".h", ".cmake", ".txt",

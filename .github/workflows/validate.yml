@@ -12,6 +12,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  installer-integration:
+    name: Installer integration (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: arch
+            image: archlinux:base
+          - distro: fedora
+            image: fedora:42
+          - distro: debian
+            image: debian:bookworm
+    steps:
+      - name: Bootstrap checkout dependency
+        shell: bash
+        run: |
+          case "${{ matrix.distro }}" in
+            arch) pacman -Sy --noconfirm git ;;
+            fedora) dnf install -y git ;;
+            debian) apt-get update && apt-get install -y --no-install-recommends git ca-certificates ;;
+          esac
+
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+
+      - name: Exercise real install, retry, cancellation, and rollback
+        shell: bash
+        env:
+          TEST_DISTRO: ${{ matrix.distro }}
+        run: bash tests/integration/run-in-container.sh
+
   # ═══════════════════════════════════════════════════════════
   # Job 1: Shell script quality - syntax, shellcheck, best practices
   # ═══════════════════════════════════════════════════════════
@@ -103,7 +138,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install lint tools
-        run: pip install flake8
+        run: python -m pip install --disable-pip-version-check 'flake8==7.1.1'
 
       - name: Python compile check
         run: |
@@ -146,7 +181,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install PyYAML
-        run: pip install pyyaml
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
 
       - name: Run repository integrity tests
         run: python3 .github/scripts/test_repo_integrity.py
@@ -417,4 +452,3 @@ jobs:
             echo "Some checks failed. Please review the job logs above." >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
-

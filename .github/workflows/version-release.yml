@@ -69,6 +69,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          trusted_fingerprint=968479A1AFF927E37D1A566BB5690EEEBB952194
+          verify_home="$(mktemp -d)"
+          trap 'rm -rf -- "$verify_home"' EXIT
+          curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$verify_home/trusted.asc"
+          fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$verify_home/trusted.asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
+          grep -Fxq "$trusted_fingerprint" <<< "$fingerprints"
+          gpg --homedir "$verify_home" --batch --import "$verify_home/trusted.asc" >/dev/null 2>&1
+          status="$(GNUPGHOME="$verify_home" git -c gpg.program=gpg verify-commit --raw "$GIT_COMMIT" 2>&1 || true)"
+          valid_fingerprint="$(printf '%s\n' "$status" | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
+          [[ "$valid_fingerprint" == "$trusted_fingerprint" ]]
+
           PREVIOUS_VERSION_TAG=$(git rev-parse -q --verify "refs/tags/$VERSION" || true)
 
           echo "PREVIOUS_VERSION_TAG=$PREVIOUS_VERSION_TAG" >> $GITHUB_ENV
@@ -77,6 +88,9 @@ jobs:
             echo "Tag $VERSION already exists; refusing to move it."
             exit 1
           fi
+          # Lightweight tags deliberately inherit the verified commit signature.
+          # The updater resolves the tag, then verifies that commit against the
+          # pinned signer fingerprint before executing any checked-out code.
           git tag "$VERSION" "$GIT_COMMIT"
           git push origin "refs/tags/$VERSION"
 

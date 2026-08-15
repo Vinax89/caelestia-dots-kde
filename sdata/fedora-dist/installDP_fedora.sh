@@ -6,6 +6,18 @@ set -uo pipefail
 log()  { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 err()  { echo -e "\033[0;31m[ERR]\033[0m  $*"; }
 
+clone_verified() {
+    local url="$1" dest="$2"
+    git clone --depth 1 "$url" "$dest" || return 1
+    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_SOURCE:-0}" != "1" ]]; then
+        git -C "$dest" verify-commit HEAD >/dev/null 2>&1 || {
+            rm -rf -- "$dest"
+            err "Refusing unsigned source checkout: $url"
+            return 1
+        }
+    fi
+}
+
 log "Installing Fedora packages..."
 
 INSTALL_FISH="${INSTALL_FISH:-true}"
@@ -50,11 +62,21 @@ case "$PACKAGE_GROUP" in
             COPR_PKGS=("quickshell-git" "gpu-screen-recorder" "app2unit" "starship" "libcava" "wl-clip-persist") ;;
 esac
 
+# See tests/integration/README.md. The override still uses dnf and rpm; it only
+# reduces the package set and disables unrelated third-party repositories.
+if [[ -n "${CAELESTIA_INTEGRATION_PACKAGES:-}" ]]; then
+    read -r -a PACKAGES <<< "$CAELESTIA_INTEGRATION_PACKAGES"
+    COPR_PKGS=()
+    INSTALL_FISH=false
+    INSTALL_PAPIRUS=false
+    INSTALL_DARKLY=false
+fi
+
 # Ensure COPR-only packages are actually requested for the relevant groups
-if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "core" ]]; then
+if [[ -z "${CAELESTIA_INTEGRATION_PACKAGES:-}" && ( "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "core" ) ]]; then
     PACKAGES+=("${COPR_CORE[@]}")
 fi
-if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "shell" ]]; then
+if [[ -z "${CAELESTIA_INTEGRATION_PACKAGES:-}" && ( "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "shell" ) ]]; then
     PACKAGES+=("${COPR_SHELL[@]}")
 fi
 
@@ -77,11 +99,16 @@ if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "themes" ]]; then
     fi
 fi
 
-log "Enabling RPM Fusion for H264 hardware codecs..."
-sudo dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm || true
-sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing || true
+if [[ -z "${CAELESTIA_INTEGRATION_PACKAGES:-}" ]]; then
+    log "Enabling RPM Fusion for H264 hardware codecs..."
+    fedora_release="$(rpm -E %fedora)"
+    sudo dnf install -y \
+        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_release}.noarch.rpm" \
+        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_release}.noarch.rpm" || true
+    sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing || true
+fi
 
-if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "core" ]]; then
+if [[ -z "${CAELESTIA_INTEGRATION_PACKAGES:-}" && ( "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "core" ) ]]; then
     PACKAGES+=(ffmpeg)
 fi
 
@@ -171,7 +198,7 @@ for pkg in "${COPR_PKGS[@]}"; do
         libcava)
             tmpdir="$(mktemp -d)"
             sudo dnf install -y alsa-lib-devel fftw-devel pulseaudio-libs-devel iniparser-devel meson ninja-build cmake gcc-c++
-            if git clone --depth 1 https://github.com/LukashonakV/cava "$tmpdir"; then
+            if clone_verified https://github.com/LukashonakV/cava "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
                     if [ -f "meson.build" ]; then
@@ -191,7 +218,7 @@ for pkg in "${COPR_PKGS[@]}"; do
         app2unit)
             tmpdir="$(mktemp -d)"
             sudo dnf install -y make
-            if git clone --depth 1 https://github.com/Vladimir-csp/app2unit "$tmpdir"; then
+            if clone_verified https://github.com/Vladimir-csp/app2unit "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
                     sudo make install
@@ -205,7 +232,7 @@ for pkg in "${COPR_PKGS[@]}"; do
         gpu-screen-recorder)
             tmpdir="$(mktemp -d)"
             sudo dnf install -y meson ninja-build pkgconf libXcomposite-devel libXrandr-devel libXfixes-devel libdrm-devel wayland-devel pipewire-devel libcap-devel ffmpeg-devel
-            if git clone --depth 1 https://git.dec05eba.com/gpu-screen-recorder "$tmpdir"; then
+            if clone_verified https://git.dec05eba.com/gpu-screen-recorder "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
                     meson setup build && ninja -C build && sudo meson install -C build
@@ -270,7 +297,7 @@ if [[ "$INSTALL_DARKLY" == "true" ]]; then
     if ! command -v darkly >/dev/null 2>&1; then
         tmpdir="$(mktemp -d)"
         sudo dnf install -y cmake extra-cmake-modules gettext kf6-kconfig-devel kf6-kconfigwidgets-devel kf6-kcoreaddons-devel kf6-kguiaddons-devel kf6-ki18n-devel kf6-kiconthemes-devel kf6-kio-devel kf6-kwidgetsaddons-devel kf6-kwindowsystem-devel qt6-qtbase-devel qt6-qtdeclarative-devel || true
-        if git clone --depth 1 https://github.com/Bali10050/Darkly "$tmpdir"; then
+        if clone_verified https://github.com/Bali10050/Darkly "$tmpdir"; then
             (
                 cd "$tmpdir" || exit 1
                 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"$(nproc)" && sudo cmake --install build
@@ -301,7 +328,7 @@ if ! command -v caelestia >/dev/null 2>&1; then
                 sudo ln -sf "$HOME/.local/bin/caelestia" /usr/local/bin/caelestia || true
             fi
         fi
-        
+
         # Install fish completions if fish is present
         mkdir -p ~/.config/fish/completions/
         cp ./completions/caelestia.fish ~/.config/fish/completions/ 2>/dev/null || true

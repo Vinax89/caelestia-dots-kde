@@ -6,6 +6,18 @@ set -uo pipefail
 log()  { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 err()  { echo -e "\033[0;31m[ERR]\033[0m  $*"; }
 
+clone_verified() {
+    local url="$1" dest="$2"
+    git clone --depth 1 "$url" "$dest" || return 1
+    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_SOURCE:-0}" != "1" ]]; then
+        git -C "$dest" verify-commit HEAD >/dev/null 2>&1 || {
+            rm -rf -- "$dest"
+            err "Refusing unsigned source checkout: $url"
+            return 1
+        }
+    fi
+}
+
 log "Installing Arch packages..."
 
 INSTALL_FISH="${INSTALL_FISH:-true}"
@@ -17,7 +29,7 @@ if ! command -v yay >/dev/null 2>&1; then
     log "yay not found - installing..."
     sudo pacman -S --needed --noconfirm base-devel git || true
     tmpdir="$(mktemp -d)"
-    git clone --depth 1 https://aur.archlinux.org/yay-bin.git "$tmpdir"
+    clone_verified https://aur.archlinux.org/yay-bin.git "$tmpdir"
     (
         cd "$tmpdir" || exit 1
         makepkg -si --noconfirm
@@ -58,6 +70,16 @@ case "$PACKAGE_GROUP" in
     all|*)  PACKAGES=("${CORE_PACKAGES[@]}" "${SHELL_PACKAGES[@]}" "${THEME_PACKAGES[@]}" "${UTILITY_PACKAGES[@]}") ;;
 esac
 
+# Container integration tests may select a small set of real repository
+# packages. This keeps the exact production install/retry path under test
+# without downloading the complete desktop stack on every CI run.
+if [[ -n "${CAELESTIA_INTEGRATION_PACKAGES:-}" ]]; then
+    read -r -a PACKAGES <<< "$CAELESTIA_INTEGRATION_PACKAGES"
+    INSTALL_FISH=false
+    INSTALL_PAPIRUS=false
+    INSTALL_DARKLY=false
+fi
+
 if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "shell" ]]; then
     if [[ "$INSTALL_FISH" == "true" ]]; then
         PACKAGES+=(fish)
@@ -93,7 +115,7 @@ if ! yay -S --needed --noconfirm "${PACKAGES[@]}"; then
         if ! yay -S --needed --noconfirm "$pkg"; then
             log "yay failed to install $pkg. Attempting manual build from AUR..."
             tmpdir="$(mktemp -d)"
-            if git clone --depth 1 "https://aur.archlinux.org/${pkg}.git" "$tmpdir"; then
+            if clone_verified "https://aur.archlinux.org/${pkg}.git" "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
                     makepkg -si --noconfirm

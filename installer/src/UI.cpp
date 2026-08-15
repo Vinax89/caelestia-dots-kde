@@ -47,7 +47,7 @@ string shell_quote(const string& value) {
     return quoted + "'";
 }
 
-bool setup_sudo_environment(const string& pw) {
+bool setup_sudo_environment() {
     const char* runtimeBase = getenv("XDG_RUNTIME_DIR");
     string templatePath = string(runtimeBase && *runtimeBase ? runtimeBase : "/tmp")
         + "/caelestia-installer-XXXXXX";
@@ -60,24 +60,17 @@ bool setup_sudo_environment(const string& pw) {
 
     g_installer_runtime_dir = runtimeDir;
     g_sudo_bin_dir = g_installer_runtime_dir + "/bin";
-    g_sudo_askpass = g_installer_runtime_dir + "/askpass";
     if (mkdir(g_sudo_bin_dir.c_str(), 0700) != 0) {
         cleanup_installer_runtime();
         return false;
     }
 
-    const string passwordPath = g_installer_runtime_dir + "/password";
-    if (!write_secure_file(passwordPath, pw + "\n", 0600)
-        || !write_secure_file(g_sudo_askpass, "#!/bin/sh\nexec /bin/cat \""
-                + passwordPath + "\"\n", 0700)
-        || !write_secure_file(g_sudo_bin_dir + "/sudo",
-                "#!/bin/sh\nexport SUDO_ASKPASS=\"" + g_sudo_askpass
-                + "\"\nexec /usr/bin/sudo -A \"$@\"\n", 0700)) {
+    // Keep the password out of files and use sudo's timestamp cache for later steps.
+    if (!write_secure_file(g_sudo_bin_dir + "/sudo",
+                "#!/bin/sh\nexec /usr/bin/sudo -n \"$@\"\n", 0700)) {
         cleanup_installer_runtime();
         return false;
     }
-
-    setenv("SUDO_ASKPASS", g_sudo_askpass.c_str(), 1);
 
     // Start background keep-awake for display (sleep inhibitor) in the private runtime dir.
     const string inhibitPid = g_installer_runtime_dir + "/inhibit.pid";
@@ -125,14 +118,14 @@ namespace UI {
             if (line.length() > art_width) art_width = line.length();
         }
         int art_height = art.size();
-        
+
         cout << Draw::clear();
 
         int left = (g_term_width - art_width) / 2;
         if (left < 1) left = 1;
         int top = (g_term_height - 18) / 2;
         if (top < 1) top = 1;
-        
+
         // Animate art character by character
         string art_color_name = "magenta";
         int speed_ms = 3;
@@ -166,10 +159,10 @@ namespace UI {
                 init_texts.push_back(text.get<string>());
             }
         }
-        
+
         cout << Draw::to(text_top, text_left + 10) << author;
         cout << Draw::sync_end() << flush;
-        
+
         for (size_t i = 0; i < init_texts.size(); ++i) {
             if (loading_text(text_left, text_top + i + 1, init_texts[i], loading_color)) return;
         }
@@ -198,7 +191,7 @@ while (!g_quit) {
         while (true) {
             if (g_resized) { Term::get_size(); g_resized = false; animated_once = false; }
             cout << Draw::sync_start() << Draw::clear();
-            
+
             int left = (g_term_width - box_width) / 2;
             if (left < 1) left = 1;
             int top = (g_term_height - box_height) / 2;
@@ -225,7 +218,7 @@ while (!g_quit) {
             }
             Draw::text(left + 2, top + 2, "Root privileges are required to install packages.", text_color);
             Draw::text(left + 2, top + 3, "Password: ", Draw::bold + Draw::color(prompt_color));
-            
+
             // Draw masked password
             string masked(pw.length(), '*');
             masked.resize(30, ' ');
@@ -234,25 +227,25 @@ while (!g_quit) {
             if (!error_msg.empty()) {
                 Draw::text(left + 2, top + 5, error_msg, Draw::color("red"));
             }
-            
+
             cout << Draw::sync_end() << flush;
 
             string key = Input::wait_key();
             if (key == "enter") {
                 if (pw.empty()) continue;
-                
+
                 // Show verifying...
                 cout << Draw::sync_start();
                 Draw::text(left + 2, top + 5, "Verifying...                             ", Draw::color("yellow"));
                 cout << Draw::sync_end() << flush;
-                
+
                 FILE* pipe = popen("/usr/bin/sudo -S true 2>/dev/null", "w");
                 if (pipe) {
                     fprintf(pipe, "%s\n", pw.c_str());
                     fflush(pipe);
                     int status = pclose(pipe);
                     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                        if (setup_sudo_environment(pw))
+                        if (setup_sudo_environment())
                             return true;
                         error_msg = "Failed to create secure sudo runtime.";
                     } else {
@@ -300,7 +293,7 @@ while (!g_quit) {
                             fflush(pipe);
                             int status = pclose(pipe);
                             if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                                if (setup_sudo_environment(pw))
+                                if (setup_sudo_environment())
                                     return true;
                                 error_msg = "Failed to create secure sudo runtime.";
                             } else {
@@ -331,7 +324,7 @@ while (!g_quit) {
         while (true) {
             if (g_resized) { Term::get_size(); g_resized = false; animated_once = false; }
             cout << Draw::sync_start() << Draw::clear();
-            
+
             int left = (g_term_width - box_width) / 2;
             if (left < 1) left = 1;
             int top = (g_term_height - box_height) / 2;
@@ -393,14 +386,14 @@ while (!g_quit) {
         while (true) {
             if (g_resized) { Term::get_size(); g_resized = false; }
             cout << Draw::sync_start() << Draw::clear();
-            
+
             int w = g_term_width - 4;
             if (w > 80) w = 80;
             int h = g_term_height - 2;
             int left = (g_term_width - w) / 2;
             int top = 1;
             const size_t content_width = w > 4 ? static_cast<size_t>(w - 4) : 0;
-            
+
             string box_title = "CAELESTIA INSTALLATION SUMMARY";
             string box_color = "green";
             string title_color = "default";
@@ -412,7 +405,7 @@ while (!g_quit) {
             }
 
             Draw::box(left, top, w, h, box_title, box_color, title_color);
-            
+
             int y = top + 2;
 
             auto print_step = [&](const string& name, const string& desc) {
@@ -502,7 +495,7 @@ while (!g_quit) {
 
             Draw::text(left + 2, top + h - 2, fit_line("Would you like to log out now? (y/N): ", content_width), Draw::bold + Draw::color("default"));
             cout << Draw::sync_end() << flush;
-            
+
             string key = Input::wait_key();
             if (key == "y" || key == "Y") {
                 g_logout = true;
@@ -628,7 +621,7 @@ namespace UI {
 
         while (!g_quit) {
             if (g_resized) { Term::get_size(); g_resized = false; }
-            
+
             int w = 60;
             for (int i = 0; i < num_items; ++i) {
                 const auto& m = meta[i];
@@ -683,7 +676,7 @@ namespace UI {
             last_top = top;
             last_w = w;
             last_h = h;
-            
+
             string key = Input::wait_key();
             auto& item = menu_items[selected];
             auto& selected_meta = meta[selected];
