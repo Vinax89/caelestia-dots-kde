@@ -112,7 +112,14 @@ StyledRect {
         }
 
         root.iconsOrderStr = newOrder.join(",");
-        saveProcess.command = ["bash", "-c", "mkdir -p ~/.config/caelestia && printf '%s' '" + root.iconsOrderStr + "' > ~/.config/caelestia/status_icons_order.txt"];
+        // Pass the order as a positional argument instead of splicing it into
+        // a single-quoted shell word. Written via a temp file + mv so a crash
+        // mid-write cannot leave a truncated order file behind.
+        saveProcess.command = ["bash", "-c",
+            'dir="$HOME/.config/caelestia"; mkdir -p "$dir"; '
+            + 'tmp="$(mktemp "$dir/.status_icons_order.XXXXXX")" || exit 1; '
+            + 'printf %s "$1" > "$tmp" && mv -- "$tmp" "$dir/status_icons_order.txt"',
+            "--", root.iconsOrderStr];
         saveProcess.running = true;
     }
 
@@ -197,7 +204,7 @@ StyledRect {
 
         Repeater {
             model: iconModel
-            
+
             delegate: Item {
                 id: delegateContainer
 
@@ -228,7 +235,7 @@ StyledRect {
                         root.saveOrder();
                     }
                 }
-            
+
                 Item {
                     id: dragItem
 
@@ -236,7 +243,7 @@ StyledRect {
 
                     width: delegateContainer.width
                     height: delegateContainer.height
-                    
+
                     Drag.active: dragArea.held
                     Drag.source: dragItem
                     Drag.hotSpot.x: width / 2
@@ -291,7 +298,7 @@ StyledRect {
                         drag.axis: root.isHorizontal ? Drag.XAxis : Drag.YAxis
                         cursorShape: Qt.PointingHandCursor
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    
+
                         onPressed: mouse => {
                             console.log("StatusIcons Drag onPressed");
                             if (mouse.button === Qt.LeftButton) {

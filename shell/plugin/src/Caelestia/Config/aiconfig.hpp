@@ -13,7 +13,7 @@ class AiConfig : public ConfigObject {
 
     CONFIG_PROPERTY(QString, ollamaUrl, u"http://localhost:11434"_s)
     CONFIG_PROPERTY(QString, ollamaModel, u"llama3"_s)
-    
+
     CONFIG_PROPERTY(bool, saveChatHistory, true)
     CONFIG_PROPERTY(QString, ollamaHistoryJson, u"[]"_s)
 
@@ -23,6 +23,15 @@ class AiConfig : public ConfigObject {
     CONFIG_PROPERTY(QString, defaultProvider, u"ollama"_s)
     CONFIG_PROPERTY(bool, enableOllama, true)
     CONFIG_PROPERTY(bool, enableCelestialMode, true)
+
+    // Whether model-chosen tool calls may act on the system (launch an
+    // application, run a `caelestia` subcommand) rather than only read.
+    //
+    // Off by default and deliberately so: the assistant reads web pages, and a
+    // page can address the model directly, so a prompt injection would
+    // otherwise reach a tool that starts processes. Read-only tools (search,
+    // page reading, weather) are unaffected and stay available.
+    CONFIG_PROPERTY(bool, allowSystemActions, false)
     CONFIG_PROPERTY(bool, showNews, true)
     CONFIG_PROPERTY(bool, showCaelestiaMode, true)
     CONFIG_PROPERTY(QString, orionModel, u"qwen3.5:9b"_s)

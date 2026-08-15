@@ -15,6 +15,12 @@ Singleton {
 
     property bool hasUpdate: false
     property string currentBranch: "main"
+
+    // Canonical repository. Keep in sync with REPO in .github/version.env;
+    // check_repo_identity.py gates that in CI. Passed to the helper script as
+    // a positional argument rather than interpolated, so it can never become
+    // part of the script text.
+    readonly property string repoSlug: "Vinax89/caelestia-dots-kde"
     property var commits: []
     property var availableBranches: ["main", "dev"]
     property var availableVersions: []
@@ -57,12 +63,15 @@ Singleton {
 
         let bashCmd = `
     CURRENT_BRANCH="$1"
+    GH_REPO="$2"
+    [ -n "$GH_REPO" ] || GH_REPO="Vinax89/caelestia-dots-kde"
+    REPO_URL="https://github.com/$GH_REPO.git"
     LOCAL_COMMIT="$(cat \"$HOME/.config/quickshell/caelestia/.current_commit\" 2>/dev/null || true)"
 
 ALLOWED_BRANCHES="main dev"
 LIVE_ALLOWED_BRANCHES=""
 for b in $ALLOWED_BRANCHES; do
-    if git ls-remote --exit-code --heads https://github.com/ladybug-me/caelestia-dots-kde.git "$b" >/dev/null 2>&1; then
+    if git ls-remote --exit-code --heads "$REPO_URL" "$b" >/dev/null 2>&1; then
         LIVE_ALLOWED_BRANCHES="$LIVE_ALLOWED_BRANCHES,$b"
     fi
 done
@@ -84,7 +93,7 @@ mkdir -p "$HOME/.config/quickshell/caelestia"
 echo "$CURRENT_BRANCH" > "$HOME/.config/quickshell/caelestia/.update_branch"
 REPO="$HOME/.cache/caelestia-update-repo"
 if [ ! -d "$REPO" ]; then
-    git clone --bare --filter=blob:none https://github.com/ladybug-me/caelestia-dots-kde.git "$REPO" >/dev/null 2>&1
+    git clone --bare --filter=blob:none "$REPO_URL" "$REPO" >/dev/null 2>&1
 else
     git -C "$REPO" fetch --force origin "$CURRENT_BRANCH:$CURRENT_BRANCH" >/dev/null 2>&1
 fi
@@ -148,7 +157,7 @@ if [ "$CURRENT_BRANCH" = "main" ]; then
     PYTHON_BIN="$(command -v python3 || command -v python || true)"
     [ -n "$PYTHON_BIN" ] || exit 0
 
-    FROM_VERSION="$FROM_VERSION" REPO="$REPO" "$PYTHON_BIN" - <<'PY'
+    FROM_VERSION="$FROM_VERSION" REPO="$REPO" GH_REPO="$GH_REPO" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 import re
@@ -183,7 +192,8 @@ def run_git(*args: str) -> str:
     return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
 
 def fetch_releases() -> list:
-    url = "https://api.github.com/repos/ladybug-me/caelestia-dots-kde/releases?per_page=100"
+    slug = os.getenv("GH_REPO") or "Vinax89/caelestia-dots-kde"
+    url = f"https://api.github.com/repos/{slug}/releases?per_page=100"
     req = urllib.request.Request(url, headers={"User-Agent": "caelestia-update-checker"})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -259,7 +269,7 @@ else
     echo "LOCAL|$LOCAL_COMMIT"
 fi
 `
-    gitProcess.command = ["bash", "-c", bashCmd, "update-check", currentBranch];
+    gitProcess.command = ["bash", "-c", bashCmd, "update-check", currentBranch, root.repoSlug];
         gitProcess.running = true;
     }
 

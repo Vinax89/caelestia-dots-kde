@@ -22,6 +22,11 @@ extern std::string g_sudo_bin_dir;
 extern std::string g_sudo_askpass;
 
 void cleanup_installer_runtime();
+
+// Run a shell command via system(). Returns the raw system() status so callers
+// that care can inspect it; callers that don't get warn_unused_result handled
+// here instead of ignoring it at each site.
+int run_shell(const std::string& command);
 extern bool g_confirm_arg;
 
 void load_bundle_dir();

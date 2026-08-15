@@ -8,24 +8,82 @@ info() { echo "[INFO]  $*"; }
 ok()   { echo "[OK]    $*"; }
 warn() { echo "[WARN]  $*"; }
 
+# Fingerprint of the maintainer's release-signing key, or empty to fall back to
+# GitHub's shared web-flow key.
+#
+# This is deliberately a constant in the *installed* updater rather than a value
+# read from the checkout: an anchor taken from the repository being verified is
+# worth nothing, because whoever controls that repository controls the anchor.
+# Set it here (or via CAELESTIA_RELEASE_SIGNER) once a release key exists, and
+# commit the public key to .github/release-signing-key.asc so the material can
+# be found. Only the fingerprint has to be trusted; the key file is checked
+# against it.
+#
+# Empty means: fall back to web-flow, which proves a commit was created through
+# github.com but does NOT identify who created it. See .github/docs/update_trust.md.
+CAELESTIA_RELEASE_SIGNER="${CAELESTIA_RELEASE_SIGNER:-}"
+WEB_FLOW_FINGERPRINT="968479A1AFF927E37D1A566BB5690EEEBB952194"
+
 verify_checkout() {
     [[ "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-0}" == "1" ]] && {
         warn "Skipping Git signature verification by explicit request."
         return
     }
-    local trusted_fingerprint="968479A1AFF927E37D1A566BB5690EEEBB952194"
+
+    local repo="$UPD_DIR/repo"
+    local anchor anchor_kind key_path
     local verify_home fingerprints status valid_fingerprint
+
     verify_home="$(mktemp -d "${TMPDIR:-/tmp}/caelestia-verify.XXXXXX")" || die "Could not create verification directory"
     chmod 700 "$verify_home"
-    curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$verify_home/trusted.asc" || die "Could not download trusted public key"
-    fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$verify_home/trusted.asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
-    grep -Fxq "$trusted_fingerprint" <<< "$fingerprints" || die "Trusted signer fingerprint mismatch"
-    gpg --homedir "$verify_home" --batch --import "$verify_home/trusted.asc" >/dev/null 2>&1 || die "Could not import trusted public key"
-    status="$(GNUPGHOME="$verify_home" git -C "$UPD_DIR/repo" -c gpg.program=gpg verify-commit --raw HEAD 2>&1 || true)"
+
+    if [[ -n "$CAELESTIA_RELEASE_SIGNER" ]]; then
+        [[ "$CAELESTIA_RELEASE_SIGNER" =~ ^[0-9A-Fa-f]{40}$ ]] || {
+            rm -rf -- "$verify_home"
+            die "CAELESTIA_RELEASE_SIGNER must be a full 40-character fingerprint"
+        }
+        anchor="$(printf '%s' "$CAELESTIA_RELEASE_SIGNER" | tr '[:lower:]' '[:upper:]')"
+        anchor_kind="maintainer release-signing key"
+        key_path="$repo/.github/release-signing-key.asc"
+        [[ -f "$key_path" ]] || {
+            rm -rf -- "$verify_home"
+            die "Release signer is pinned but .github/release-signing-key.asc is missing from the update"
+        }
+    else
+        anchor="$WEB_FLOW_FINGERPRINT"
+        anchor_kind="GitHub web-flow key"
+        key_path="$verify_home/trusted.asc"
+        curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$key_path" || {
+            rm -rf -- "$verify_home"
+            die "Could not download trusted public key"
+        }
+    fi
+
+    fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$key_path" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
+    grep -Fxq "$anchor" <<< "$fingerprints" || {
+        rm -rf -- "$verify_home"
+        die "Trusted signer fingerprint mismatch ($anchor_kind)"
+    }
+    gpg --homedir "$verify_home" --batch --import "$key_path" >/dev/null 2>&1 || {
+        rm -rf -- "$verify_home"
+        die "Could not import trusted public key"
+    }
+
+    # Prefer an annotated signed tag over the commit it points at.
+    status=""
+    if [[ "${TARGET_KIND:-}" == "tag" && -n "${TARGET_REF:-}" ]] \
+        && [[ "$(git -C "$repo" cat-file -t "$TARGET_REF" 2>/dev/null)" == "tag" ]]; then
+        status="$(GNUPGHOME="$verify_home" git -C "$repo" -c gpg.program=gpg verify-tag --raw "$TARGET_REF" 2>&1 || true)"
+    fi
+    if ! grep -q 'VALIDSIG' <<< "$status"; then
+        status="$(GNUPGHOME="$verify_home" git -C "$repo" -c gpg.program=gpg verify-commit --raw HEAD 2>&1 || true)"
+    fi
+
     valid_fingerprint="$(printf '%s\n' "$status" | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
     rm -rf -- "$verify_home"
-    [[ "$valid_fingerprint" == "$trusted_fingerprint" ]] || \
-        die "Refusing untrusted update commit. Set CAELESTIA_ALLOW_UNVERIFIED_UPDATE=1 only for a trusted local test."
+    [[ "$valid_fingerprint" == "$anchor" ]] || \
+        die "Refusing untrusted update ($anchor_kind). Set CAELESTIA_ALLOW_UNVERIFIED_UPDATE=1 only for a trusted local test."
+    info "Update signature verified against the $anchor_kind."
 }
 
 run_stage() {
@@ -39,19 +97,24 @@ run_stage() {
     fi
 }
 
+# Canonical repository. Keep the default in sync with REPO in
+# .github/version.env; check_repo_identity.py gates that in CI.
+CAELESTIA_REPO="${CAELESTIA_REPO:-Vinax89/caelestia-dots-kde}"
+CAELESTIA_REPO_URL="https://github.com/${CAELESTIA_REPO}.git"
+
 BRANCH="${1:-main}"
 TARGET_REF="${2:-}"
 if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "dev" ]; then
     echo "Warning: Branch '$BRANCH' is not allowed. Falling back to 'main'."
     BRANCH="main"
 fi
-if ! git ls-remote --exit-code --heads https://github.com/ladybug-me/caelestia-dots-kde.git "$BRANCH" >/dev/null 2>&1; then
+if ! git ls-remote --exit-code --heads "$CAELESTIA_REPO_URL" "$BRANCH" >/dev/null 2>&1; then
     echo "Warning: Branch '$BRANCH' does not exist on remote. Falling back to 'main'."
     BRANCH="main"
 fi
 
 if [ -n "$TARGET_REF" ]; then
-    if git ls-remote --exit-code --tags https://github.com/ladybug-me/caelestia-dots-kde.git "$TARGET_REF" >/dev/null 2>&1; then
+    if git ls-remote --exit-code --tags "$CAELESTIA_REPO_URL" "$TARGET_REF" >/dev/null 2>&1; then
         TARGET_KIND="tag"
     elif [ "$BRANCH" = "dev" ] && [[ "$TARGET_REF" =~ ^[0-9a-f]{7,40}$ ]]; then
         # Dev branch supports installing/reverting to a specific commit from the
@@ -153,7 +216,8 @@ if [ "$EUID" -ne 0 ]; then
     # (or the wrapper above) can resolve the askpass helper without needing
     # to re-discover it in a non-tty child.
     if command -v ksshaskpass &> /dev/null; then
-        export SUDO_ASKPASS="$(command -v ksshaskpass)"
+        SUDO_ASKPASS="$(command -v ksshaskpass)"
+        export SUDO_ASKPASS
     fi
 
     # Background keepalive: refresh the sudo timestamp every 30 seconds
@@ -180,19 +244,20 @@ echo "PROGRESS: 1/5: Fetching updates from GitHub..."
 info "Checking for local repository cache..."
 
 # --- Safe Backup Directory outside of the git repo ---
-export BACKUP_DIR="$UPD_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="$UPD_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+export BACKUP_DIR
 mkdir -p "$BACKUP_DIR"
 
 if [[ ! -d "$UPD_DIR/repo/.git" ]]; then
     mkdir -p "$UPD_DIR/repo"
-    cd "$UPD_DIR/repo"
+    cd "$UPD_DIR/repo" || die "Could not enter $UPD_DIR/repo"
     git init -q
-    git remote add origin https://github.com/ladybug-me/caelestia-dots-kde.git
+    git remote add origin "$CAELESTIA_REPO_URL"
 else
-    cd "$UPD_DIR/repo"
+    cd "$UPD_DIR/repo" || die "Could not enter $UPD_DIR/repo"
     git reset --hard -q HEAD || die "Failed to reset repository state"
     git clean -fdx -q
-    git remote set-url origin https://github.com/ladybug-me/caelestia-dots-kde.git
+    git remote set-url origin "$CAELESTIA_REPO_URL"
 fi
 
 # Always enforce sparse-checkout rules
@@ -230,13 +295,21 @@ else
     git reset --hard -q origin/"$BRANCH" || die "Failed to apply updates"
 fi
 
+# Verify the superproject BEFORE touching submodules.
+#
+# Submodule init reads .gitmodules from the checkout and fetches from three
+# third-party hosts. Doing that before the signature check meant acting on an
+# unverified .gitmodules -- writing content from URLs an unverified commit
+# chose. Nothing was executed, but the verification gap was real, and update.sh
+# already gets this order right.
+verify_checkout
+
 # Initialize submodules
 if [[ -f "$UPD_DIR/repo/.gitmodules" ]]; then
     info "Initializing all submodule..."
     git submodule sync --recursive >/dev/null 2>&1 || true
     git submodule update --init --recursive --force >/dev/null 2>&1 || die "Failed to initialize all submodules"
 fi
-verify_checkout
 
 [[ -f "$UPD_DIR/repo/src/dots/starship.toml" ]] || die "Missing src/dots content after update"
 

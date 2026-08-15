@@ -57,11 +57,19 @@ PageBase {
         }
 
         ToggleRow {
-            last: true
             text: qsTr("Enable Tool Usage")
             subtext: qsTr("Lets Ollama / Claude API models use built-in tools (web search, screenshots…). Claude Code has its own agent tools and ignores this.")
             checked: GlobalConfig.ai.enableCelestialMode
             onToggled: GlobalConfig.ai.enableCelestialMode = checked
+        }
+
+        ToggleRow {
+            last: true
+            text: qsTr("Allow system actions")
+            subtext: qsTr("Off by default. Lets the assistant launch applications and run caelestia commands. The assistant reads web pages, and a page can contain instructions aimed at the model — leave this off unless you need it.")
+            enabled: GlobalConfig.ai.enableCelestialMode
+            checked: GlobalConfig.ai.allowSystemActions
+            onToggled: GlobalConfig.ai.allowSystemActions = checked
         }
 
         SectionHeader {

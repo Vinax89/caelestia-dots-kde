@@ -19,7 +19,7 @@ Item {
             "/ColorPicker",
             "org.kde.kwin.ColorPicker.pick"
         ]
-        
+
         stdout: StdioCollector {
             id: outCollector
 
@@ -35,10 +35,10 @@ Item {
                     // Convert to hex (ignoring alpha to get #RRGGBB)
                     let hex = (decimalColor & 0x00FFFFFF).toString(16).padStart(6, '0');
                     let colorCode = "#" + hex.toUpperCase();
-                    
+
                     // Copy to clipboard using wl-copy
-                    Quickshell.execDetached(["bash", "-c", `echo -n '${colorCode}' | wl-copy`]);
-                    
+                    Quickshell.execDetached(["bash", "-c", 'printf %s "$1" | wl-copy', "--", colorCode]);
+
                     // Notify user
                     Quickshell.execDetached(["notify-send", "Color Picker", `Color ${colorCode} copied to clipboard!`]);
                 }

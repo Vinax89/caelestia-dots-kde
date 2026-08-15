@@ -15,6 +15,23 @@ Singleton {
     property bool needsStop
     property bool needsPause
 
+    // gpu-screen-recorder (via `caelestia record`) links against an OpenCV
+    // SONAME the distro may not ship. Older installs papered over that by
+    // symlinking libopencv_*.so.413 next to the real libraries in /usr/lib,
+    // which lies to the dynamic linker for every process on the machine.
+    // 08-build-shell.sh now puts those compat links in a private directory
+    // instead, and this is what actually scopes them to the recorder.
+    readonly property string compatLibDir: Quickshell.env("CAELESTIA_COMPAT_LIB_DIR")
+        || (Quickshell.env("HOME") + "/.local/lib/caelestia/compat")
+
+    // ["caelestia", "record", ...] with the compat directory prepended to
+    // LD_LIBRARY_PATH, which child processes inherit.
+    function recordCommand(extraArgs = []): list<string> {
+        const existing = Quickshell.env("LD_LIBRARY_PATH") || "";
+        const libPath = existing ? root.compatLibDir + ":" + existing : root.compatLibDir;
+        return ["env", "LD_LIBRARY_PATH=" + libPath, "caelestia", "record"].concat(extraArgs);
+    }
+
     function start(extraArgs = []): void {
         needsStart = true;
         startArgs = extraArgs;
@@ -69,14 +86,14 @@ Singleton {
 
             if (isRunning) {
                 if (root.needsStop) {
-                    Quickshell.execDetached(["caelestia", "record"]);
+                    Quickshell.execDetached(root.recordCommand());
                     confirmTimer.restart();
                 } else if (root.needsPause) {
-                    Quickshell.execDetached(["caelestia", "record", "-p"]);
+                    Quickshell.execDetached(root.recordCommand(["-p"]));
                     props.paused = !props.paused;
                 }
             } else if (root.needsStart) {
-                Quickshell.execDetached(["caelestia", "record", ...root.startArgs]);
+                Quickshell.execDetached(root.recordCommand(root.startArgs));
                 confirmTimer.restart();
             }
 

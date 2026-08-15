@@ -122,7 +122,7 @@ jobs:
           CCACHE_DISABLE: 1
 
       - name: Build installer
-        run: cmake --build installer/build -- -j$(nproc)
+        run: cmake --build installer/build -- -j"$(nproc)"
 
       - name: Verify binary exists
         run: test -f installer/build/caelestia-install && echo "Installer binary OK"
@@ -161,8 +161,10 @@ jobs:
           echo "::group::flake8"
           # Only check our own Python scripts, not vendored/pre-existing ones
           # (shell/scripts holds the QML linter and other repo tooling).
+          # orion_search.py is no longer excluded: its bare except is gone and
+          # it lints clean, so the AI assistant's network code is now gated.
           flake8 .github/scripts/ shell/scripts/ \
-            --exclude 'orion_search.py,menu_perf_stats.py' \
+            --exclude 'menu_perf_stats.py' \
             --max-line-length=120 \
             --extend-ignore=E402,W503,E501,E203 \
             --count \
@@ -221,6 +223,10 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          # Required: the hygiene script diffs against the merge base with the
+          # target branch. At depth 1 that diff is impossible and the gate
+          # silently passed on every pull request.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -253,6 +259,7 @@ jobs:
           globs: |
             .github/CONTRIBUTING.md
             .github/docs/update_trust.md
+            .github/docs/ai_assistant_trust.md
             tests/integration/README.md
 
   # ═══════════════════════════════════════════════════════════
@@ -343,7 +350,7 @@ jobs:
           sudo mv /tmp/actionlint /usr/local/bin/actionlint
 
       - name: Lint workflow files
-        run: actionlint -shellcheck= -color
+        run: actionlint -color
 
   # ═══════════════════════════════════════════════════════════
   # Job 13: Wayland static lifetime - catch exit-time SIGSEGVs
@@ -412,10 +419,31 @@ jobs:
         run: cmake --build shell/build --parallel
 
   # ═══════════════════════════════════════════════════════════
+  # Job 15: Repository identity - hardcoded slugs vs version.env
+  # ═══════════════════════════════════════════════════════════
+  # The updater and update checker run before any checkout exists, so they
+  # carry a compiled-in repository slug. This job is what keeps that default
+  # in sync with REPO in .github/version.env.
+  repo-identity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.x'
+
+      - name: Check repository identity consistency
+        run: python3 .github/scripts/check_repo_identity.py
+
+  # ═══════════════════════════════════════════════════════════
   # Final gate: require all non-skippable jobs to pass
   # ═══════════════════════════════════════════════════════════
   validate-gate:
     needs:
+      - installer-integration
       - shell-quality
       - qml-lint
       - cpp-build
@@ -430,15 +458,17 @@ jobs:
       - actionlint
       - wayland-static-lifetime
       - shell-build
+      - repo-identity
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Report status
         run: |
-          echo "## Validate Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Validate Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
           declare -A job_results
+          job_results[installer-integration]="${{ needs.installer-integration.result }}"
           job_results[shell-quality]="${{ needs.shell-quality.result }}"
           job_results[qml-lint]="${{ needs.qml-lint.result }}"
           job_results[cpp-build]="${{ needs.cpp-build.result }}"
@@ -453,25 +483,23 @@ jobs:
           job_results[actionlint]="${{ needs.actionlint.result }}"
           job_results[wayland-static-lifetime]="${{ needs.wayland-static-lifetime.result }}"
           job_results[shell-build]="${{ needs.shell-build.result }}"
+          job_results[repo-identity]="${{ needs.repo-identity.result }}"
 
           all_passed=true
-          soft_fail_jobs=""
           for job in "${!job_results[@]}"; do
             result="${job_results[$job]}"
             if [[ "$result" == "success" ]]; then
-              echo "- [PASS] **${job}**" >> $GITHUB_STEP_SUMMARY
+              echo "- [PASS] **${job}**" >> "$GITHUB_STEP_SUMMARY"
             elif [[ "$result" == "skipped" ]]; then
-              echo "- [SKIP] **${job}**" >> $GITHUB_STEP_SUMMARY
-            elif [[ " $soft_fail_jobs " == *" $job "* ]]; then
-              echo "- [WARN] **${job}** - pre-existing issues (not blocking)" >> $GITHUB_STEP_SUMMARY
+              echo "- [SKIP] **${job}**" >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "- [FAIL] **${job}** - ${result}" >> $GITHUB_STEP_SUMMARY
+              echo "- [FAIL] **${job}** - ${result}" >> "$GITHUB_STEP_SUMMARY"
               all_passed=false
             fi
           done
 
           if [[ "$all_passed" != "true" ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Some checks failed. Please review the job logs above." >> $GITHUB_STEP_SUMMARY
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Some checks failed. Please review the job logs above." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

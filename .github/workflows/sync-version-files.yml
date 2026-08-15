@@ -38,6 +38,8 @@ jobs:
           sed -i -E '0,/set\(VERSION "v[0-9]+\.[0-9]+\.[0-9]+"\)/s//set(VERSION "'"$VERSION"'")/' shell/CMakeLists.txt
 
       - name: Commit Synced Files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -46,9 +48,15 @@ jobs:
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Commit via the Contents API so the result is web-flow signed. A
+          # locally-made runner commit is unsigned, and the updater's signature
+          # check rejects unsigned commits at a branch tip.
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/shell/CMakeLists.txt?ref=${GITHUB_REF_NAME}" --jq .sha)"
 
-          git add shell/CMakeLists.txt
-          git commit -m "chore: sync version files to $VERSION"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/shell/CMakeLists.txt" \
+            -f message="chore: sync version files to $VERSION" \
+            -f content="$(base64 -w0 shell/CMakeLists.txt)" \
+            -f sha="$current_sha" \
+            -f branch="${GITHUB_REF_NAME}" >/dev/null
+
+          echo "Committed version sync to ${GITHUB_REF_NAME} via the API (web-flow signed)."

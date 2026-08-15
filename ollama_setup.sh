@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Exit on error
-set -e
+set -euo pipefail
 
 # Harmonious HSL colors for elegant premium styling output
 BLUE='\033[0;34m'
@@ -19,22 +19,115 @@ section() {
 
 section "Ollama AI Setup for Caelestia"
 
-# 1. Install Ollama from a downloaded temporary script. The upstream
-# installer remains remote code; pin and verify it before production use.
+# 1. Install Ollama.
+#
+# Prefer the distribution package: it is signed by the distro, tracked by the
+# package manager, and removable. Only when no package exists do we fall back
+# to piping the vendor's install script into a root shell, and then only with
+# explicit confirmation.
+#
+# The previous version had no packaged path at all, and demanded
+# OLLAMA_INSTALL_SHA256 with no published value to compare against -- leaving
+# two options: don't run it, or hash the same download it was meant to
+# authenticate. Neither verifies anything.
 section "Step 1/4 - Install Ollama"
+
+detect_base_distro() {
+    if [ -f /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        case "$ID" in
+            arch|cachyos|endeavouros|manjaro|artix) echo arch; return ;;
+            fedora|nobara|bazzite|rhel|centos|almalinux|rocky) echo fedora; return ;;
+            debian|ubuntu|pop|mint|kali|raspbian|elementary|zorin|deepin|devuan) echo debian; return ;;
+        esac
+        case "${ID_LIKE:-}" in
+            *arch*) echo arch; return ;;
+            *fedora*|*rhel*) echo fedora; return ;;
+            *debian*|*ubuntu*) echo debian; return ;;
+        esac
+    fi
+    if command -v pacman >/dev/null 2>&1; then echo arch
+    elif command -v dnf >/dev/null 2>&1; then echo fedora
+    elif command -v apt-get >/dev/null 2>&1; then echo debian
+    else echo unknown
+    fi
+}
+
+install_ollama_from_repo() {
+    case "$(detect_base_distro)" in
+        arch)
+            pacman -Si ollama >/dev/null 2>&1 || return 1
+            echo -e "${BLUE}Installing ollama from the Arch repositories...${NC}"
+            sudo pacman -S --needed --noconfirm ollama
+            ;;
+        fedora)
+            dnf info ollama >/dev/null 2>&1 || return 1
+            echo -e "${BLUE}Installing ollama from the Fedora repositories...${NC}"
+            sudo dnf install -y ollama
+            ;;
+        debian)
+            apt-cache show ollama >/dev/null 2>&1 || return 1
+            echo -e "${BLUE}Installing ollama from the APT repositories...${NC}"
+            sudo apt-get update && sudo apt-get install -y ollama
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+if command -v ollama >/dev/null 2>&1; then
+    echo -e "${GREEN}Ollama is already installed ($(command -v ollama)).${NC}"
+elif install_ollama_from_repo; then
+    echo -e "${GREEN}Ollama installed from your distribution's repositories.${NC}"
+else
+
+echo -e "${YELLOW}No packaged Ollama found for this distribution.${NC}"
+echo -e "${YELLOW}The only remaining option is the vendor's install script, run as root.${NC}"
+echo
 tmp_installer="$(mktemp)"
 trap 'rm -f "$tmp_installer"' EXIT
 curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp_installer" https://ollama.com/install.sh
-: "${OLLAMA_INSTALL_SHA256:?Set OLLAMA_INSTALL_SHA256 to the vendor-published SHA-256 before running this installer}"
-if ! command -v sha256sum >/dev/null 2>&1; then
-    echo "sha256sum is required to verify the Ollama installer." >&2
-    exit 1
+
+actual_sha=""
+if command -v sha256sum >/dev/null 2>&1; then
+    actual_sha="$(sha256sum "$tmp_installer" | cut -d' ' -f1)"
 fi
-printf '%s  %s\n' "$OLLAMA_INSTALL_SHA256" "$tmp_installer" | sha256sum --check --status || {
-    echo "Ollama installer checksum verification failed." >&2
-    exit 1
-}
+
+if [ -n "${OLLAMA_INSTALL_SHA256:-}" ]; then
+    if [ -z "$actual_sha" ]; then
+        echo -e "${RED}sha256sum is required to verify OLLAMA_INSTALL_SHA256.${NC}" >&2
+        exit 1
+    fi
+    if [ "$actual_sha" != "$OLLAMA_INSTALL_SHA256" ]; then
+        echo -e "${RED}Ollama installer checksum mismatch.${NC}" >&2
+        echo "  expected: $OLLAMA_INSTALL_SHA256" >&2
+        echo "  actual:   $actual_sha" >&2
+        exit 1
+    fi
+    echo -e "${GREEN}Installer matches the pinned checksum.${NC}"
+else
+    echo -e "${YELLOW}About to run the official Ollama install script as root.${NC}"
+    echo -e "  source:   https://ollama.com/install.sh"
+    echo -e "  saved to: $tmp_installer"
+    echo -e "  sha256:   ${actual_sha:-<sha256sum unavailable>}"
+    echo -e "  size:     $(wc -c < "$tmp_installer") bytes"
+    echo
+    echo -e "Review it first if you like:  ${BLUE}less $tmp_installer${NC}"
+    echo -e "To skip this prompt in future, pin the hash above:"
+    echo -e "  ${BLUE}OLLAMA_INSTALL_SHA256=${actual_sha:-<hash>} ./ollama_setup.sh${NC}"
+    echo
+    read -r -p "Run the Ollama install script now? [y/N]: " _ollama_confirm
+    case "${_ollama_confirm,,}" in
+        y|yes) ;;
+        *) echo -e "${YELLOW}Skipping Ollama installation.${NC}"; exit 0 ;;
+    esac
+fi
+
 sh "$tmp_installer"
+
+fi  # end: packaged install unavailable
 
 # 2. Enable and start the systemd service
 section "Step 2/4 - Enable and Start Ollama Daemon"

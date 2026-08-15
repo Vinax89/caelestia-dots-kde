@@ -47,6 +47,55 @@ string shell_quote(const string& value) {
     return quoted + "'";
 }
 
+// Overwrite a secret in place before it is freed. A plain memset here is a
+// classic dead-store elimination target, so go through a volatile pointer.
+void secure_wipe(string& secret) {
+    volatile char* p = const_cast<volatile char*>(secret.data());
+    for (size_t i = 0; i < secret.size(); ++i) {
+        p[i] = '\0';
+    }
+    secret.clear();
+}
+
+bool setup_sudo_environment();
+
+// Verify `pw` against sudo and, on success, set up the private runtime.
+//
+// Returns true when the caller should proceed. On failure it updates
+// `attempts` and `error_msg`, and exits the process after three tries. The
+// password is wiped on every exit path -- previously it was left in the heap
+// for the remainder of the install.
+bool try_password(string& pw, int& attempts, string& error_msg) {
+    FILE* pipe = popen("/usr/bin/sudo -S true 2>/dev/null", "w");
+    if (!pipe) {
+        error_msg = "Could not invoke sudo.";
+        secure_wipe(pw);
+        return false;
+    }
+
+    fprintf(pipe, "%s\n", pw.c_str());
+    fflush(pipe);
+    const int status = pclose(pipe);
+    const bool accepted = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    secure_wipe(pw);
+
+    if (accepted) {
+        if (setup_sudo_environment())
+            return true;
+        error_msg = "Failed to create secure sudo runtime.";
+        return false;
+    }
+
+    attempts++;
+    if (attempts >= 3) {
+        Term::restore();
+        cout << "Too many incorrect password attempts.\n";
+        exit(1);
+    }
+    error_msg = "Incorrect password, please try again. (" + to_string(attempts) + "/3)";
+    return false;
+}
+
 bool setup_sudo_environment() {
     const char* runtimeBase = getenv("XDG_RUNTIME_DIR");
     string templatePath = string(runtimeBase && *runtimeBase ? runtimeBase : "/tmp")
@@ -78,11 +127,11 @@ bool setup_sudo_environment() {
     const string pidCommand = "systemd-inhibit --what=idle:sleep --who='Caelestia Installer' "
         "--why='Installation in progress' sleep 86400 >/dev/null 2>&1 & echo $! > "
         + shell_quote(inhibitPid);
-    system(pidCommand.c_str());
+    run_shell(pidCommand);
     const string cookieCommand = "qdbus6 org.freedesktop.ScreenSaver /ScreenSaver "
         "org.freedesktop.ScreenSaver.Inhibit 'Caelestia Installer' 'Installation in progress' >"
         + shell_quote(inhibitCookie) + " 2>/dev/null";
-    system(cookieCommand.c_str());
+    run_shell(cookieCommand);
     return true;
 }
 
@@ -115,7 +164,7 @@ namespace UI {
 
         int art_width = 0;
         for (const auto& line : art) {
-            if (line.length() > art_width) art_width = line.length();
+            if (static_cast<int>(line.length()) > art_width) art_width = static_cast<int>(line.length());
         }
         int art_height = art.size();
 
@@ -139,6 +188,8 @@ namespace UI {
             cout << Draw::to(top + i, left);
             cout << art[i] << flush;
             if (!Input::get().empty()) return;
+            if (speed_ms > 0)
+                this_thread::sleep_for(chrono::milliseconds(speed_ms));
         }
         cout << Draw::reset;
 
@@ -239,26 +290,8 @@ while (!g_quit) {
                 Draw::text(left + 2, top + 5, "Verifying...                             ", Draw::color("yellow"));
                 cout << Draw::sync_end() << flush;
 
-                FILE* pipe = popen("/usr/bin/sudo -S true 2>/dev/null", "w");
-                if (pipe) {
-                    fprintf(pipe, "%s\n", pw.c_str());
-                    fflush(pipe);
-                    int status = pclose(pipe);
-                    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                        if (setup_sudo_environment())
-                            return true;
-                        error_msg = "Failed to create secure sudo runtime.";
-                    } else {
-                        attempts++;
-                        if (attempts >= 3) {
-                            Term::restore();
-                            cout << "Too many incorrect password attempts.\n";
-                            exit(1);
-                        }
-                        error_msg = "Incorrect password, please try again. (" + to_string(attempts) + "/3)";
-                        pw.clear();
-                    }
-                }
+                if (try_password(pw, attempts, error_msg))
+                    return true;
             } else if (key == "backspace" || (key.length() == 1 && (key[0] == '\x7f' || key[0] == '\x08'))) { // Backspace
                 if (!pw.empty()) pw.pop_back();
                 error_msg.clear();
@@ -287,26 +320,8 @@ while (!g_quit) {
                         cout << Draw::sync_start();
                         Draw::text(left + 2, top + 5, "Verifying...                             ", Draw::color("yellow"));
                         cout << Draw::sync_end() << flush;
-                        FILE* pipe = popen("/usr/bin/sudo -S true 2>/dev/null", "w");
-                        if (pipe) {
-                            fprintf(pipe, "%s\n", pw.c_str());
-                            fflush(pipe);
-                            int status = pclose(pipe);
-                            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                                if (setup_sudo_environment())
-                                    return true;
-                                error_msg = "Failed to create secure sudo runtime.";
-                            } else {
-                                attempts++;
-                                if (attempts >= 3) {
-                                    Term::restore();
-                                    cout << "Too many incorrect password attempts.\n";
-                                    exit(1);
-                                }
-                                error_msg = "Incorrect password, please try again. (" + to_string(attempts) + "/3)";
-                                pw.clear();
-                            }
-                        }
+                        if (try_password(pw, attempts, error_msg))
+                            return true;
                     }
                 }
             }
@@ -340,7 +355,7 @@ while (!g_quit) {
 
             for (size_t i = 0; i < options.size(); i++) {
                 int opt_y = top + 4 + i;
-                if (i == selected) {
+                if (i == static_cast<size_t>(selected)) {
                     Draw::text(left + 2, opt_y, " > " + options[i], Draw::color("green"));
                 } else {
                     Draw::text(left + 2, opt_y, "   " + options[i]);
@@ -350,7 +365,7 @@ while (!g_quit) {
 
             string key = Input::wait_key();
             if (key == "KEY_up") { if (selected > 0) selected--; }
-            else if (key == "KEY_down") { if (selected < options.size() - 1) selected++; }
+            else if (key == "KEY_down") { if (selected + 1 < static_cast<int>(options.size())) selected++; }
             else if (key == "enter") {
                 if (options[selected] == "Arch-based") return "arch";
                 if (options[selected] == "Fedora") return "fedora";

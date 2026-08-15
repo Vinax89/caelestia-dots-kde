@@ -2,10 +2,14 @@
 """
 Generate a contributor stats snippet for the README.
 
-Queries the GitHub API for the ladybug-me/caelestia-dots-kde repository and
-counts issues and pull requests authored by each contributor.  Outputs a
+Queries the GitHub API for the repository named by REPO in .github/version.env
+and counts issues and pull requests authored by each contributor.  Outputs a
 Markdown table suitable for pasting between the <!-- contributors-start -->
 and <!-- contributors-end --> markers in .github/README.md.
+
+Requires GITHUB_TOKEN (or GH_TOKEN) in the environment: unauthenticated calls
+share a 60-requests-per-hour pool across the whole runner fleet, which used to
+truncate the table silently and commit the truncated version.
 
 Usage:
     python3 .github/scripts/contributors.py                    # print table only
@@ -20,12 +24,36 @@ import sys
 import urllib.request
 from collections import defaultdict
 
-REPO = "ladybug-me/caelestia-dots-kde"
+_VERSION_ENV = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), os.pardir, "version.env"
+)
+
+
+def _canonical_repo() -> str:
+    """Read REPO from .github/version.env, the single source of truth."""
+    try:
+        with open(_VERSION_ENV, encoding="utf-8") as handle:
+            for line in handle:
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "REPO":
+                    slug = value.strip().strip('"').strip("'")
+                    if slug:
+                        return slug
+    except OSError:
+        pass
+    return "Vinax89/caelestia-dots-kde"
+
+
+REPO = _canonical_repo()
 API_BASE = f"https://api.github.com/repos/{REPO}"
+
+_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
 HEADERS = {
     "User-Agent": "caelestia-contributors-script",
     "Accept": "application/vnd.github+json",
 }
+if _TOKEN:
+    HEADERS["Authorization"] = f"Bearer {_TOKEN}"
 
 # Accounts to exclude from the contributor list (bots, maintainers who prefer
 # not to appear in the counts, etc.).
@@ -54,8 +82,9 @@ def api_fetch(url: str) -> list[dict]:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:
-            print(f"[warn] Failed to fetch page {page}: {e}", file=sys.stderr)
-            break
+            # Never degrade to a partial result: the caller may be about to
+            # commit this table to the README.
+            raise RuntimeError(f"GitHub API request failed for page {page}: {e}") from e
 
         if not data:
             break
@@ -221,11 +250,23 @@ def main():
     )
     args = parser.parse_args()
 
-    contributors = collect_contributors()
+    if args.update_readme and not _TOKEN:
+        print(
+            "Refusing to rewrite the README without GITHUB_TOKEN: unauthenticated "
+            "API calls are rate limited and would commit a truncated table.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        contributors = collect_contributors()
+    except RuntimeError as exc:
+        print(f"[error] {exc}", file=sys.stderr)
+        return 1
 
     if args.json:
         json.dump(contributors, sys.stdout, indent=2)
-        return
+        return 0
 
     table = format_markdown(contributors)
     if args.update_readme:
@@ -234,7 +275,8 @@ def main():
         update_readme(readme_path, table)
     else:
         print(table)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

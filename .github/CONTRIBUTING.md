@@ -6,7 +6,7 @@ contributing.
 ## Quick start
 
 ```bash
-git clone https://github.com/ladybug-me/caelestia-dots-kde ~/caelestia-dots-kde
+git clone https://github.com/Vinax89/caelestia-dots-kde ~/caelestia-dots-kde
 cd ~/caelestia-dots-kde
 bash setup.sh          # Full install - do this at least once
 ```
@@ -106,6 +106,18 @@ cmake -B build && cmake --build build   # Compile
 - Use `Paths.runtimeTemp("filename")` for temporary files instead of hardcoded
   `/tmp/` paths.
 
+- Workflows triggered by `issues`, `issue_comment` or `pull_request_review_comment`
+  run in the base repository with a write token, and their input is text any
+  stranger can write. `moderator.yml` feeds that text to a third-party AI action
+  holding `issues: write` and `pull-requests: write`, so a crafted comment is a
+  prompt-injection surface against a privileged token. Pin such actions by
+  commit SHA (as it is), give them the narrowest permissions that work, and do
+  not add steps that act on model output without a human in the loop.
+
+- The shell's own AI assistant has a separate boundary, written up in
+  [AI assistant trust](docs/ai_assistant_trust.md). Read it before adding a tool
+  to the dispatcher.
+
 ## Architecture docs
 
 - [KWin port architecture](docs/kwin_port_architecture.md): C++ and QML APIs
@@ -115,5 +127,5 @@ cmake -B build && cmake --build build   # Compile
 ## Stuck?
 
 Open a
-[Discussion](https://github.com/ladybug-me/caelestia-dots-kde/discussions)
+[Discussion](https://github.com/Vinax89/caelestia-dots-kde/discussions)
 or ask in an issue. We are happy to help.

@@ -16,6 +16,7 @@ import py_compile
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -28,16 +29,23 @@ INSTALLER_ENTRYPOINTS = [
     Path("uninstall.sh"),
 ]
 
-VERSION_FILE_PATHS = [
-    ".github/version.env",                      # canonical source
-    "shell/CMakeLists.txt",                      # hardcoded fallback
-]
 
-# Files where the version string must appear
-VERSION_CONSUMERS = [
-    ("shell/CMakeLists.txt", r'set\(VERSION\s+"(v[\d.]+)"\)'),
-    (".github/version.env", r'^VERSION=(v[\d.]+)$'),
-]
+def read_version_env() -> dict[str, str]:
+    """Parse .github/version.env as key=value lines, ignoring comments.
+
+    The file carries more than VERSION now (REPO is the canonical repository
+    slug), so tests must not regex it as a single line.
+    """
+    values: dict[str, str] = {}
+    text = (ROOT / ".github" / "version.env").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        if sep:
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
 
 
 def repo_files(pattern: str) -> list[Path]:
@@ -169,10 +177,12 @@ class InstallerTests(unittest.TestCase):
 class VersionConsistencyTests(unittest.TestCase):
     def test_version_env_matches_cmake(self) -> None:
         """The canonical version in version.env must match shell/CMakeLists.txt."""
-        env_text = (ROOT / ".github" / "version.env").read_text(encoding="utf-8").strip()
-        env_match = re.match(r"^VERSION=(v[\d.]+)$", env_text)
-        self.assertIsNotNone(env_match, f"Invalid version.env format: {env_text!r}")
-        canonical_version = cast(re.Match, env_match).group(1)
+        env = read_version_env()
+        canonical_version = env.get("VERSION", "")
+        self.assertRegex(
+            canonical_version, r"^v[\d.]+$",
+            f"Invalid VERSION in version.env: {canonical_version!r}"
+        )
 
         cmake_text = (ROOT / "shell" / "CMakeLists.txt").read_text(encoding="utf-8")
         cmake_match = re.search(r'set\(VERSION\s+"(v?[\d.]+)"\)', cmake_text)
@@ -189,11 +199,29 @@ class VersionConsistencyTests(unittest.TestCase):
 
     def test_version_format_valid(self) -> None:
         """Version must follow semver-like vX.Y.Z format."""
-        env_text = (ROOT / ".github" / "version.env").read_text(encoding="utf-8").strip()
-        env_match = re.match(r"^VERSION=(v\d+\.\d+\.\d+)$", env_text)
-        self.assertIsNotNone(
-            env_match,
-            f"version.env must contain VERSION=vX.Y.Z, got: {env_text!r}"
+        env = read_version_env()
+        self.assertRegex(
+            env.get("VERSION", ""), r"^v\d+\.\d+\.\d+$",
+            f"version.env must contain VERSION=vX.Y.Z, got: {env.get('VERSION')!r}"
+        )
+
+    def test_repo_slug_present_and_valid(self) -> None:
+        """REPO is the canonical owner/name every runtime default is checked against."""
+        env = read_version_env()
+        self.assertRegex(
+            env.get("REPO", ""), r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$",
+            f"version.env must contain a valid REPO slug, got: {env.get('REPO')!r}"
+        )
+
+    def test_repo_identity_is_consistent(self) -> None:
+        """No tracked file may hardcode a different repository than REPO."""
+        result = subprocess.run(
+            [sys.executable, str(ROOT / ".github" / "scripts" / "check_repo_identity.py")],
+            capture_output=True, text=True, cwd=ROOT, check=False,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"check_repo_identity.py failed:\n{result.stdout}\n{result.stderr}"
         )
 
     def test_updater_scripts_have_current_commit_logic(self) -> None:
@@ -340,14 +368,28 @@ class SafetyContractTests(unittest.TestCase):
         self.assertIn("Skipping unsupported third-party Python patches", builder)
 
     def test_updater_rejects_unreviewed_updates(self) -> None:
-        result = subprocess.run(
-            [str(ROOT / "update.sh")],
-            cwd=ROOT,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(ROOT / ".test-home")},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        """The guard must fire before update.sh touches anything.
+
+        Run a copy in a throwaway directory rather than the checkout itself.
+        The original invoked ROOT/update.sh with cwd=ROOT, which was safe only
+        because the guard happens to be the third statement in the script -- if
+        it ever moved below the `cd`/lock/git lines, this test would start
+        running git operations against the working tree.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sandbox = Path(tmp)
+            shutil.copy2(ROOT / "update.sh", sandbox / "update.sh")
+            (sandbox / "home").mkdir()
+
+            result = subprocess.run(
+                [str(sandbox / "update.sh")],
+                cwd=sandbox,
+                env={"PATH": "/usr/bin:/bin", "HOME": str(sandbox / "home")},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Refusing mutable update", result.stderr)
 

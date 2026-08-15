@@ -56,12 +56,25 @@ def ok(msg: str) -> None:
 
 
 def is_text_file(filepath: Path) -> bool:
-    """Heuristic: try to read as UTF-8 text; if it fails, treat as binary."""
+    """Heuristic: a NUL byte in the first 8 KB means binary.
+
+    Sniffing a prefix rather than decoding the whole file matters in --all mode,
+    where the alternative is decoding every .mp4, .wav and .png in an 88 MB tree.
+    """
     try:
-        filepath.read_text(encoding="utf-8")
-        return True
-    except (UnicodeDecodeError, OSError):
+        with filepath.open("rb") as handle:
+            chunk = handle.read(8192)
+    except OSError:
         return False
+    if b"\0" in chunk:
+        return False
+    try:
+        chunk.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # Tolerate a multi-byte character split by the 8 KB read boundary; only
+        # a failure earlier in the buffer is evidence of a binary file.
+        return len(chunk) == 8192 and exc.start >= len(chunk) - 4
+    return True
 
 
 def should_skip(rel_path: str, patterns: list[str] | None = None) -> bool:
@@ -72,41 +85,73 @@ def should_skip(rel_path: str, patterns: list[str] | None = None) -> bool:
     return False
 
 
-def get_changed_files() -> list[str]:
-    """Get list of files changed in this PR/push, or empty list if no diff available."""
-    # For pull_request events, use GITHUB_BASE_REF
-    base_ref = os.environ.get("GITHUB_BASE_REF")
-    if not base_ref:
-        # For push events, try comparing with origin/main
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", "origin/main"],
-            capture_output=True, text=True, cwd=ROOT,
-        )
-        if result.returncode == 0:
-            base_ref = "main"
-
-    if base_ref:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
-            capture_output=True, text=True, cwd=ROOT,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
-            print(f"Checking {len(files)} changed file(s) against {base_ref}")
-            return files
-
-    # Push events may not have origin/main available in shallow checkouts.
-    # Check the commit itself instead of silently turning the quality gate off.
+def _git(*args: str) -> tuple[int, str]:
     result = subprocess.run(
-        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
-        capture_output=True, text=True, cwd=ROOT,
+        ["git", *args], capture_output=True, text=True, cwd=ROOT,
     )
-    if result.returncode == 0:
-        files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
-        print(f"Checking {len(files)} file(s) changed by HEAD")
-        return files
+    return result.returncode, result.stdout
 
-    raise RuntimeError("Unable to determine changed files for hygiene check")
+
+def _is_merge_commit(rev: str = "HEAD") -> bool:
+    code, out = _git("rev-list", "--no-walk", "--count", "--merges", rev)
+    return code == 0 and out.strip() == "1"
+
+
+def get_changed_files() -> list[str]:
+    """Return the files this PR or push changed.
+
+    Every strategy here must either produce a real file list or fall through to
+    the next one -- returning an empty list on failure silently disables the
+    gate, which is exactly what this function used to do on pull requests.
+    """
+    strategies: list[tuple[str, list[str]]] = []
+
+    # 1. Pull request: diff against the merge base with the target branch.
+    #    Requires fetch-depth: 0, which the workflow now sets.
+    base_ref = os.environ.get("GITHUB_BASE_REF")
+    if base_ref:
+        strategies.append(
+            (f"merge base with origin/{base_ref}",
+             ["diff", "--name-only", f"origin/{base_ref}...HEAD"])
+        )
+
+    # 2. Pull request without a usable remote ref: actions/checkout leaves HEAD
+    #    as the synthesized merge commit, whose first parent is the base tip.
+    #    `diff-tree HEAD` prints nothing at all for a merge, so it must not be
+    #    the fallback -- diffing against the first parent is what we want.
+    if _is_merge_commit():
+        strategies.append(
+            ("first parent of the merge commit",
+             ["diff", "--name-only", "HEAD^1", "HEAD"])
+        )
+
+    # 3. Push events: compare against the default branch when it is available.
+    code, _ = _git("rev-parse", "--verify", "origin/main")
+    if code == 0:
+        strategies.append(
+            ("origin/main", ["diff", "--name-only", "origin/main...HEAD"])
+        )
+
+    # 4. Single non-merge commit.
+    strategies.append(
+        ("HEAD commit", ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])
+    )
+
+    for label, argv in strategies:
+        code, out = _git(*argv)
+        if code != 0:
+            print(f"{YELLOW}[skip]{RESET} {label}: git exited {code}")
+            continue
+        files = [f.strip() for f in out.splitlines() if f.strip()]
+        if files:
+            print(f"Checking {len(files)} changed file(s) via {label}")
+            return files
+        print(f"{YELLOW}[skip]{RESET} {label}: produced no files")
+
+    raise RuntimeError(
+        "Unable to determine changed files for hygiene check. "
+        "Ensure the workflow checks out with fetch-depth: 0."
+    )
 
 
 TEXT_FILE_EXTS = {".qml", ".py", ".cpp", ".hpp", ".h", ".cmake", ".txt",
@@ -115,8 +160,6 @@ TEXT_FILE_EXTS = {".qml", ".py", ".cpp", ".hpp", ".h", ".cmake", ".txt",
                   ".desktop", ".service", ".timer", ".env", ".toml"}
 
 SPACE_ONLY_EXTS = {".qml", ".py", ".cpp", ".hpp", ".h"}
-
-NON_TEXT_DIRS = {"assets", "wallpapers", "sounds", "icons", "images"}
 
 
 def check_large_files(changed_files: list[str]) -> None:
@@ -155,6 +198,10 @@ def check_merge_conflicts(changed_files: list[str]) -> None:
 
         filepath = ROOT / rel_path
         if not filepath.is_file():
+            continue
+        # Conflict markers only appear in text we would ever merge; skipping by
+        # extension first avoids sniffing every asset in --all mode.
+        if filepath.suffix not in TEXT_FILE_EXTS:
             continue
         if not is_text_file(filepath):
             continue
@@ -197,7 +244,9 @@ def check_trailing_whitespace(changed_files: list[str]) -> None:
             continue
 
         for line_no, line in enumerate(lines, 1):
-            if line.rstrip() != line.rstrip("\n") and line.rstrip() != line:
+            # `lines` is already split on "\n", so a difference after rstrip()
+            # is trailing whitespace and nothing else.
+            if line.rstrip() != line:
                 error(f"Trailing whitespace: {rel_path}:{line_no}")
 
 

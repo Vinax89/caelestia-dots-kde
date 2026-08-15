@@ -11,6 +11,20 @@ Singleton {
         return localeName.startsWith("en_US");
     }
 
+    // Escape a value for interpolation *inside* a single-quoted shell word,
+    // i.e. the caller writes '...${StringUtils.shellSingleQuoteEscape(v)}...'
+    // and supplies the surrounding quotes itself.
+    //
+    // RegionSelection.qml has been calling this for a while, but it was never
+    // defined anywhere -- the binding threw a TypeError, so the command never
+    // resolved and image region detection silently did nothing.
+    //
+    // Prefer passing values as positional arguments where you can; this exists
+    // for the cases where the value has to sit inside a larger command string.
+    function shellSingleQuoteEscape(value: string): string {
+        return String(value).split("'").join("'\\''");
+    }
+
     function localizeEnglishSpelling(text: string): string {
         if (!text || text.length === 0)
             return text;
