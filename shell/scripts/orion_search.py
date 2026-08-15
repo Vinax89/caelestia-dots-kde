@@ -4,6 +4,38 @@ import argparse
 import urllib.request
 import urllib.parse
 import re
+from html.parser import HTMLParser
+
+class _VisibleTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._skip_tags = {"script", "style", "nav", "footer", "header", "aside"}
+        self._skip_depth = 0
+        self._in_body = False
+        self._chunks = []
+
+    def handle_starttag(self, tag, attrs):
+        t = tag.lower()
+        if t == "body":
+            self._in_body = True
+        if t in self._skip_tags:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag):
+        t = tag.lower()
+        if t in self._skip_tags and self._skip_depth > 0:
+            self._skip_depth -= 1
+        if t == "body":
+            self._in_body = False
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            # Prefer body content when present; fall back to full document text otherwise.
+            if self._in_body or not self._chunks:
+                self._chunks.append(data)
+
+    def get_text(self):
+        return " ".join(self._chunks)
 
 def search_web(query, page_num):
     try:
@@ -70,26 +102,13 @@ def read_webpage(url):
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         )
         html = urllib.request.urlopen(req, timeout=15).read().decode('utf-8', errors='ignore')
-        
-        # Remove script and style tags completely
-        html = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html, flags=re.IGNORECASE | re.DOTALL)
-        html = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', html, flags=re.IGNORECASE | re.DOTALL)
-        
-        # Remove header, footer, nav
-        html = re.sub(r'<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>', '', html, flags=re.IGNORECASE | re.DOTALL)
-        html = re.sub(r'<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>', '', html, flags=re.IGNORECASE | re.DOTALL)
-        html = re.sub(r'<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>', '', html, flags=re.IGNORECASE | re.DOTALL)
-        html = re.sub(r'<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>', '', html, flags=re.IGNORECASE | re.DOTALL)
-        
-        # Extract text from remaining body
-        body_match = re.search(r'<body[^>]*>(.*?)</body>', html, re.IGNORECASE | re.DOTALL)
-        if body_match:
-            body_html = body_match.group(1)
-        else:
-            body_html = html
-            
-        # Strip remaining tags
-        text = re.sub(r'<[^>]+>', ' ', body_html)
+
+        # Parse HTML safely and extract visible text while skipping non-content sections.
+        extractor = _VisibleTextExtractor()
+        extractor.feed(html)
+        extractor.close()
+
+        text = extractor.get_text()
         # Collapse whitespace
         text = re.sub(r'\s+', ' ', text).strip()
         
