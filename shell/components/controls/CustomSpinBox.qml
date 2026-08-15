@@ -19,14 +19,13 @@ RowLayout {
 
     signal valueModified(value: real)
 
-    spacing: Tokens.spacing.small
-
-    implicitWidth: 156
-
     function _round(v) {
         const decimals = root.step < 1 ? Math.max(1, Math.ceil(-Math.log10(root.step))) : 0;
         return Math.round(v * Math.pow(10, decimals)) / Math.pow(10, decimals);
     }
+
+    spacing: Tokens.spacing.small
+    implicitWidth: 156
 
     onValueChanged: {
         if (!root.isEditing) {
