@@ -85,16 +85,19 @@ jobs:
           echo "PREVIOUS_VERSION_TAG=$PREVIOUS_VERSION_TAG" >> $GITHUB_ENV
 
           if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-            echo "Tag $VERSION already exists; refusing to move it."
-            exit 1
+            echo "Tag $VERSION already exists; leaving it unchanged."
+            echo "RELEASE_CREATED=false" >> $GITHUB_ENV
+            exit 0
           fi
           # Lightweight tags deliberately inherit the verified commit signature.
           # The updater resolves the tag, then verifies that commit against the
           # pinned signer fingerprint before executing any checked-out code.
           git tag "$VERSION" "$GIT_COMMIT"
           git push origin "refs/tags/$VERSION"
+          echo "RELEASE_CREATED=true" >> $GITHUB_ENV
 
       - name: Create or Update Release
+        if: ${{ env.RELEASE_CREATED == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -135,6 +138,7 @@ jobs:
           fi
 
       - name: Update README Contributor Stats
+        if: ${{ env.RELEASE_CREATED == 'true' }}
         run: |
           set -euo pipefail
 
