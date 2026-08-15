@@ -76,13 +76,13 @@ Popup {
     Process {
         id: blockShortcutsProc
 
-        command: ["bash", "-c", "gdbus call --session --dest=org.kde.kglobalaccel --object-path=/kglobalaccel --method=org.kde.KGlobalAccel.blockGlobalShortcuts 'true'"]
+        command: ["gdbus", "call", "--session", "--dest=org.kde.kglobalaccel", "--object-path=/kglobalaccel", "--method=org.kde.KGlobalAccel.blockGlobalShortcuts", "true"]
     }
 
     Process {
         id: unblockShortcutsProc
 
-        command: ["bash", "-c", "gdbus call --session --dest=org.kde.kglobalaccel --object-path=/kglobalaccel --method=org.kde.KGlobalAccel.blockGlobalShortcuts 'false'"]
+        command: ["gdbus", "call", "--session", "--dest=org.kde.kglobalaccel", "--object-path=/kglobalaccel", "--method=org.kde.KGlobalAccel.blockGlobalShortcuts", "false"]
         onExited: {
             root.unblocked()
         }

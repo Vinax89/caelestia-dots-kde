@@ -34,6 +34,11 @@ Controls.Menu {
         return JSON.parse(JSON.stringify(entries));
     }
 
+    function commandArgv(command) {
+        const tokens = command.match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"])*"|'[^']*')+/g) || [];
+        return tokens.map(token => token.replace(/^(['"])(.*)\1$/, "$2").replace(/\\(.)/g, "$1"));
+    }
+
     function executeEntryByKey(key) {
         let entry = root.entryByKey[key];
         if (!entry) return;
@@ -65,7 +70,7 @@ Controls.Menu {
                 if (entry.command === "terminal") {
                     Quickshell.execDetached([...GlobalConfig.general.apps.terminal]);
                 } else {
-                    Quickshell.execDetached(typeof entry.command === "string" ? entry.command.split(" ") : entry.command);
+                    Quickshell.execDetached(typeof entry.command === "string" ? commandArgv(entry.command) : entry.command);
                 }
             }
         };

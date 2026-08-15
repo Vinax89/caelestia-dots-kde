@@ -131,7 +131,7 @@ Scope {
     Process {
         id: availProc
 
-        command: ["sh", "-c", "fprintd-list $USER"]
+        command: ["fprintd-list", Quickshell.env("USER")]
         onExited: code => { // qmllint disable signal-handler-parameters
             fprint.available = code === 0;
             fprint.checkAvail();

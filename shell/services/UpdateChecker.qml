@@ -54,7 +54,7 @@ Singleton {
         else currentBranch = clampBranch(currentBranch);
         checkingUpdates = true;
         checkClaudeCodeUpdate();
-        
+
         let bashCmd = `
     CURRENT_BRANCH="$1"
     LOCAL_COMMIT="$(cat \"$HOME/.config/quickshell/caelestia/.current_commit\" 2>/dev/null || true)"
@@ -351,7 +351,7 @@ fi
     Process {
         id: localCommitProcess
 
-        running: GlobalConfig.general.checkUpdates
+        running: false
         command: ["bash", "-c", "echo \"$(cat ~/.config/quickshell/caelestia/.current_commit 2>/dev/null)|$(cat ~/.config/quickshell/caelestia/.update_branch 2>/dev/null)\""]
         stdout: StdioCollector {
             onStreamFinished: {
@@ -364,6 +364,14 @@ fi
                 root.checkUpdates();
             }
         }
+    }
+
+    Timer {
+        id: startupCheckTimer
+        interval: 10000
+        running: GlobalConfig.general.checkUpdates
+        repeat: false
+        onTriggered: localCommitProcess.running = true
     }
 
     Process {
@@ -384,7 +392,7 @@ fi
                     let parsedVersionSummaryMode = root.currentBranch === "main";
                     let parsedLocalCommitFull = "";
                     root.availableBranches = ["main", "dev"];
-                    
+
                     for (let i = 0; i < lines.length; i++) {
                         const line = lines[i].trim();
                         if (line === "") continue;
@@ -538,7 +546,7 @@ fi
                     root.pendingCount = parsedPendingCount;
                     root.hasUpdate = parsedHasUpdate;
                     root.versionSummaryMode = parsedVersionSummaryMode;
-                    
+
                     if (root.hasUpdate && prevCount === 0 && root.loaded) {
                         const summaryText = root.currentBranch === "main"
                             ? qsTr("Main branch version update available")

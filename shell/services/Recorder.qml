@@ -35,6 +35,8 @@ Singleton {
         Quickshell.execDetached(["spectacle", "-R", "r"]);
     }
 
+    Component.onCompleted: checkProc.running = true
+
     PersistentProperties {
         id: props
 
@@ -58,19 +60,24 @@ Singleton {
                 props.elapsed = 0;
                 props.paused = false;
             }
-            
+
             root._wasRunning = isRunning;
             props.running = isRunning;
+
+            if (isRunning && !exitWatcher.running)
+                exitWatcher.running = true;
 
             if (isRunning) {
                 if (root.needsStop) {
                     Quickshell.execDetached(["caelestia", "record"]);
+                    confirmTimer.restart();
                 } else if (root.needsPause) {
                     Quickshell.execDetached(["caelestia", "record", "-p"]);
                     props.paused = !props.paused;
                 }
             } else if (root.needsStart) {
                 Quickshell.execDetached(["caelestia", "record", ...root.startArgs]);
+                confirmTimer.restart();
             }
 
             root.needsStart = false;
@@ -79,15 +86,23 @@ Singleton {
         }
     }
 
-    Timer {
-        interval: 500
-        repeat: true
-        running: true
-        onTriggered: {
-            if (!checkProc.running) {
-                checkProc.running = true;
-            }
+    Process {
+        id: exitWatcher
+
+        command: ["pidwait", "-e", "gpu-screen-recorder"]
+        onExited: {
+            props.running = false;
+            props.paused = false;
+            root._wasRunning = false;
         }
+    }
+
+    Timer {
+        id: confirmTimer
+
+        interval: 350
+        repeat: false
+        onTriggered: checkProc.running = true
     }
 
     Connections {

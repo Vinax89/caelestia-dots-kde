@@ -27,7 +27,7 @@ PageBase {
             Process {
                 id: restartProcess
 
-                command: ["bash", "-c", "nohup bash -c 'caelestia shell -k; sleep 2; caelestia shell -d; sleep 1; caelestia shell nexus openPage 0 8' >/dev/null 2>&1 & disown"]
+                command: [Paths.absolutePath("root:/scripts/restart-shell.sh"), "8"]
             }
         }
     ]
@@ -106,7 +106,7 @@ PageBase {
             Process {
                 id: bbdxCheck
 
-                command: ["bash", "-c", "kreadconfig6 --file kwinrc --group Plugins --key better_blur_dxEnabled"]
+                command: ["kreadconfig6", "--file", "kwinrc", "--group", "Plugins", "--key", "better_blur_dxEnabled"]
                 running: true
             }
             Process {

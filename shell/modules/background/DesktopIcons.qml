@@ -41,7 +41,7 @@ Item {
     Process {
         id: loadLayoutProc
 
-        command: ["sh", "-c", "cat ~/.local/share/caelestia/desktop_layout.json 2>/dev/null || echo '[]'"]
+        command: ["cat", Quickshell.env("HOME") + "/.local/share/caelestia/desktop_layout.json"]
         stdout: StdioCollector {
             onStreamFinished: {
                 try {

@@ -132,26 +132,11 @@ Singleton {
     // fallback logic.
     function applyKwin(enable: bool): void {
         const stateFile = `${Paths.cache}/gamemode-state`;
-        if (enable) {
-            Quickshell.execDetached(["sh", "-c",
-                `p="${stateFile}"; ` +
-                '[ -e "$p" ] || { ' +
-                'prevBlur="$(kreadconfig6 --file kwinrc --group Plugins --key blurEnabled --default true)"; ' +
-                'prevAnim="$(kreadconfig6 --file kdeglobals --group KDE --key AnimationDurationFactor --default 1)"; ' +
-                'mkdir -p "$(dirname "$p")"; printf "%s\\n%s\\n" "$prevBlur" "$prevAnim" > "$p"; }; ' +
-                'kwriteconfig6 --file kwinrc --group Plugins --key blurEnabled false; ' +
-                'kwriteconfig6 --file kdeglobals --group KDE --key AnimationDurationFactor --notify 0; ' +
-                'qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1']);
-        } else {
-            Quickshell.execDetached(["sh", "-c",
-                `p="${stateFile}"; ` +
-                'blur="$(sed -n 1p "$p" 2>/dev/null)"; anim="$(sed -n 2p "$p" 2>/dev/null)"; ' +
-                '[ -n "$blur" ] || blur=true; [ -n "$anim" ] || anim=1; ' +
-                'kwriteconfig6 --file kwinrc --group Plugins --key blurEnabled "$blur"; ' +
-                'kwriteconfig6 --file kdeglobals --group KDE --key AnimationDurationFactor --notify "$anim"; ' +
-                'rm -f "$p"; ' +
-                'qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1']);
-        }
+        Quickshell.execDetached([
+            Paths.absolutePath("root:/scripts/game-mode-kde.sh"),
+            enable ? "enable" : "disable",
+            stateFile
+        ]);
     }
 
     onEnabledChanged: {

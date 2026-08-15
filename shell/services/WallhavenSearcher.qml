@@ -293,8 +293,15 @@ Singleton {
             return;
         }
 
+        const wallpaperId = String(wallpaper.id || "");
+        const wallpaperUrl = String(wallpaper.path || wallpaper.url || "");
+        if (!/^[0-9]+$/.test(wallpaperId) || !/^https:\/\/[^\s]+$/i.test(wallpaperUrl)) {
+            console.error("Wallhaven: refusing invalid wallpaper id or URL");
+            return;
+        }
+
         // Extract extension from file path or URL, default to jpg
-        const fullPath = wallpaper.path || wallpaper.url || "";
+        const fullPath = wallpaperUrl;
         const urlMatch = fullPath.match(/\.([a-zA-Z]{3,4})(?:\?|$)/);
         let ext = urlMatch ? urlMatch[1] : "";
         // Normalize to lowercase and handle jpeg -> jpg
@@ -306,19 +313,19 @@ Singleton {
             ext = "jpg";
         }
 
-        const tmpPath = `${Paths.cache}/wallhaven-${wallpaper.id}.tmp`;
-        const dstPath = `${Paths.wallsdir}/wallhaven-${wallpaper.id}.${ext}`;
+        const tmpPath = `${Paths.cache}/.wallhaven-${wallpaperId}-${Date.now()}.tmp`;
+        const dstPath = `${Paths.wallsdir}/wallhaven-${wallpaperId}.${ext}`;
 
         currentWallpaper = {
-            id: wallpaper.id,
+            id: wallpaperId,
             ext: ext
         };
         if (activeDownloadRunning || downloadProc.running) {
             console.warn("Wallhaven: Download already in progress");
             return;
         }
-        resetDownloadState(wallpaper.id);
-        downloadProc.wallpaperId = wallpaper.id;
+        resetDownloadState(wallpaperId);
+        downloadProc.wallpaperId = wallpaperId;
         downloadProc.tmpPath = tmpPath;
         downloadProc.dstPath = dstPath;
 
@@ -328,8 +335,8 @@ Singleton {
         downloadProc.command = [
             "python3",
             "-c",
-            'import math, os, sys, urllib.request\nurl, tmp_path, dst_path = sys.argv[1:4]\nos.makedirs(os.path.dirname(dst_path), exist_ok=True)\ntry:\n    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"})\n    with urllib.request.urlopen(req) as response, open(tmp_path, "wb") as handle:\n        total = response.headers.get("Content-Length")\n        total = int(total) if total else 0\n        downloaded = 0\n        while True:\n            chunk = response.read(262144)\n            if not chunk:\n                break\n            handle.write(chunk)\n            downloaded += len(chunk)\n            if total > 0:\n                print(f"PROGRESS {downloaded / total:.6f}", flush=True)\n            else:\n                pseudo = min(0.92, 1.0 - math.exp(-downloaded / 1200000.0))\n                print(f"PROGRESS {pseudo:.6f}", flush=True)\n    print("PROGRESS 1", flush=True)\n    os.replace(tmp_path, dst_path)\nexcept Exception as exc:\n    try:\n        if os.path.exists(tmp_path):\n            os.remove(tmp_path)\n    except OSError:\n        pass\n    print(str(exc), file=sys.stderr, flush=True)\n    sys.exit(1)',
-            wallpaper.path,
+            'import math, os, sys, urllib.request\nurl, tmp_path, dst_path = sys.argv[1:4]\nos.makedirs(os.path.dirname(dst_path), exist_ok=True)\ntry:\n    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"})\n    with urllib.request.urlopen(req, timeout=30) as response, open(tmp_path, "xb") as handle:\n        total = int(response.headers.get("Content-Length") or 0)\n        if total > 50 * 1024 * 1024:\n            raise ValueError("wallpaper exceeds 50 MiB limit")\n        downloaded = 0\n        while True:\n            chunk = response.read(262144)\n            if not chunk:\n                break\n            downloaded += len(chunk)\n            if downloaded > 50 * 1024 * 1024:\n                raise ValueError("wallpaper exceeds 50 MiB limit")\n            handle.write(chunk)\n            if total > 0:\n                print(f"PROGRESS {downloaded / total:.6f}", flush=True)\n            else:\n                pseudo = min(0.92, 1.0 - math.exp(-downloaded / 1200000.0))\n                print(f"PROGRESS {pseudo:.6f}", flush=True)\n    print("PROGRESS 1", flush=True)\n    os.replace(tmp_path, dst_path)\nexcept Exception as exc:\n    try:\n        if os.path.exists(tmp_path):\n            os.remove(tmp_path)\n    except OSError:\n        pass\n    print(str(exc), file=sys.stderr, flush=True)\n    sys.exit(1)',
+            wallpaperUrl,
             tmpPath,
             dstPath
         ];

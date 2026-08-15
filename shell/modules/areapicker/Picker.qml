@@ -81,7 +81,7 @@ MouseArea {
             if (isSearch) {
                 Quickshell.execDetached(["touch", Paths.runtimeTemp("search.done")]);
             } else if (root.loader.clipboardOnly) {
-                Quickshell.execDetached(["sh", "-c", "wl-copy --type image/png < " + path]);
+                Quickshell.execDetached(["sh", "-c", "wl-copy --type image/png < \"$1\"", "--", path]);
                 Quickshell.execDetached(["notify-send", "-a", "caelestia-cli", "-i", path, "Screenshot taken", "Screenshot copied to clipboard"]);
             } else {
                 Quickshell.execDetached(["swappy", "-f", path]);
@@ -242,7 +242,7 @@ MouseArea {
 
         width: root.sw + border.width * 2
         height: root.sh + border.width * 2
-        
+
         color: "transparent"
         border.color: Qt.alpha(Colours.palette.m3secondaryContainer, 0.3)
         border.width: Math.max(root.width, root.height)
