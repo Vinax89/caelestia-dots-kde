@@ -231,7 +231,7 @@ jobs:
         # PRs: only files changed in this PR (hard). Pushes to main/dev: full
         # repo scan (report-only — there is pre-existing debt that would fail
         # a hard gate, but the log surfaces it for cleanup).
-        run: python3 .github/scripts/check_file_hygiene.py ${{ github.event_name == 'push' && '--all' || '' }}
+        run: python3 .github/scripts/check_file_hygiene.py ${{ github.event_name == 'push' && '--all --report-only' || '' }}
 
   # ═══════════════════════════════════════════════════════════
   # Job 8: Markdown lint

@@ -270,6 +270,7 @@ def main() -> int:
     # --all scans every git-tracked file (used for push events where there is
     # no PR diff to diff against). Without it, only changed files are checked.
     all_files = "--all" in sys.argv
+    report_only = "--report-only" in sys.argv
     if all_files:
         result = subprocess.run(
             ["git", "ls-files"],
@@ -319,8 +320,10 @@ def main() -> int:
         print(f"{BOLD}{GREEN}All file hygiene checks passed.{RESET}")
     else:
         print(f"{BOLD}{RED}{len(VIOLATIONS)} file hygiene violation(s) found.{RESET}")
+        if report_only:
+            print(f"{YELLOW}Full-repository scan is report-only; changed-file checks remain blocking.{RESET}")
 
-    return EXIT_CODE
+    return 0 if report_only else EXIT_CODE
 
 
 if __name__ == "__main__":
