@@ -23,8 +23,14 @@ if [[ "${CAELESTIA_SETUP_RUNNING:-0}" == "0" ]]; then
 
     if [[ -f "$BUNDLE_DIR/.gitmodules" ]]; then
         info "Initializing all submodule..."
-        git submodule sync --recursive >/dev/null 2>&1 || true
-        git submodule update --init --recursive --force >/dev/null 2>&1 || die "Failed to initialize all submodules"
+        # -C "$BUNDLE_DIR": these ran against the caller's working directory, so
+        # invoking the script by absolute path from anywhere but the repo failed
+        # with a bare "Failed to initialize all submodules".
+        git -C "$BUNDLE_DIR" submodule sync --recursive >/dev/null 2>&1 || true
+        if ! submodule_err="$(git -C "$BUNDLE_DIR" submodule update --init --recursive --force 2>&1)"; then
+            printf '%s\n' "$submodule_err" >&2
+            die "Failed to initialize all submodules"
+        fi
     fi
 
     info "Installing Caelestia Services..."
