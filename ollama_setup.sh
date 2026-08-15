@@ -25,6 +25,15 @@ section "Step 1/4 - Install Ollama"
 tmp_installer="$(mktemp)"
 trap 'rm -f "$tmp_installer"' EXIT
 curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp_installer" https://ollama.com/install.sh
+: "${OLLAMA_INSTALL_SHA256:?Set OLLAMA_INSTALL_SHA256 to the vendor-published SHA-256 before running this installer}"
+if ! command -v sha256sum >/dev/null 2>&1; then
+    echo "sha256sum is required to verify the Ollama installer." >&2
+    exit 1
+fi
+printf '%s  %s\n' "$OLLAMA_INSTALL_SHA256" "$tmp_installer" | sha256sum --check --status || {
+    echo "Ollama installer checksum verification failed." >&2
+    exit 1
+}
 sh "$tmp_installer"
 
 # 2. Enable and start the systemd service
@@ -54,7 +63,7 @@ case $MODEL_CHOICE in
     2) pull_model "phi3" ;;
     3) pull_model "gemma" ;;
     4) pull_model "mistral" ;;
-    5) 
+    5)
         pull_model "llama3"
         pull_model "phi3"
         pull_model "gemma"

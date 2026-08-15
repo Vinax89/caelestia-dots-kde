@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import Quickshell.Io
+import Quickshell
 import M3Shapes
 import Caelestia.Config
 import qs.components
@@ -18,23 +18,13 @@ Item {
     required property FileDialog facePicker
 
     property color pfpFallbackColour: Colours.layer(Colours.palette.m3surfaceContainerHighest, 2)
-    property string hyprlandSplashText: ""
+    property string hyprlandSplashText: qsTr("Welcome back, %1").arg(Quickshell.env("USER"))
 
     anchors.fill: parent
     anchors.margins: Tokens.padding.large
 
     Behavior on pfpFallbackColour {
         CAnim {}
-    }
-
-    Process {
-        running: Config.dashboard.showHyprlandSplash
-        command: ["sh", "-c", "echo \"Welcome back, $USER\""]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                hyprlandSplashText = text.trim();
-            }
-        }
     }
 
     Item {

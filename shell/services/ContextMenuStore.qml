@@ -57,7 +57,7 @@ Singleton {
     Process {
         id: readProc
 
-        command: ["sh", "-c", "cat \"" + root.menuPath + "\" 2>/dev/null || echo '[]'"]
+        command: ["cat", root.menuPath]
         running: false
         stdout: StdioCollector {
             onStreamFinished: {

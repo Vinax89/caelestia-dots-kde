@@ -6,6 +6,18 @@ set -uo pipefail
 log()  { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 err()  { echo -e "\033[0;31m[ERR]\033[0m  $*"; }
 
+clone_verified() {
+    local url="$1" dest="$2"
+    git clone --depth 1 "$url" "$dest" || return 1
+    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_SOURCE:-0}" != "1" ]]; then
+        git -C "$dest" verify-commit HEAD >/dev/null 2>&1 || {
+            rm -rf -- "$dest"
+            err "Refusing unsigned source checkout: $url"
+            return 1
+        }
+    fi
+}
+
 log "Installing Debian packages..."
 
 INSTALL_FISH="${INSTALL_FISH:-true}"
@@ -53,6 +65,16 @@ case "$PACKAGE_GROUP" in
     all|*)  PACKAGES=("${CORE_PACKAGES[@]}" "${SHELL_PACKAGES[@]}" "${THEME_PACKAGES[@]}" "${UTILITY_PACKAGES[@]}")
             FALLBACK_TARGETS=("quickshell" "starship" "libcava" "app2unit" "gpu-screen-recorder" "wl-clip-persist" "satty" "adw-gtk3" "uv" "konsave") ;;
 esac
+
+# See tests/integration/README.md. Packages still come from apt and are checked
+# with dpkg; the override only bounds the CI workload.
+if [[ -n "${CAELESTIA_INTEGRATION_PACKAGES:-}" ]]; then
+    read -r -a PACKAGES <<< "$CAELESTIA_INTEGRATION_PACKAGES"
+    FALLBACK_TARGETS=()
+    INSTALL_FISH=false
+    INSTALL_PAPIRUS=false
+    INSTALL_DARKLY=false
+fi
 
 log "Installing packages (group: $PACKAGE_GROUP)..."
 
@@ -128,7 +150,7 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
         libcava|cava)
             tmpdir="$(mktemp -d)"
             sudo apt-get install -y libasound2-dev libfftw3-dev libpulse-dev libiniparser-dev meson ninja-build cmake gcc g++ || true
-            if git clone --depth 1 https://github.com/LukashonakV/cava "$tmpdir"; then
+            if clone_verified https://github.com/LukashonakV/cava "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
                     if [ -f "meson.build" ]; then
@@ -148,7 +170,7 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
         app2unit)
             tmpdir="$(mktemp -d)"
             sudo apt-get install -y make || true
-            if git clone --depth 1 https://github.com/Vladimir-csp/app2unit "$tmpdir"; then
+            if clone_verified https://github.com/Vladimir-csp/app2unit "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
                     sudo make install
@@ -162,7 +184,7 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
         gpu-screen-recorder)
             tmpdir="$(mktemp -d)"
             sudo apt-get install -y build-essential git ffmpeg meson libxi-dev libdrm-dev libavcodec-dev libavformat-dev libx11-dev libxcomposite-dev libxdamage-dev libxrender-dev libxrandr-dev libpulse-dev libva-dev libcap-dev libdbus-1-dev libpipewire-0.3-dev libavfilter-dev libvulkan-dev || true
-            if git clone --depth 1 https://repo.dec05eba.com/gpu-screen-recorder "$tmpdir"; then
+            if clone_verified https://repo.dec05eba.com/gpu-screen-recorder "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
                     sudo ./install.sh
@@ -181,7 +203,7 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
             sudo apt-get install -y build-essential cargo git libwayland-dev || true
             if command -v cargo >/dev/null 2>&1; then
                 tmpdir="$(mktemp -d)"
-                if git clone --depth 1 https://github.com/Linus789/wl-clip-persist "$tmpdir"; then
+                if clone_verified https://github.com/Linus789/wl-clip-persist "$tmpdir"; then
                     (
                         cd "$tmpdir" || exit 1
                         cargo build --release
@@ -286,7 +308,7 @@ if [[ "$INSTALL_DARKLY" == "true" ]]; then
     if ! command -v darkly >/dev/null 2>&1; then
         tmpdir="$(mktemp -d)"
         sudo apt-get install -y cmake extra-cmake-modules gettext libkf6config-dev libkf6configwidgets-dev libkf6coreaddons-dev libkf6guiaddons-dev libkf6i18n-dev libkf6iconthemes-dev libkf6kio-dev libkf6widgetsaddons-dev libkf6windowsystem-dev libkf6colorscheme-dev libkf6kcmutils-dev libkirigami-dev libkdecorations3-dev libkf6style-dev qt6-base-dev qt6-declarative-dev || true
-        if git clone --depth 1 https://github.com/Bali10050/Darkly "$tmpdir"; then
+        if clone_verified https://github.com/Bali10050/Darkly "$tmpdir"; then
             (
                 cd "$tmpdir" || exit 1
                 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_QT5=OFF && cmake --build build -j"$(nproc)" && cd build && sudo cmake --install .
@@ -318,7 +340,7 @@ if ! command -v caelestia >/dev/null 2>&1; then
                 sudo ln -sf "$HOME/.local/bin/caelestia" /usr/local/bin/caelestia || true
             fi
         fi
-        
+
         # Install fish completions if fish is present
         mkdir -p ~/.config/fish/completions/
         cp ./completions/caelestia.fish ~/.config/fish/completions/ 2>/dev/null || true

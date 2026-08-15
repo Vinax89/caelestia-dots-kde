@@ -38,7 +38,7 @@ PageBase {
         // warning when the (optional) CLI isn't installed
         Process {
             running: true
-            command: ["sh", "-c", "caelestia --version 2>/dev/null"]
+            command: ["caelestia", "--version"]
             stdout: StdioCollector {
                 onStreamFinished: {
                     const m = text.match(/caelestia-cli\S*\s+(\d+(?:\.\d+)*)/);

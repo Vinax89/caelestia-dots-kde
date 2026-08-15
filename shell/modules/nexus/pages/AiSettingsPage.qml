@@ -240,7 +240,7 @@ PageBase {
     // This clears the CLI's base credentials (WinTone01), not the Claude Desktop app.
 
     function logoutDefault() {
-        logoutProc.command = ["sh", "-c", JSON.stringify(root.claudeBin()) + " auth logout"];
+        logoutProc.command = [root.claudeBin(), "auth", "logout"];
         logoutProc.running = true;
     }
 

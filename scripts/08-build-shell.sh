@@ -20,7 +20,7 @@ SHELL_DIR="$BUNDLE_DIR/shell"
 
 if [[ "${CAELESTIA_SETUP_RUNNING:-0}" == "0" ]]; then
     info "Running standalone update mode... syncing submodules first."
-    
+
     if [[ -f "$BUNDLE_DIR/.gitmodules" ]]; then
         info "Initializing all submodule..."
         git submodule sync --recursive >/dev/null 2>&1 || true
@@ -50,7 +50,7 @@ if [[ "${CAELESTIA_SETUP_RUNNING:-0}" == "0" ]]; then
         info "Installing via apt..."
         sudo apt-get update && sudo apt-get install -y qt6-wayland qt6-wayland-dev libkf6globalaccel-dev libkf6windowsystem-dev qt6-base-private-dev libkf6kpipewire-dev || warn "apt install failed..."
     fi
-    
+
     if [[ "${CAELESTIA_SKIP_DEPLOY:-0}" == "0" ]]; then
         info "Configuring KDE Lock Screen to use Caelestia..."
         if command -v kwriteconfig6 >/dev/null 2>&1 && command -v kpackagetool6 >/dev/null 2>&1; then
@@ -184,13 +184,13 @@ if not file_path:
     sys.exit(1)
 try:
     with open(file_path, "r") as f: code = f.read()
-    
+
     code = code.replace("args += [\"-a\", \"default_output\"]", "args += [\"-a\", \"default_output\", \"-a\", \"default_input\"]")
     code = code.replace("args += [\"-f\", str(max_rr)]", "args += [\"-f\", str(max_rr if max_rr > 0 else 60)]")
     if "-fallback-cpu-encoding" not in code:
         code = code.replace("recording_path.parent.mkdir(parents=True, exist_ok=True)", """recording_path.parent.mkdir(parents=True, exist_ok=True)
         args += ["-fallback-cpu-encoding", "yes"]""")
-    
+
     # Inject KWin focused monitor refresh rate logic
     kwin_logic = """        import json, os, subprocess
         focused_rr = 60
@@ -218,7 +218,7 @@ try:
     code = code.replace("if self.args.region:", "if False:")
     code = code.replace("text=True)", "text=True).strip()")
     code = code.replace("args += [\"region\", \"-region\", region]", "args += [region]")
-    
+
     launch_orig = """        proc = subprocess.Popen([RECORDER, *args, "-o", str(recording_path)], start_new_session=True)
 
         notif = notify("-p", "Recording started", "Recording...")"""
@@ -234,9 +234,9 @@ try:
     # Match the block whether it is unpatched or already patched in any form
     pattern = r"(?:\s*recording_path\.unlink\(missing_ok=True\)[\s\S]*?)?\s*proc = subprocess\.Popen\(\[RECORDER[\s\S]*?notif = notify\(\"-p\", \"Recording started\", \"Recording\.\.\.\"\)"
     code = re.sub(pattern, "\n" + launch_new, code)
-    
+
     code = code.replace("[\"app2unit\", \"-O\", new_path]", "[\"xdg-open\", str(new_path)]")
-    
+
     old_dbus = """            p = subprocess.run(
                 [
                     "dbus-send",
@@ -254,7 +254,7 @@ try:
     new_xdg = "            subprocess.Popen([\"xdg-open\", str(new_path.parent)], start_new_session=True)"
     code = code.replace(old_dbus, new_xdg)
     code = code.replace("[\"dolphin\", \"--select\", str(new_path)]", "[\"xdg-open\", str(new_path.parent)]")
-    
+
     import shutil, tempfile
     backup_path = file_path + ".caelestia-original"
     if not os.path.exists(backup_path):
@@ -265,7 +265,7 @@ try:
         os.replace(patched_path, file_path)
     finally:
         if os.path.exists(patched_path): os.unlink(patched_path)
-        
+
     screenshot_path = None
     for p in search_paths:
         candidate = os.path.join(p, "caelestia", "subcommands", "screenshot.py")
@@ -276,7 +276,7 @@ try:
         with open(screenshot_path, "r") as f: scode = f.read()
         scode = scode.replace("cmd = [\"grim\"]", "cmd = [\"spectacle\", \"-b\", \"-f\", \"-n\", \"-o\"]")
         scode = scode.replace("if focused_monitor:\n            cmd += [\"-o\", focused_monitor[\"name\"]]", "")
-        scode = scode.replace("cmd += [\"-\"]\n        sc_data = subprocess.check_output(cmd)", "tmp_file = \"/tmp/qs-screenshot.png\"\n        cmd += [tmp_file]\n        subprocess.run(cmd)\n        try:\n            with open(tmp_file, \"rb\") as f:\n                sc_data = f.read()\n        except Exception:\n            sc_data = b\"\"")
+        scode = scode.replace("cmd += [\"-\"]\n        sc_data = subprocess.check_output(cmd)", "fd, tmp_file = tempfile.mkstemp(prefix=\"caelestia-screenshot-\", suffix=\".png\")\n        os.close(fd)\n        try:\n            cmd += [tmp_file]\n            subprocess.run(cmd, check=False)\n            try:\n                with open(tmp_file, \"rb\") as f:\n                    sc_data = f.read()\n            except OSError:\n                sc_data = b\"\"\n        finally:\n            try:\n                os.unlink(tmp_file)\n            except FileNotFoundError:\n                pass")
         backup_path = screenshot_path + ".caelestia-original"
         if not os.path.exists(backup_path):
             shutil.copy2(screenshot_path, backup_path)
@@ -371,7 +371,7 @@ try:
 
     # Patch convert_gif to convert_animated
     code = code.replace("def convert_gif(wall: Path) -> Path:", "def convert_animated(wall: Path) -> Path:")
-    
+
     old_convert = """        with Image.open(wall) as img:
             try:
                 img.seek(0)

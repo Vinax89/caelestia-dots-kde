@@ -27,7 +27,7 @@ Item {
     property string currentChatId: ""
 
     property var currentRequest: null
-    
+
 
     Timer {
         id: typingTimer
@@ -42,7 +42,7 @@ Item {
         property int charIndex: 0
 
         property int targetIdx: -1
-        
+
         onTriggered: {
             if (targetIdx < 0 || targetIdx >= chatHistory.count) {
                 stop();
@@ -68,7 +68,7 @@ Item {
             listView.positionViewAtEnd();
         }
     }
-    
+
     property real savedContentY: -1
 
     // Refresh the model list when switching to an OpenAI-compatible provider, so a
@@ -1518,14 +1518,14 @@ Item {
                 "thoughtText": msg.thoughtText || ""
             });
         }
-        
+
         if (msgs.length === 0) return;
-        
+
         var found = false;
         for (var j = 0; j < allChatSessions.length; j++) {
             if (allChatSessions[j].id === currentChatId) {
                 allChatSessions[j].messages = msgs;
-                
+
                 var firstUser = null;
                 for (var k = 0; k < msgs.length; k++) {
                     if (msgs[k].isUser) { firstUser = msgs[k]; break; }
@@ -1539,31 +1539,31 @@ Item {
                 break;
             }
         }
-        
+
         if (!found) {
             var firstUserMsg = null;
             for (var m = 0; m < msgs.length; m++) {
                 if (msgs[m].isUser) { firstUserMsg = msgs[m]; break; }
             }
-            
+
             var initialTitle = "New Chat";
-            
+
             allChatSessions.unshift({
                 "id": currentChatId || ("chat_" + Date.now()),
                 "title": initialTitle,
                 "messages": msgs
             });
-            
+
             historySessionsModel.insert(0, {
                 "id": currentChatId || ("chat_" + Date.now()),
                 "title": initialTitle
             });
-            
+
             if (firstUserMsg) {
                 generateChatTitleAsync(currentChatId, firstUserMsg.text);
             }
         }
-        
+
         GlobalConfig.ai.ollamaHistoryJson = JSON.stringify(allChatSessions);
     }
 
@@ -1584,7 +1584,7 @@ Item {
                     break;
                 }
             }
-            
+
             GlobalConfig.ai.ollamaHistoryJson = JSON.stringify(allChatSessions);
 
             if (currentChatId === id) {
@@ -1720,11 +1720,11 @@ Item {
 
     function updateChatTitle(chatId, title) {
         if (!title || !chatId) return;
-        
+
         for (var i = 0; i < allChatSessions.length; i++) {
             if (allChatSessions[i].id === chatId) {
                 allChatSessions[i].title = title;
-                
+
                 var inModel = false;
                 for (var j = 0; j < historySessionsModel.count; j++) {
                     if (historySessionsModel.get(j).id === chatId) {
@@ -1733,14 +1733,14 @@ Item {
                         break;
                     }
                 }
-                
+
                 if (!inModel) {
                     historySessionsModel.insert(0, {
                         "id": chatId || "",
                         "title": title || "New Chat"
                     });
                 }
-                
+
                 GlobalConfig.ai.ollamaHistoryJson = JSON.stringify(allChatSessions);
                 break;
             }
@@ -1797,7 +1797,7 @@ Item {
         inAgentLoop = true;
         currentThoughtText = "";
         isThoughtExpanded = false;
-        
+
         if (isSystemToolResult) {
             if (toolName === "web_search" || toolName === "read_webpage") {
                 currentActionText = "Reading results...";
@@ -1850,29 +1850,29 @@ Item {
             xhr.open("POST", ollamaUrl + "/api/chat", true);
             xhr.setRequestHeader("Content-Type", "application/json");
         }
-        
+
         var processedTextLength = 0;
         var accumulatedThoughtText = "";
         var accumulatedContentText = "";
         var rawAccumulatedContentText = "";
         var finalToolCalls = null;
-        
+
         for (var i = chatHistory.count - 1; i >= 0; i--) {
             var m = chatHistory.get(i);
             if (!m.isUser && !m.isFinished && m.text === "") {
                 chatHistory.remove(i);
             }
         }
-        
+
         chatHistory.append({
             "isUser": false,
             "text": "",
             "isFinished": false,
             "thoughtText": ""
         });
-        
+
         listView.positionViewAtEnd();
-        
+
         xhr.onerror = () => { root.handleSendError(); };
         xhr.onreadystatechange = () => {
             if (xhr.readyState === 3 || xhr.readyState === XMLHttpRequest.DONE) {
@@ -1880,9 +1880,9 @@ Item {
                     var currentText = xhr.responseText;
                     var unparsed = currentText.substring(processedTextLength);
                     var lines = unparsed.split('\n');
-                    
+
                     var linesToProcess = (xhr.readyState === XMLHttpRequest.DONE) ? lines.length : lines.length - 1;
-                    
+
                     for (var i = 0; i < linesToProcess; i++) {
                         var rawLine = lines[i];
                         var line = rawLine.trim();
@@ -2001,13 +2001,13 @@ Item {
                         listView.positionViewAtEnd();
                     }
                 }
-                
+
                 if (xhr.readyState === XMLHttpRequest.DONE) {
                     if (xhr.status === 200) {
                             root.rateLimitRetries = 0;
                     chatHistory.setProperty(chatHistory.count - 1, "isFinished", true);
                         saveHistory();
-                        
+
                         var enableTools = GlobalConfig.ai.enableCelestialMode;
                         var textToolCalls = enableTools ? parseTextToolCalls(rawAccumulatedContentText) : [];
 
@@ -2176,7 +2176,7 @@ Item {
         if (enableTools) {
             sysPrompt += "\n\nYou have access to the following tools. To call a tool, output a <tool_call> block containing ONLY valid JSON. Do not output any text inside the block other than the JSON object.\n\nFORMAT:\n<tool_call>\n{\"name\": \"TOOL_NAME\", \"args\": {ARGUMENTS}}\n</tool_call>\n\nAVAILABLE TOOLS:\n- take_screenshot: Captures the user's screen for visual analysis. Args: none.\n  Example: <tool_call>\n{\"name\": \"take_screenshot\", \"args\": {}}\n</tool_call>\n\n- web_search: Searches the web. Args: query (string, required), page (number, optional).\n  Example: <tool_call>\n{\"name\": \"web_search\", \"args\": {\"query\": \"latest news\"}}\n</tool_call>\n\n- read_webpage: Fetches and reads the text of a URL. Args: url (string, required).\n  Example: <tool_call>\n{\"name\": \"read_webpage\", \"args\": {\"url\": \"https://example.com\"}}\n</tool_call>\n\n- open_app: Launches an installed desktop application. Args: app_name (string, required).\n  Example: <tool_call>\n{\"name\": \"open_app\", \"args\": {\"app_name\": \"dolphin\"}}\n</tool_call>\n\n- set_timer: Sets a countdown timer that fires a desktop notification. Args: seconds (number, required), message (string, required).\n  Example: <tool_call>\n{\"name\": \"set_timer\", \"args\": {\"seconds\": 300, \"message\": \"Break time!\"}}\n</tool_call>\n\n- get_weather: Gets the current local weather from the system dashboard. Args: none.\n  Example: <tool_call>\n{\"name\": \"get_weather\", \"args\": {}}\n</tool_call>\n\n- caelestia_command: Runs a caelestia CLI command. Valid subcommands: shell, toggle, scheme, search, screenshot, record, clipboard, emoji, wallpaper, resizer, install, update. Args: subcommand (string, required), args (string, optional extra flags).\n  Example: <tool_call>\n{\"name\": \"caelestia_command\", \"args\": {\"subcommand\": \"wallpaper\", \"args\": \"--random\"}}\n</tool_call>\n\nCRITICAL RULES:\n1. ALWAYS use a <tool_call> block to call a tool. NEVER pretend to perform actions in plain text.\n2. You may output a brief acknowledgment before the <tool_call> block (e.g. 'Opening Dolphin for you!') but you MUST include the block.\n3. You can include multiple <tool_call> blocks in one response.\n4. After receiving tool results, respond naturally to the user based on what the tool returned.";
         }
-        
+
         var requestBody;
         if (useAnthropic) {
             // Anthropic Messages API: system prompt is a top-level field; messages must
@@ -2314,7 +2314,7 @@ Item {
                      radius: Tokens.rounding.full
                      color: Colours.palette.m3primary
                      x: isHistoryTab ? historyTab.x : chatTab.x
-                     
+
                      Behavior on x { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
                      Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
                  }
@@ -2329,7 +2329,7 @@ Item {
 
                          height: parent.height
                          width: !isHistoryTab ? 40 : chatContent.implicitWidth + Tokens.padding.medium * 2
-                         
+
 
                          Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
 
@@ -2365,7 +2365,7 @@ Item {
 
                          height: parent.height
                          width: isHistoryTab ? 40 : historyContent.implicitWidth + Tokens.padding.medium * 2
-                         
+
 
                          Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
 
@@ -2560,7 +2560,7 @@ Item {
 
 
          }
-         
+
          Item {
              id: contentStack
 
@@ -2589,7 +2589,7 @@ Item {
                      spacing: Tokens.spacing.medium
                      model: chatHistory
                      boundsBehavior: Flickable.StopAtBounds
-                     
+
                      ColumnLayout {
                          anchors.centerIn: parent
                          opacity: chatHistory.count === 0 && !isTyping && !isThinking ? 1.0 : 0.0
@@ -2657,7 +2657,7 @@ Item {
                          height: isThinking ? bubbleBg.height + Tokens.spacing.medium : 0
                          visible: opacity > 0
                          opacity: isThinking ? 1 : 0
-                         
+
                          Behavior on height { Anim { type: Anim.DefaultSpatial } }
                          Behavior on opacity { Anim { type: Anim.DefaultSpatial } }
 
@@ -2682,16 +2682,16 @@ Item {
                                  anchors.fill: parent
                                  anchors.margins: Tokens.padding.medium
                                  spacing: Tokens.spacing.small
-                                 
+
                                  Row {
                                      spacing: Tokens.spacing.small
-                                     
+
                                      LoadingIndicator {
                                          width: 20
                                          height: 20
                                          color: Colours.palette.m3primary
                                      }
-                                     
+
                                      // M3 Expressive Animated Text Wrapper
                                      Item {
                                          width: mainText.implicitWidth
@@ -2699,14 +2699,14 @@ Item {
                                          // The bubble smoothly expands/shrinks as the text width changes
 
                                          Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
-                                         
+
                                          StyledText {
                                              id: mainText
 
                                              text: displayedText
                                              color: Colours.palette.m3onSurfaceVariant
                                              font: Tokens.font.body.small
-                                             
+
                                              property string displayedText: root.currentActionText
 
                                              property string nextText: ""
@@ -2749,13 +2749,13 @@ Item {
                                              }
                                          }
                                      }
-                                     
+
                                      Item {
                                          visible: root.currentThoughtText !== ""
                                          width: Tokens.spacing.medium
                                          height: 1
                                      }
-                                     
+
                                      Item {
                                          visible: root.currentThoughtText !== ""
                                          width: thoughtRowFooter.implicitWidth
@@ -2789,7 +2789,7 @@ Item {
                                      width: footerThoughtContent.width
                                      height: root.isThoughtExpanded ? footerThoughtContent.implicitHeight : 0
                                      clip: true
-                                     
+
                                      Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
                                      TextEdit {
@@ -2806,7 +2806,7 @@ Item {
                                          selectionColor: Colours.palette.m3primary
                                          selectedTextColor: Colours.palette.m3onPrimary
                                          opacity: root.isThoughtExpanded ? 1.0 : 0.0
-                                         
+
                                          Behavior on opacity {
                                              SequentialAnimation {
                                                  PauseAnimation { duration: root.isThoughtExpanded ? 100 : 0 }
@@ -2830,28 +2830,28 @@ Item {
                          width: listView.width - Tokens.padding.large
                          visible: (!delegateItem.isFinished && isThinking) ? false : (delegateItem.text !== "" || delegateItem.thoughtText !== "")
                          height: visible ? bubbleRect.height : 0
-                         
+
                          scale: 0.0
                          opacity: 0.0
-                         
+
                          Component.onCompleted: {
                              popInAnim.start();
                          }
-                         
+
                          ParallelAnimation {
                              id: popInAnim
 
                              NumberAnimation { target: delegateItem; property: "scale"; from: 0.8; to: 1.0; duration: 300; easing.type: Easing.OutBack }
                              NumberAnimation { target: delegateItem; property: "opacity"; from: 0.0; to: 1.0; duration: 200; easing.type: Easing.OutQuad }
                          }
-                         
+
                          SequentialAnimation {
                              id: popDoneAnim
 
                              NumberAnimation { target: delegateItem; property: "scale"; from: 1.0; to: 1.02; duration: 100; easing.type: Easing.OutQuad }
                              NumberAnimation { target: delegateItem; property: "scale"; from: 1.02; to: 1.0; duration: 150; easing.type: Easing.OutSine }
                          }
-                         
+
                          onIsFinishedChanged: {
                              if (isFinished) popDoneAnim.start();
                          }
@@ -2863,7 +2863,7 @@ Item {
 
                              anchors.right: delegateItem.isUser ? parent.right : undefined
                              anchors.left: delegateItem.isUser ? undefined : parent.left
-                             
+
                              // Let implicitWidth dictate width (with +8 buffer for layout engine) to stop short words from splitting line breaks
                              width: Math.min(maxBubbleWidth, bubbleLayout.implicitWidth + Tokens.padding.medium * 2 + 8)
                              height: bubbleLayout.implicitHeight + Tokens.padding.medium * 2
@@ -2875,7 +2875,7 @@ Item {
                              topRightRadius: Tokens.rounding.large
                              bottomLeftRadius: delegateItem.isUser ? Tokens.rounding.large : 4
                              bottomRightRadius: delegateItem.isUser ? 4 : Tokens.rounding.large
-                             
+
                              Column {
                                  id: bubbleLayout
 
@@ -2928,7 +2928,7 @@ Item {
                                      width: thoughtContent.width
                                      height: bubbleLayout.isExpanded ? thoughtContent.implicitHeight : 0
                                      clip: true
-                                     
+
                                      Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
                                      TextEdit {
@@ -2936,9 +2936,9 @@ Item {
 
                                          width: Math.min(implicitWidth, bubbleRect.maxBubbleWidth - Tokens.padding.medium * 2)
                                          textFormat: Text.MarkdownText
-                                         
+
                                          property string fullThought: bubbleLayout.delegateThought
-                                         
+
                                          property bool cursorVisible: true
 
                                          Timer {
@@ -2947,9 +2947,9 @@ Item {
                                              interval: 400
                                              onTriggered: thoughtContent.cursorVisible = !thoughtContent.cursorVisible
                                          }
-                                         
+
                                          text: delegateItem.isFinished ? fullThought : fullThought + (cursorVisible ? "▌" : "")
-                                         
+
                                          color: Colours.palette.m3onSurfaceVariant
 
                                          font: Tokens.font.body.small
@@ -2965,7 +2965,7 @@ Item {
                                          selectedTextColor: Colours.palette.m3onPrimary
 
                                          opacity: bubbleLayout.isExpanded ? 1.0 : 0.0
-                                         
+
                                          Behavior on opacity {
                                              SequentialAnimation {
                                                  PauseAnimation { duration: bubbleLayout.isExpanded ? 100 : 0 }
@@ -2980,9 +2980,9 @@ Item {
 
                                      textFormat: Text.MarkdownText
                                      width: Math.min(implicitWidth, bubbleRect.maxBubbleWidth - Tokens.padding.medium * 2)
-                                     
+
                                      property string fullText: delegateItem.text !== undefined ? delegateItem.text : ""
-                                     
+
                                      property bool cursorVisible: true
 
                                      Timer {
@@ -2991,9 +2991,9 @@ Item {
                                          interval: 400
                                          onTriggered: messageText.cursorVisible = !messageText.cursorVisible
                                      }
-                                     
+
                                      text: delegateItem.isFinished ? fullText : fullText + (cursorVisible ? "▌" : "")
-                                     
+
                                      color: delegateItem.isUser ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
 
                                      font: Tokens.font.body.small
@@ -3206,7 +3206,7 @@ Item {
                              id: inputScroll
                              Layout.fillWidth: true
                              Layout.fillHeight: true
-                             
+
                              TextArea {
                                  id: inputArea
 
@@ -3274,7 +3274,7 @@ Item {
                                  shape: root.isTyping ? MaterialShape.Cookie4Sided : (inputArea.text.length > 0 ? MaterialShape.Arrow : MaterialShape.Circle)
                                  scale: (inputArea.text.length === 0 && !root.isTyping) ? 1 : sendMouse.pressed ? 0.6 : sendMouse.containsMouse ? 0.8 : 0.7
                                  rotation: 0
-                                 
+
                                  Behavior on scale { Anim { type: Anim.FastSpatial } }
                                  Behavior on color { CAnim {} }
 
@@ -3333,7 +3333,7 @@ Item {
                      anchors.right: parent.right
                      anchors.bottom: newChatButton.top
                      anchors.bottomMargin: Tokens.spacing.medium
-                     
+
                      cellWidth: width / 2
                      cellHeight: 90
                      model: historySessionsModel
@@ -3396,7 +3396,7 @@ Item {
                                      Layout.alignment: Qt.AlignTop | Qt.AlignRight
                                      Layout.preferredWidth: 24
                                      Layout.preferredHeight: 24
-                                     
+
                                      StyledRect {
                                          anchors.fill: parent
                                          radius: 12

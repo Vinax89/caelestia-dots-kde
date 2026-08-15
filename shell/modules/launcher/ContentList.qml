@@ -130,7 +130,6 @@ Item {
                 implicitWidth: root.Tokens.sizes.launcher.itemWidth
                 implicitHeight: Math.min(root.maxHeight, root.Tokens.sizes.launcher.itemHeight * 7)
             }
-
         }
     ]
 

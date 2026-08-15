@@ -17,7 +17,8 @@ tput civis 2>/dev/null || true
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$BUNDLE_DIR/scripts"
 export BUNDLE_DIR
-export INSTALL_START_EPOCH="$(date +%s)"
+INSTALL_START_EPOCH="$(date +%s)"
+export INSTALL_START_EPOCH
 
 # Prevent concurrent runs in a private directory.
 LOCK_DIR="${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/caelestia"
@@ -191,7 +192,8 @@ run_arch_pacman_install() {
     sudo pacman "${pacman_args[@]}" "${pkgs[@]}"
 }
 
-export BASE_DISTRO="$(detect_base_distro)"
+BASE_DISTRO="$(detect_base_distro)"
+export BASE_DISTRO
 
 PACKAGE_STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde"
 PACKAGE_BEFORE="$PACKAGE_STATE_DIR/packages.before"
@@ -211,7 +213,8 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
 fi
 
 normalize_line_endings_first() {
-    export BASE_DISTRO="$(detect_base_distro)"
+    BASE_DISTRO="$(detect_base_distro)"
+    export BASE_DISTRO
     local -a crlf_files=()
     local convert_choice=""
 
@@ -369,7 +372,7 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         echo "Full log saved to: $BUILD_LOG"
         exit 1
     }
-    
+
     kill $SPINNER_PID 2>/dev/null || true
     wait $SPINNER_PID 2>/dev/null || true
     echo ""
@@ -383,7 +386,7 @@ fi
 
 cleanup_install_state() {
     tput cnorm 2>/dev/null || true
-    
+
     if [[ -n "${TMUX:-}" && "${CAELESTIA_TMUX_MASTER:-0}" == "1" ]]; then
         tmux kill-session -t caelestia_install 2>/dev/null || true
     fi
@@ -396,7 +399,7 @@ trap cleanup_install_state EXIT
 if [[ -z "${TMUX:-}" && "${CAELESTIA_NO_TMUX:-0}" == "0" && "${CAELESTIA_USE_TMUX:-1}" == "1" ]]; then
     # Kill any stale session first
     tmux kill-session -t caelestia_install 2>/dev/null || true
-    
+
     export CAELESTIA_TMUX_MASTER=1
     CAELESTIA_IPC_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-install-XXXXXX")" || {
         echo "[FATAL] Failed to create private installer IPC directory." >&2
@@ -428,7 +431,7 @@ WRAPPER_EOF
     # Keep pane visible on failure; close normally on success.
     tmux set-option -t caelestia_install remain-on-exit failed
     tmux set-option -t caelestia_install mouse on
-    
+
     tmux attach-session -t caelestia_install
     _tmux_exit=$?
 
@@ -476,6 +479,16 @@ WRAPPER_EOF
     exit $_tmux_exit
 fi
 
+# Always capture diagnostics in a private directory; never fall back to /tmp.
+if [[ -z "${CAELESTIA_IPC_DIR:-}" ]]; then
+    CAELESTIA_IPC_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-install-XXXXXX")" || {
+        echo "[FATAL] Failed to create private installer runtime directory." >&2
+        exit 1
+    }
+    chmod 700 "$CAELESTIA_IPC_DIR"
+    export CAELESTIA_IPC_DIR CAELESTIA_IPC_CLEANUP=1
+fi
+
 if [[ ! -x "$BIN" ]]; then
     echo ""
     echo "============================================================"
@@ -489,7 +502,7 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 _installer_start=$(date +%s)
-_installer_err_log="${CAELESTIA_IPC_DIR:-/tmp}/installer_err.log"
+_installer_err_log="$CAELESTIA_IPC_DIR/installer_err.log"
 if "$BIN" "$@" 2>"$_installer_err_log"; then
     _exit_code=0
 else
@@ -508,7 +521,7 @@ if [[ $_exit_code -eq 0 && -s "$PACKAGE_BEFORE" ]]; then
 fi
 
 _reached_done=0
-if grep -q '\[installer\] done (success)' "${CAELESTIA_IPC_DIR:-/tmp}/installer_err.log" 2>/dev/null; then
+if grep -q '\[installer\] done (success)' "$CAELESTIA_IPC_DIR/installer_err.log" 2>/dev/null; then
     _reached_done=1
 fi
 

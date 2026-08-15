@@ -17,11 +17,14 @@ Searcher {
         return search.slice(`${GlobalConfig.launcher.actionPrefix}animations `.length);
     }
 
+    list: anims.instances
+    useFuzzy: true
+
     Process {
         id: getAnimationsProc
 
         running: typeof KWinActiveWindowBridge === "undefined"
-        command: ["sh", "-c", "ls -1 ~/.config/caelestia/animations/*.lua || true"]
+        command: ["find", Paths.absolutePath("~/.config/caelestia/animations"), "-maxdepth", "1", "-type", "f", "-name", "*.lua", "-print"]
         stdout: StdioCollector {
             onStreamFinished: {
                 let lines = text.trim().split("\n").filter(l => l.length > 0);
@@ -57,14 +60,12 @@ Searcher {
         }
     }
 
-    list: anims.instances
-    useFuzzy: true
-
     Variants {
         id: anims
         
         QtObject {
             id: animItem
+
             required property var modelData
             
             readonly property string name: modelData.name

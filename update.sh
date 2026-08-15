@@ -11,6 +11,21 @@ info() { echo "[INFO]  $*"; }
 ok()   { echo "[OK]    $*"; }
 warn() { echo "[WARN]  $*"; }
 
+verify_update_commit() {
+    local trusted_fingerprint="968479A1AFF927E37D1A566BB5690EEEBB952194"
+    local verify_home fingerprints status valid_fingerprint
+    verify_home="$(mktemp -d "${TMPDIR:-/tmp}/caelestia-verify.XXXXXX")" || die "Could not create verification directory"
+    chmod 700 "$verify_home"
+    curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$verify_home/trusted.asc" || die "Could not download trusted public key"
+    fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$verify_home/trusted.asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
+    grep -Fxq "$trusted_fingerprint" <<< "$fingerprints" || die "Trusted signer fingerprint mismatch"
+    gpg --homedir "$verify_home" --batch --import "$verify_home/trusted.asc" >/dev/null 2>&1 || die "Could not import trusted public key"
+    status="$(GNUPGHOME="$verify_home" git -C "$BUNDLE_DIR" -c gpg.program=gpg verify-commit --raw HEAD 2>&1 || true)"
+    valid_fingerprint="$(printf '%s\n' "$status" | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
+    rm -rf -- "$verify_home"
+    [[ "$valid_fingerprint" == "$trusted_fingerprint" ]] || die "Update commit is not trusted"
+}
+
 section() {
     local title="$1"
     echo
@@ -19,7 +34,8 @@ section() {
     echo "-------------------------------------------------------------"
 }
 
-export BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export BUNDLE_DIR
 EXPECTED_COMMIT="${CAELESTIA_UPDATE_COMMIT:-}"
 if [[ -z "$EXPECTED_COMMIT" && "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
     die "Refusing mutable update: set CAELESTIA_UPDATE_COMMIT to a reviewed commit"
@@ -108,6 +124,10 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
         git -C "$BUNDLE_DIR" pull --ff-only origin "$BRANCH" || die "Refusing non-fast-forward update for origin/$BRANCH"
     fi
 
+    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
+        verify_update_commit
+    fi
+
     if [[ -f "$BUNDLE_DIR/.gitmodules" ]]; then
         info "Syncing and updating submodules..."
         git -C "$BUNDLE_DIR" submodule sync --recursive || die "Failed to sync submodules"
@@ -143,7 +163,8 @@ if [ "$EUID" -ne 0 ]; then
     if [ -t 1 ]; then
         sudo -v || die "Failed to obtain sudo privileges."
     elif command -v ksshaskpass &> /dev/null; then
-        export SUDO_ASKPASS="$(command -v ksshaskpass)"
+        SUDO_ASKPASS="$(command -v ksshaskpass)"
+        export SUDO_ASKPASS
         sudo -A -v || die "Failed to obtain sudo privileges."
     elif command -v pkexec &> /dev/null; then
         info "Requesting administrator privileges via pkexec..."

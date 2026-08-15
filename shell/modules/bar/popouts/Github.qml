@@ -115,7 +115,6 @@ ColumnLayout {
                     font.pointSize: Tokens.font.body.medium.pointSize * root.fontScale
                 }
             }
-
         }
     }
 

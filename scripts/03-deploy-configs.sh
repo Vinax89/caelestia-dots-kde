@@ -18,8 +18,8 @@ if [[ -z "${BACKUP_DIR:-}" ]]; then
     # Only reuse the cached backup dir if it belongs to *this* bundle's backups and matches the timestamp format.
     if [[ -n "$BACKUP_DIR" ]]; then
         case "$BACKUP_DIR" in
-            "$BUNDLE_DIR/backups/"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]) ;; 
-            *) BACKUP_DIR="" ;; 
+            "$BUNDLE_DIR/backups/"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+            *) BACKUP_DIR="" ;;
         esac
     fi
 
@@ -128,7 +128,7 @@ if [[ -f "$DOTS_DIR/starship.toml" ]]; then
     echo "    Deployed: starship.toml"
 fi
 
-#  Deploy Bridge Files 
+#  Deploy Bridge Files
 echo "  Deploying bridge files (bin, applications, systemd, kwin script)..."
 mkdir -p \
     "$HOME/.local/bin" \
@@ -152,6 +152,8 @@ for unit in "$BUNDLE_DIR/src/systemd/"*.service "$BUNDLE_DIR/src/systemd/"*.time
     install -m 0644 "$unit" "$HOME/.config/systemd/user/$(basename "$unit")"
 done
 systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user enable --now caelestia-update-checker.timer 2>/dev/null || \
+    echo "  [WARN]  Could not enable the Caelestia update checker timer." >&2
 
 # Update desktop database
 update-desktop-database "$HOME/.local/share/applications/" 2>/dev/null || true
@@ -161,8 +163,9 @@ if [[ "${APPLY_LOCKSCREEN:-true}" != "false" ]]; then
     echo "  Configuring KDE Lock Screen to use Caelestia..."
     if command -v kwriteconfig6 >/dev/null 2>&1 && command -v kpackagetool6 >/dev/null 2>&1; then
         if kpackagetool6 --list -t Plasma/Wallpaper 2>/dev/null | grep -q "net.dosowisko.PlasmaApplicationWallpaper"; then
+            printf -v lockscreen_command 'quickshell -p %q' "$HOME/.config/quickshell/caelestia/lockscreen.qml"
             kwriteconfig6 --file kscreenlockerrc --group Greeter --key WallpaperPlugin net.dosowisko.PlasmaApplicationWallpaper
-            kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key command "quickshell -p $HOME/.config/quickshell/caelestia/lockscreen.qml"
+            kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key command "$lockscreen_command"
             kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key fps 1
             kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key alwaysShowClock false
             kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key showMediaControls false

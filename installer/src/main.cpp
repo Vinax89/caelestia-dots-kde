@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
             Term::restore();
             return 0; // User backed out or exited
         }
-        
+
         // Export all answers as environment variables for the bash scripts
         for (const auto& pair : g_answers) {
             setenv(pair.first.c_str(), pair.second.c_str(), 1);
@@ -123,9 +123,15 @@ int main(int argc, char** argv) {
     check_signals();
     // Phase 5: Execute
     std::cerr << "[installer] phase 5: execute (" << Runner::steps.size() << " steps)" << std::endl;
-    Runner::execute();
+    const bool installation_succeeded = Runner::execute();
 
     check_signals();
+    if (!installation_succeeded) {
+        Term::restore();
+        cleanup_installer_runtime();
+        std::cerr << "[installer] done (failed)" << std::endl;
+        return 1;
+    }
     // Phase 6: Finalize
     std::cerr << "[installer] phase 6: summary_screen" << std::endl;
     UI::summary_screen();

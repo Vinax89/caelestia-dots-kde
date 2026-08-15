@@ -197,7 +197,9 @@ Item {
     Timer {
         id: checkTimer
 
-        interval: 100
+        // Fallback only; configuration/window connections handle most changes.
+        // A one-second cadence avoids ten full toplevel scans per second per video.
+        interval: 1000
         running: true
         repeat: true
 

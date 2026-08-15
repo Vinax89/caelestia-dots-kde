@@ -75,7 +75,7 @@ Singleton {
 
     Process {
         running: true
-        command: ["sh", "-c", "asdbctl get"] // To avoid warnings if asdbctl is not installed
+        command: [Paths.absolutePath("root:/scripts/read-brightness.sh")]
         stdout: StdioCollector {
             onStreamFinished: root.appleDisplayPresent = text.trim().length > 0
         }

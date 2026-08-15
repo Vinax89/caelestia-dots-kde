@@ -29,6 +29,10 @@ Singleton {
     }
 
     function getCommand(x, y, width, height, screenshotPath, action, saveDir = "") {
+        if (action === ScreenshotAction.Action.Search && !/^https:\/\/[^\s]+$/.test(root.fileUploadApiEndpoint)) {
+            console.warn("[Region Selector] Refusing non-HTTPS upload endpoint");
+            return;
+        }
         // Set command for action
         const rx = Math.round(x);
         const ry = Math.round(y);
@@ -41,9 +45,9 @@ Singleton {
         const cleanup = `rm -f '${escapeShellStr(screenshotPath)}'`
         const annotationCommand = `swappy -f -`; // default to swappy
         const uploadAndGetUrl = (filePath) => {
-            return `curl -sF files[]=@'${escapeShellStr(filePath)}' ${root.fileUploadApiEndpoint} | jq -r '.files[0].url'`
+            return `curl --fail --silent --show-error --max-time 30 -sF files[]=@'${escapeShellStr(filePath)}' "$1" | jq -er '.files[0].url'`
         }
-        
+
         const rawSaveDir = saveDir;
 
         switch (action) {
@@ -72,10 +76,10 @@ Singleton {
                     `SAVE_DIR="\${SAVE_DIR/#\\~/$HOME}"; ` +
                     `mkdir -p "$SAVE_DIR" && ` +
                     `saveFile="$SAVE_DIR/screenshot-$(date +%Y-%m-%d_%H.%M.%S).png" && ` +
-                    `TMPF=$(mktemp /tmp/qs-snip-XXXXXX.png); ` +
+                    `TMPF=$(mktemp "${Paths.runtimeTemp}/qs-snip-XXXXXX.png"); ` +
                     `${cropBase} "$TMPF" && ` +
                     `CONF_DIR=$(mktemp -d); ln -s ~/.config/* "$CONF_DIR/" 2>/dev/null || true; rm -rf "$CONF_DIR/swappy"; mkdir -p "$CONF_DIR/swappy"; ` +
-                    `SWAPPY_OUT_DIR=$(mktemp -d /tmp/swappy-out-XXXXXX); ` +
+                    `SWAPPY_OUT_DIR=$(mktemp -d "${Paths.runtimeTemp}/swappy-out-XXXXXX"); ` +
                     `if [ -f ~/.config/swappy/config ]; then cp ~/.config/swappy/config "$CONF_DIR/swappy/config"; else echo "[Default]" > "$CONF_DIR/swappy/config"; fi; ` +
                     `sed -i '/^early_exit.*/d; /^save_dir.*/d; /^save_filename_format.*/d; /^auto_save.*/d' "$CONF_DIR/swappy/config"; ` +
                     `echo -e "early_exit=true\\nsave_dir=$SWAPPY_OUT_DIR\\nsave_filename_format=swappy-out.png\\nauto_save=true" >> "$CONF_DIR/swappy/config"; ` +
@@ -98,26 +102,25 @@ Singleton {
             case ScreenshotAction.Action.Search: {
                 const tmpFile = Paths.runtimeTemp("snip-search.png")
                 return ["bash", "-c",
-                    `set -euo pipefail; ` +
+                    `set -euo pipefail; trap "rm -f '${escapeShellStr(tmpFile)}' '${escapeShellStr(screenshotPath)}'" EXIT; ` +
                     `${cropToFile(tmpFile)} && ` +
-                    `xdg-open "${root.imageSearchEngineBaseUrl}$(${uploadAndGetUrl(tmpFile)})"; ` +
-                    `rm -f '${tmpFile}'; ${cleanup}`
-                ]
+                    `url=$(${uploadAndGetUrl(tmpFile)}) && xdg-open "${root.imageSearchEngineBaseUrl}$url"`
+                , root.fileUploadApiEndpoint]
             }
 
             case ScreenshotAction.Action.CharRecognition:
                 return ["bash", "-c",
-                    `set -euo pipefail; TMPF=$(mktemp /tmp/qs-snip-XXXXXX.png); ` +
+                    `set -euo pipefail; TMPF=$(mktemp "${Paths.runtimeTemp}/qs-snip-XXXXXX.png"); ` +
                     `${cropBase} "$TMPF" && ` +
                     `tesseract "$TMPF" stdout -l $(tesseract --list-langs | awk 'NR>1{print $1}' | tr '\\n' '+' | sed 's/\\+$/\\n/') | wl-copy; ` +
                     `rm -f "$TMPF"; ${cleanup}`
                 ]
 
             case ScreenshotAction.Action.Record:
-                return ["bash", "-c", `spectacle -R r`]
+                return ["spectacle", "-R", "r"]
 
             case ScreenshotAction.Action.RecordWithSound:
-                return ["bash", "-c", `spectacle -R r`]
+                return ["spectacle", "-R", "r"]
 
             default:
                 console.warn("[Region Selector] Unknown snip action, skipping snip.");
