@@ -17,7 +17,6 @@ import argparse
 import http.client
 import ipaddress
 import socket
-import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -162,8 +161,6 @@ def fetch_url(url: str) -> str:
     with _opener.open(req, timeout=TIMEOUT) as resp:
         raw = resp.read(MAX_BYTES)
     return raw.decode("utf-8", errors="ignore")
-
-
 
 
 class _VisibleTextExtractor(HTMLParser):
