@@ -8,6 +8,7 @@ SRC_DIR="$BUNDLE_DIR/src"
 DOTS_DIR="$SRC_DIR/dots"
 FISH_DIR="$SRC_DIR/dots-extra"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde"
+DEPLOYED_DIR="$CACHE_DIR/deployed"
 BACKUP_DIR_FILE="$CACHE_DIR/backup-dir.txt"
 if [[ -z "${BACKUP_DIR:-}" ]]; then
     BACKUP_DIR=""
@@ -38,6 +39,7 @@ echo "  Step 3/11  Config Deployment"
 echo ""
 
 mkdir -p "$BACKUP_DIR"
+mkdir -p "$DEPLOYED_DIR"
 
 if [[ ! -d "$DOTS_DIR" ]] || [[ -z "$(ls -A "$DOTS_DIR" 2>/dev/null)" ]]; then
     echo "  [ERR] Missing src/dots content. Run: git submodule update --init --recursive src/dots"
@@ -121,16 +123,85 @@ deploy_config_dir() {
     return 1
 }
 
-echo "  Deploying Caelestia configs..."
-for config in btop fastfetch foot kitty micro thunar; do
-    if [[ -d "$DOTS_DIR/$config" ]]; then
-        if ! deploy_config_dir "$DOTS_DIR/$config" "$HOME/.config/$config"; then
-            echo "[FATAL] Failed to deploy $config; existing config was preserved." >&2
-            exit 1
-        fi
-        echo "    Deployed: $config"
+config_checksum() {
+    local path="$1"
+
+    if [[ ! -e "$path" ]]; then
+        printf 'missing\n'
+        return
     fi
+
+    if [[ -d "$path" ]]; then
+        (
+            cd "$path"
+            find . -type f -print0 | sort -z | while IFS= read -r -d '' file; do
+                sha256sum "$file"
+            done
+        ) | sha256sum | awk '{print $1}'
+    else
+        sha256sum "$path" | awk '{print $1}'
+    fi
+}
+
+deploy_config() {
+    local config="$1"
+    local source="$2"
+    local target="$HOME/.config/$config"
+    local stamp="$DEPLOYED_DIR/$config.sha256"
+
+    if [[ ! -d "$source" ]]; then
+        return
+    fi
+
+    if [[ -e "$target" ]]; then
+        local current expected
+        current="$(config_checksum "$target")"
+        expected=""
+        if [[ -f "$stamp" ]]; then
+            expected="$(<"$stamp")"
+        fi
+
+        if [[ -z "$expected" || "$current" != "$expected" ]]; then
+            echo "    [SKIP] Preserving locally modified config: $config"
+            echo "           Backup: $BACKUP_DIR/.config/$config"
+            return
+        fi
+    fi
+
+    # Staged swap rather than rm -rf + cp: a failed copy leaves the previous
+    # config in place instead of a half-deployed directory.
+    if ! deploy_config_dir "$source" "$target"; then
+        echo "[FATAL] Failed to deploy $config; existing config was preserved." >&2
+        exit 1
+    fi
+    config_checksum "$target" > "$stamp"
+    echo "    Deployed: $config"
+}
+
+echo "  Deploying Caelestia configs..."
+for config in btop fastfetch foot kitty micro; do
+    deploy_config "$config" "$DOTS_DIR/$config"
 done
+
+if [[ "${INSTALL_THUNAR:-false}" == "true" ]]; then
+    thunar_source="$DOTS_DIR/thunar"
+    thunar_target="$HOME/.config/thunar"
+    if [[ -d "$thunar_source" ]]; then
+        mkdir -p "$thunar_target"
+        for file in thunar-volman.xml uca.xml; do
+            if [[ -f "$thunar_source/$file" ]]; then
+                cp "$thunar_source/$file" "$thunar_target/$file"
+                echo "    Deployed: thunar/$file"
+            else
+                echo "    [WARN] Missing optional Thunar file: thunar/$file"
+            fi
+        done
+    else
+        echo "    [WARN] Thunar integration files unavailable in src/dots/thunar"
+    fi
+else
+    echo "    [SKIP] Thunar integration files disabled by user choice"
+fi
 
 echo "  Deploying extra configs..."
 for config in fish fastfetch; do
@@ -139,13 +210,7 @@ for config in fish fastfetch; do
         continue
     fi
 
-    if [[ -d "$FISH_DIR/$config" ]]; then
-        if ! deploy_config_dir "$FISH_DIR/$config" "$HOME/.config/$config"; then
-            echo "[FATAL] Failed to deploy $config; existing config was preserved." >&2
-            exit 1
-        fi
-        echo "    Deployed: $config"
-    fi
+    deploy_config "$config" "$FISH_DIR/$config"
 done
 
 # Backup existing starship config
@@ -157,14 +222,36 @@ if [[ -f "$HOME/.config/starship.toml" ]]; then
     fi
 fi
 
-# Deploy starship.toml
+# Deploy starship.toml unless the previous Caelestia copy was locally edited.
 if [[ -f "$DOTS_DIR/starship.toml" ]]; then
     mkdir -p "$HOME/.config"
-    if ! install -m 0644 "$DOTS_DIR/starship.toml" "$HOME/.config/starship.toml"; then
-        echo "[FATAL] Failed to deploy starship.toml." >&2
-        exit 1
+    starship_target="$HOME/.config/starship.toml"
+    starship_stamp="$DEPLOYED_DIR/starship.toml.sha256"
+    if [[ -e "$starship_target" ]]; then
+        starship_current="$(config_checksum "$starship_target")"
+        starship_expected=""
+        if [[ -f "$starship_stamp" ]]; then
+            starship_expected="$(<"$starship_stamp")"
+        fi
+        if [[ -z "$starship_expected" || "$starship_current" != "$starship_expected" ]]; then
+            echo "    [SKIP] Preserving locally modified config: starship.toml"
+            echo "           Backup: $BACKUP_DIR/.config/starship.toml"
+        else
+            if ! install -m 0644 "$DOTS_DIR/starship.toml" "$starship_target"; then
+                echo "[FATAL] Failed to deploy starship.toml." >&2
+                exit 1
+            fi
+            config_checksum "$starship_target" > "$starship_stamp"
+            echo "    Deployed: starship.toml"
+        fi
+    else
+        if ! install -m 0644 "$DOTS_DIR/starship.toml" "$starship_target"; then
+            echo "[FATAL] Failed to deploy starship.toml." >&2
+            exit 1
+        fi
+        config_checksum "$starship_target" > "$starship_stamp"
+        echo "    Deployed: starship.toml"
     fi
-    echo "    Deployed: starship.toml"
 fi
 
 #  Deploy Bridge Files
@@ -203,18 +290,30 @@ echo "  [OK]  Bridge files deployed."
 
 if [[ "${APPLY_LOCKSCREEN:-true}" != "false" ]]; then
     echo "  Configuring KDE Lock Screen to use Caelestia..."
-    if command -v kwriteconfig6 >/dev/null 2>&1 && command -v kpackagetool6 >/dev/null 2>&1; then
-        if kpackagetool6 --list -t Plasma/Wallpaper 2>/dev/null | grep -q "net.dosowisko.PlasmaApplicationWallpaper"; then
-            printf -v lockscreen_command 'quickshell -p %q' "$HOME/.config/quickshell/caelestia/lockscreen.qml"
-            kwriteconfig6 --file kscreenlockerrc --group Greeter --key WallpaperPlugin net.dosowisko.PlasmaApplicationWallpaper
-            kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key command "$lockscreen_command"
-            kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key fps 1
-            kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key alwaysShowClock false
-            kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key showMediaControls false
-            echo "  [OK]  KDE Lock Screen configured."
-        else
-            echo "  [WARN] plasma-wallpaper-application plugin not installed. Skipping KDE Lock Screen configuration."
-        fi
+    WALLPAPER_STAMP="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/wallpaper-plugin-installed"
+    PLUGIN_OK=false
+    if [[ "${CAELESTIA_WALLPAPER_PLUGIN_INSTALLED:-false}" == "true" ]]; then
+        PLUGIN_OK=true
+    elif command -v kpackagetool6 >/dev/null 2>&1 \
+        && kpackagetool6 --list -t Plasma/Wallpaper 2>/dev/null \
+        | grep -q "net.dosowisko.PlasmaApplicationWallpaper"; then
+        PLUGIN_OK=true
+    elif ! command -v kpackagetool6 >/dev/null 2>&1 && [[ -f "$WALLPAPER_STAMP" ]]; then
+        PLUGIN_OK=true
+    fi
+
+    if $PLUGIN_OK && command -v kwriteconfig6 >/dev/null 2>&1; then
+        # The greeter runs this command through a shell, so the path must be
+        # shell-quoted (%q) rather than interpolated raw.
+        printf -v lockscreen_command 'quickshell -p %q' "$HOME/.config/quickshell/caelestia/lockscreen.qml"
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --key WallpaperPlugin net.dosowisko.PlasmaApplicationWallpaper
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key command "$lockscreen_command"
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key fps 1
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key alwaysShowClock false
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key showMediaControls false
+        echo "  [OK]  KDE Lock Screen configured."
+    elif ! $PLUGIN_OK; then
+        echo "  [WARN] plasma-wallpaper-application plugin not installed. Skipping KDE Lock Screen configuration."
     else
         echo "  [WARN] KDE config tools not found. Skipping KDE Lock Screen configuration."
     fi

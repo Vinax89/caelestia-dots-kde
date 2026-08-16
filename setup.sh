@@ -122,6 +122,20 @@ detect_country() {
     return 1
 }
 
+is_cachyos() {
+    local os_id=""
+    local os_like=""
+
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        os_id="${ID:-}"
+        os_like="${ID_LIKE:-}"
+    fi
+
+    [[ "$os_id" == "cachyos" || " $os_like " == *" cachyos "* ]]
+}
+
 silent_refresh_pacman_sources() {
     if [[ "$BASE_DISTRO" != "arch" ]]; then
         return 0
@@ -150,38 +164,40 @@ silent_refresh_pacman_sources() {
             fi
         }
 
-        # Reflector: rank pacman mirrors by speed. Install on-the-fly if
-        # missing (single -Sy, not -Syy).
-        if ! command -v reflector >/dev/null 2>&1; then
-            as_root pacman -Syu --noconfirm reflector >/dev/null 2>&1 || true
-        fi
-
-        if command -v reflector >/dev/null 2>&1; then
-            local reflector_country
-            # `|| true` matters under `set -e`: detect_country returns non-zero
-            # whenever the geo-IP lookup is disabled or fails, and a bare
-            # assignment from a failing substitution aborts the installer.
-            reflector_country="$(detect_country || true)"
-            local -a reflector_args=(--latest 20 --protocol https --sort rate)
-            if [[ -n "$reflector_country" ]]; then
-                echo "[INFO]  Ranking pacman mirrors by download speed (country: $reflector_country)..."
-                reflector_args+=(--country "$reflector_country")
+        if is_cachyos; then
+            if command -v cachyos-rate-mirrors >/dev/null 2>&1; then
+                echo "[INFO]  Ranking Arch and CachyOS mirrors using cachyos-rate-mirrors..."
+                as_root cachyos-rate-mirrors >/dev/null 2>&1 || echo "[WARN]  cachyos-rate-mirrors failed, continuing with current mirrors."
             else
-                if [[ "${CAELESTIA_GEOIP_MIRRORS:-0}" == "1" ]]; then
-                    echo "[INFO]  Ranking pacman mirrors by download speed (country detection failed, using global pool)..."
-                else
-                    echo "[INFO]  Ranking pacman mirrors by download speed (global pool)."
-                    echo "[INFO]  Set CAELESTIA_GEOIP_MIRRORS=1 to narrow this by country via a third-party geo-IP lookup."
-                fi
+                echo "[WARN]  cachyos-rate-mirrors is not installed; continuing with current mirrors."
+            fi
+        else
+            # Reflector is the fallback for Arch-based systems without CachyOS tooling.
+            if ! command -v reflector >/dev/null 2>&1; then
+                as_root pacman -Syu --noconfirm reflector >/dev/null 2>&1 || true
             fi
 
-            as_root reflector "${reflector_args[@]}" --save /etc/pacman.d/mirrorlist >/dev/null 2>&1 || echo "[WARN]  reflector failed, continuing with current mirrors."
-        fi
-
-        # Re-rank CachyOS-specific mirrors (separate from Arch mirrorlist).
-        if command -v cachyos-rate-mirrors >/dev/null 2>&1; then
-            echo "[INFO]  Ranking CachyOS mirrors by download speed..."
-            as_root cachyos-rate-mirrors >/dev/null 2>&1 || echo "[WARN]  cachyos-rate-mirrors failed, continuing with current mirrors."
+            if command -v reflector >/dev/null 2>&1; then
+                local reflector_country
+                # `|| true` matters under `set -e`: detect_country returns non-zero
+                # whenever the geo-IP lookup is disabled or fails, and a bare
+                # assignment from a failing substitution aborts the installer.
+                reflector_country="$(detect_country || true)"
+                local -a reflector_args=(--latest 20 --protocol https --sort rate)
+                if [[ -n "$reflector_country" ]]; then
+                    echo "[INFO]  Ranking pacman mirrors by download speed (country: $reflector_country)..."
+                    reflector_args+=(--country "$reflector_country")
+                else
+                    if [[ "${CAELESTIA_GEOIP_MIRRORS:-0}" == "1" ]]; then
+                        echo "[INFO]  Ranking pacman mirrors by download speed (country detection failed, using global pool)..."
+                    else
+                        echo "[INFO]  Ranking pacman mirrors by download speed (global pool)."
+                        echo "[INFO]  Set CAELESTIA_GEOIP_MIRRORS=1 to narrow this by country via a third-party geo-IP lookup."
+                    fi
+                fi
+                as_root reflector "${reflector_args[@]}" --save /etc/pacman.d/mirrorlist >/dev/null 2>&1 \
+                    || echo "[WARN]  reflector failed, continuing with current mirrors."
+            fi
         fi
 
         # Pre-install dos2unix for CRLF normalization later.
@@ -192,6 +208,43 @@ silent_refresh_pacman_sources() {
         as_root pacman -Syu --noconfirm >/dev/null 2>&1 || echo "[WARN]  Failed to refresh pacman sources early. Continuing..."
         unset -f as_root
     fi
+}
+
+silent_refresh_native_sources() {
+    local have_root=0
+
+    case "$BASE_DISTRO" in
+        fedora|debian) ;;
+        *) return 0 ;;
+    esac
+
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        have_root=1
+    elif sudo -v; then
+        have_root=1
+    else
+        echo "[WARN]  Skipping package source refresh (sudo access not available)."
+        return 0
+    fi
+
+    case "$BASE_DISTRO" in
+        fedora)
+            echo "[INFO]  Refreshing Fedora repository metadata using DNF..."
+            if (( have_root )) && [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+                dnf makecache --refresh >/dev/null 2>&1 || echo "[WARN]  Failed to refresh DNF metadata. Continuing..."
+            else
+                sudo -n dnf makecache --refresh >/dev/null 2>&1 || echo "[WARN]  Failed to refresh DNF metadata. Continuing..."
+            fi
+            ;;
+        debian)
+            echo "[INFO]  Refreshing Debian repository metadata using APT..."
+            if (( have_root )) && [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+                apt-get update >/dev/null 2>&1 || echo "[WARN]  Failed to refresh APT metadata. Continuing..."
+            else
+                sudo -n apt-get update >/dev/null 2>&1 || echo "[WARN]  Failed to refresh APT metadata. Continuing..."
+            fi
+            ;;
+    esac
 }
 
 run_arch_pacman_install() {
@@ -237,7 +290,11 @@ export PACKAGE_STATE_DIR PACKAGE_BEFORE PACKAGE_MANIFEST
 
 # Only run in the outer (pre-tmux) invocation.
 if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
-    silent_refresh_pacman_sources
+    if [[ "$BASE_DISTRO" == "arch" ]]; then
+        silent_refresh_pacman_sources
+    elif [[ "$BASE_DISTRO" == "fedora" || "$BASE_DISTRO" == "debian" ]]; then
+        silent_refresh_native_sources
+    fi
 fi
 
 normalize_line_endings_first() {

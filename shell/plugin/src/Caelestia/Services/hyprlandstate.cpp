@@ -1,12 +1,9 @@
 #include "hyprlandstate.hpp"
+#include "plasmawindows.hpp"
 
 #include <qdir.h>
 #include <qlocalsocket.h>
 #include <qloggingcategory.h>
-#include <qfilesystemwatcher.h>
-#include <qfileinfo.h>
-#include <qsavefile.h>
-#include <unistd.h>
 
 Q_LOGGING_CATEGORY(lcHyprState, "caelestia.services.hyprlandstate", QtInfoMsg)
 
@@ -21,39 +18,22 @@ HyprlandState::HyprlandState(QObject* parent)
 
     const auto his = qEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE");
     if (his.isEmpty()) {
-        qCWarning(lcHyprState) << "$HYPRLAND_INSTANCE_SIGNATURE is unset. Using KDE fallback bridge.";
-        m_kwinWatcher = new QFileSystemWatcher(this);
-        QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR", "/tmp");
-        QString filePath = runtimeDir + "/qs_kwin_windows.json";
-        if (!QFile::exists(filePath)) {
-            QSaveFile f(filePath);
-            if (f.open(QIODevice::WriteOnly)) {
-                if (f.write("[]") != 2 || !f.commit())
-                    qCWarning(lcHyprState) << "Failed to initialize" << filePath << f.errorString();
-            }
-        }
-        if (QFile::exists(filePath)) {
-            m_kwinWatcher->addPath(filePath);
-        }
-        connect(m_kwinWatcher, &QFileSystemWatcher::fileChanged, this, [this](const QString&) {
-            updateWindowList();
-        });
-        updateAll();
+        qCWarning(lcHyprState) << "$HYPRLAND_INSTANCE_SIGNATURE is unset. Using KDE (PlasmaWindows) bridge.";
+        auto* pw = PlasmaWindows::instance();
+        connect(pw, &PlasmaWindows::windowAdded, this, &HyprlandState::onKWinWindowListChanged);
+        connect(pw, &PlasmaWindows::handleLost, this, &HyprlandState::onKWinWindowListChanged);
+        // Push the initial state that PlasmaWindows already has
+        onKWinWindowListChanged();
+        onKWinActiveWindowChanged();
         return;
     }
 
-    const auto safeSocketDir = [](const QString& path) {
-        const QFileInfo info(path);
-        const auto unsafe = QFile::WriteGroup | QFile::WriteOther;
-        return info.isDir() && info.ownerId() == static_cast<uint>(geteuid())
-            && !(info.permissions() & unsafe);
-    };
     auto hyprDir = QString("%1/hypr/%2").arg(qEnvironmentVariable("XDG_RUNTIME_DIR"), his);
-    if (!safeSocketDir(hyprDir)) {
+    if (!QDir(hyprDir).exists()) {
         hyprDir = "/tmp/hypr/" + his;
 
-        if (!safeSocketDir(hyprDir)) {
-            qCWarning(lcHyprState) << "Refusing unsafe or missing Hyprland socket directory:" << hyprDir;
+        if (!QDir(hyprDir).exists()) {
+            qCWarning(lcHyprState) << "Hyprland socket directory does not exist. Unable to connect to Hyprland socket.";
             return;
         }
     }
@@ -98,43 +78,53 @@ void HyprlandState::updateAll() {
     updateActiveWorkspace();
 }
 
-void HyprlandState::updateWindowList() {
-    if (m_kwinWatcher) {
-        QFile f(qEnvironmentVariable("XDG_RUNTIME_DIR", "/tmp") + "/qs_kwin_windows.json");
-        if (f.open(QIODevice::ReadOnly)) {
-            const auto doc = QJsonDocument::fromJson(f.readAll());
-            const auto clients = doc.array();
-            QVariantList newList;
-            QVariantMap newByAddress;
-            QVariantList newAddresses;
-            QVariantMap newActiveWindow;
-            for (const auto& c : clients) {
-                const auto obj = c.toObject();
-                const auto cls = obj.value("class").toString();
-                if (cls.isEmpty() || cls.toLower().contains("quickshell")) continue;
-                const auto variant = obj.toVariantMap();
-                newList.append(variant);
-                const auto addr = obj.value("address").toString();
-                newByAddress.insert(addr, variant);
-                newAddresses.append(addr);
-
-                if (obj.value("focused").toBool()) {
-                    newActiveWindow = variant;
-                }
-            }
-            m_windowList = newList;
-            m_windowByAddress = newByAddress;
-            m_addresses = newAddresses;
-
-            if (m_activeWindow != newActiveWindow) {
-                m_activeWindow = newActiveWindow;
-                emit activeWindowChanged();
-            }
-
-            emit windowListChanged();
+void HyprlandState::onKWinWindowListChanged() {
+    auto* pw = PlasmaWindows::instance();
+    QVariantList newList;
+    QVariantMap newByAddress;
+    QVariantList newAddresses;
+    QVariantMap newActiveWindow;
+    for (const QString& uuid : pw->windowUuids()) {
+        auto* handle = pw->handleFor(uuid);
+        if (!handle) continue;
+        const auto cls = handle->appId();
+        if (cls.isEmpty() || cls.toLower().contains("quickshell")) continue;
+        const QVariantMap variant = {
+            { "address", handle->uuid() },
+            { "pid",     static_cast<int>(handle->pid()) },
+            { "title",   handle->title() },
+            { "class",   handle->appId() },
+            { "x",       handle->x() },
+            { "y",       handle->y() },
+            { "width",   static_cast<int>(handle->width()) },
+            { "height",  static_cast<int>(handle->height()) },
+            { "fullscreen", handle->isFullscreen() },
+            { "maximized",  handle->isMaximized() },
+            { "minimized",  handle->isMinimized() },
+        };
+        newList.append(variant);
+        newByAddress.insert(handle->uuid(), variant);
+        newAddresses.append(handle->uuid());
+        if (handle->isActive()) {
+            newActiveWindow = variant;
         }
-        return;
     }
+    m_windowList = newList;
+    m_windowByAddress = newByAddress;
+    m_addresses = newAddresses;
+    emit windowListChanged();
+    // Also update active window from the same pass
+    if (m_activeWindow != newActiveWindow) {
+        m_activeWindow = newActiveWindow;
+        emit activeWindowChanged();
+    }
+}
+
+void HyprlandState::onKWinActiveWindowChanged() {
+    // Active window state is derived in onKWinWindowListChanged; nothing more needed here.
+}
+
+void HyprlandState::updateWindowList() {
 
     if (!m_clientsRefresh.isNull()) {
         m_clientsRefresh->close();
@@ -321,19 +311,12 @@ HyprlandState::SocketPtr HyprlandState::makeRequest(
 
     auto socket = SocketPtr::create(this);
 
-    const auto response = QSharedPointer<QByteArray>::create();
-    const auto completed = QSharedPointer<bool>::create(false);
     QObject::connect(socket.data(), &QLocalSocket::connected, this, [=, this]() {
-        QObject::connect(socket.data(), &QLocalSocket::readyRead, this, [socket, response]() {
-            response->append(socket->readAll());
+        QObject::connect(socket.data(), &QLocalSocket::readyRead, this, [socket, callback]() {
+            const auto response = socket->readAll();
+            callback(true, std::move(response));
+            socket->close();
         });
-        QObject::connect(socket.data(), &QLocalSocket::disconnected, this,
-            [socket, response, completed, callback]() {
-                if (*completed)
-                    return;
-                *completed = true;
-                callback(true, std::move(*response));
-            });
 
         socket->write(request.toUtf8());
         socket->flush();
@@ -341,16 +324,7 @@ HyprlandState::SocketPtr HyprlandState::makeRequest(
 
     QObject::connect(socket.data(), &QLocalSocket::errorOccurred, this, [=](QLocalSocket::LocalSocketError err) {
         qCWarning(lcHyprState) << "makeRequest: error making request:" << err << "| request:" << request;
-        if (err == QLocalSocket::PeerClosedError) {
-            response->append(socket->readAll());
-            if (!*completed) {
-                *completed = true;
-                callback(true, std::move(*response));
-            }
-        } else if (!*completed) {
-            *completed = true;
-            callback(false, {});
-        }
+        callback(false, {});
         socket->close();
     });
 
