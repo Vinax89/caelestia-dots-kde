@@ -220,6 +220,7 @@ int main(int argc, char** argv) {
             && std::filesystem::exists(menu_probe, probe_error)
             && std::filesystem::exists(script_probe, probe_error);
         if (looks_like_bundle) {
+            std::error_code error;
             std::filesystem::remove_all(g_bundle_dir + "/shell/build", error);
             std::filesystem::remove_all(g_bundle_dir + "/shell/plugin/build", error);
         } else {
