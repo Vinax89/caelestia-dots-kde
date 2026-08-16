@@ -198,18 +198,22 @@ if [ "$EUID" -ne 0 ]; then
         # its own short-lived authorization caching, so the user won't
         # be prompted for every single command.
         info "Requesting administrator privileges via pkexec (PolicyKit)…"
-        pkexec true || die "Failed to obtain administrator privileges."
+        # Root is optional for the update itself (the only root-requiring
+        # step, the workspace-tracker effect install, warns and continues),
+        # so a failed priming must not abort the whole update — e.g. when
+        # pkexec is unavailable headless or rejects the environment's SHELL.
+        pkexec true || warn "Could not prime administrator privileges; continuing without root (system-level steps will be skipped)."
         # Skip the sudo keepalive — it's useless without a sudo timestamp.
         # The sudo wrapper ($UPD_DIR/bin/sudo) will use pkexec for each
         # elevation via its fallback path.
         SUDO_ASK_CMD=()  # signal: skip sudo -v below
     else
-        die "Cannot elevate privileges — no terminal, ksshaskpass, or pkexec available."
+        warn "No privilege helper available (terminal, ksshaskpass, pkexec); continuing without root — system-level steps will be skipped."
     fi
 
     if [[ ${#SUDO_ASK_CMD[@]} -gt 0 ]]; then
         info "Requesting administrator privileges (used for system update and installing the shell)..."
-        "${SUDO_ASK_CMD[@]}" || die "Failed to obtain administrator privileges."
+        "${SUDO_ASK_CMD[@]}" || warn "Could not prime administrator privileges; continuing without root (system-level steps will be skipped)."
     fi
 
     # Export SUDO_ASKPASS so any sub-scripts that use raw /usr/bin/sudo -A

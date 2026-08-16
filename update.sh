@@ -173,18 +173,22 @@ fi
 # SUDO_ASKPASS for every child process.
 
 if [ "$EUID" -ne 0 ]; then
-    # Determine the best interactive helper for the initial prompt.
+    # Determine the best interactive helper for the initial prompt. Root is
+    # optional for the update itself (the only root-requiring step, the
+    # workspace-tracker effect install, warns and continues), so a failed
+    # priming must not abort the whole update — e.g. when pkexec rejects the
+    # environment's SHELL or no polkit agent is reachable.
     if [ -t 1 ]; then
-        sudo -v || die "Failed to obtain sudo privileges."
+        sudo -v || warn "Could not prime sudo; continuing without root (system-level steps will be skipped)."
     elif command -v ksshaskpass &> /dev/null; then
         SUDO_ASKPASS="$(command -v ksshaskpass)"
         export SUDO_ASKPASS
-        sudo -A -v || die "Failed to obtain sudo privileges."
+        sudo -A -v || warn "Could not prime sudo; continuing without root (system-level steps will be skipped)."
     elif command -v pkexec &> /dev/null; then
         info "Requesting administrator privileges via pkexec..."
-        pkexec true || die "Failed to obtain administrator privileges."
+        pkexec true || warn "Could not prime administrator privileges; continuing without root (system-level steps will be skipped)."
     else
-        die "Cannot elevate privileges — no terminal, ksshaskpass, or pkexec available."
+        warn "No privilege helper available (terminal, ksshaskpass, pkexec); continuing without root — system-level steps will be skipped."
     fi
 
     # Background keepalive: refresh the sudo timestamp every 30 seconds.
