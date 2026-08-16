@@ -61,7 +61,7 @@ Singleton {
                 props.elapsed = 0;
                 props.paused = false;
             }
-            
+
             root._wasRunning = isRunning;
             props.running = isRunning;
 

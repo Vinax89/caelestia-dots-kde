@@ -145,7 +145,7 @@ public:
     /// the connection is already gone. Uuids are normalised, so callers need
     /// not care whether theirs arrived brace-wrapped.
     PlasmaWindowHandle* handleFor(const QString& uuid);
-    
+
     QList<QString> windowUuids() const { return m_handles.keys(); }
 
     /// KWin hands out window ids as QUuid::toString(), i.e. brace-wrapped.

@@ -400,7 +400,8 @@ jobs:
             meson fftw iniparser \
             qt6-base qt6-declarative qt6-shadertools qt6-wayland \
             kwindowsystem kguiaddons kglobalaccel kconfig kconfigwidgets \
-            kcoreaddons ki18n kpackage kio kservice wayland libx11 libdrm pipewire \
+            kcoreaddons ki18n kpackage kio kservice networkmanager-qt \
+            wayland libx11 libdrm pipewire \
             libqalculate aubio
 
       - name: Build pinned libcava

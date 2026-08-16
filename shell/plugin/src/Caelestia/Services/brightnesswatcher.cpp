@@ -61,9 +61,9 @@ BrightnessWatcher::BrightnessWatcher(QObject* parent)
     : QObject(parent) {
     m_registry = new KdeOutputDeviceRegistry(this);
     connect(m_registry, &KdeOutputDeviceRegistry::deviceAdded, this, &BrightnessWatcher::onDeviceAdded);
-    
+
     m_management = new KdeOutputManagement(this);
-    
+
     // QtWayland requires us to explicitly check if the extension was successfully bound.
     // However, it binds asynchronously. If QGuiApplication is already running, it binds immediately.
 }
@@ -107,9 +107,9 @@ void BrightnessWatcher::setBrightness(const QString& outputName, qreal value) {
     cfg.apply();
     // Destroying the config object when it goes out of scope?
     // According to protocol, the server cleans up the config after apply or destroy.
-    // Actually, we must call destroy() on the wrapper to free client-side memory, 
+    // Actually, we must call destroy() on the wrapper to free client-side memory,
     // or let it leak? QtWayland wrappers don't automatically destroy the Wayland object on C++ destruction unless told.
-    // Let's call destroy() after apply(), but wait - apply is asynchronous. 
+    // Let's call destroy() after apply(), but wait - apply is asynchronous.
     // Usually destroying the object right after apply is safe in Wayland.
     cfg.destroy();
 }
@@ -119,7 +119,7 @@ void BrightnessWatcher::onDeviceAdded(KdeOutputDevice* device) {
     connect(device, &KdeOutputDevice::nameChanged, this, [this, device]() {
         if (!device->name().isEmpty()) {
             m_devices[device->name()] = device;
-            
+
             connect(device, &KdeOutputDevice::brightnessChanged, this, [this, device]() {
                 emit brightnessChanged(device->name(), device->brightness() / 10000.0);
             });

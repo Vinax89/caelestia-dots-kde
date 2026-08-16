@@ -62,7 +62,7 @@ void PlasmaWindowHandle::org_kde_plasma_window_state_changed(uint32_t flags) {
     bool fullscreen = (flags & QtWayland::org_kde_plasma_window_management::state_fullscreen);
     bool demandsAttention = (flags & QtWayland::org_kde_plasma_window_management::state_demands_attention);
     bool skipTaskbar = (flags & QtWayland::org_kde_plasma_window_management::state_skiptaskbar);
-    
+
     bool changed = false;
     if (m_isActive != active) { m_isActive = active; changed = true; }
     if (m_isMinimized != minimized) { m_isMinimized = minimized; changed = true; }
@@ -70,7 +70,7 @@ void PlasmaWindowHandle::org_kde_plasma_window_state_changed(uint32_t flags) {
     if (m_isFullscreen != fullscreen) { m_isFullscreen = fullscreen; changed = true; }
     if (m_demandsAttention != demandsAttention) { m_demandsAttention = demandsAttention; changed = true; }
     if (m_skipTaskbar != skipTaskbar) { m_skipTaskbar = skipTaskbar; changed = true; }
-    
+
     if (changed) {
         emit stateChanged();
     }
@@ -127,7 +127,7 @@ PlasmaWindowManagement::PlasmaWindowManagement(QObject* parent)
                " X-KDE-Wayland-Interfaces in its desktop file.";
     } else {
 // qDebug() << "org_kde_plasma_window_management is successfully bound at version:" << this->QWaylandClientExtension::version();
-        
+
         if (this->QWaylandClientExtension::version() >= 17) {
 // qDebug() << "Version >= 17, manually fetching stacking order on startup...";
             auto* stacking_order_obj = get_stacking_order();
@@ -196,8 +196,8 @@ PlasmaWindows::PlasmaWindows(QObject* parent)
     if (auto* app = QCoreApplication::instance()) {
         connect(app, &QCoreApplication::aboutToQuit, this, &PlasmaWindows::shutdown);
     }
-    
-    // Eagerly initialize the Wayland management interface so we receive the 
+
+    // Eagerly initialize the Wayland management interface so we receive the
     // initial burst of windowWithUuid events from the compositor.
 // qDebug() << "PlasmaWindows::PlasmaWindows initialized, calling available().";
     available();
@@ -235,11 +235,11 @@ bool PlasmaWindows::available() {
 
 void PlasmaWindows::onWindowWithUuid(uint32_t id, const QString& raw_uuid) {
     const auto key = normaliseUuid(raw_uuid);
-    
+
     if (m_handles.contains(key)) {
         return; // We already know about this one.
     }
-    
+
     // We MUST request the window object using the uuid because get_window(id) is
     // deprecated and actively crashes Plasma 6!
     auto* window = m_management->get_window_by_uuid(raw_uuid);
@@ -247,7 +247,7 @@ void PlasmaWindows::onWindowWithUuid(uint32_t id, const QString& raw_uuid) {
     handle->setUuid(key);
     handle->setParent(this);
     connect(handle, &PlasmaWindowHandle::unmapped, this, [this, key]() { forget(key); });
-    
+
     m_handles.insert(key, handle);
     emit windowAdded(key);
 }

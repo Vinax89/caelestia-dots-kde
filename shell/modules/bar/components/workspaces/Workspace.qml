@@ -118,7 +118,7 @@ GridLayout {
 
             readonly property real swipeWeight: {
                 if (!isSwiping || rawSwipeOffset === 0.0) return active ? 1.0 : 0.0;
-                
+
                 // Use swipeStartWsId to prevent KWin desyncs when activeWsId changes before rawSwipeOffset resets
                 const startId = swipeStartWsId !== -1 ? swipeStartWsId : root.activeWsId;
                 const activeIdx = startId - 1;
