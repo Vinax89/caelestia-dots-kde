@@ -17,6 +17,7 @@ Item {
 
     required property Props props
     required property DrawerVisibilities visibilities
+    property bool showTitle: true
     readonly property int notifCount: Notifs.openCount
 
     anchors.fill: parent
@@ -32,7 +33,8 @@ Item {
         anchors.right: parent.right
         anchors.margins: Tokens.padding.extraSmall
 
-        implicitHeight: Math.max(count.implicitHeight, titleText.implicitHeight)
+        visible: root.showTitle
+        implicitHeight: visible ? Math.max(count.implicitHeight, titleText.implicitHeight) : 0
 
         StyledText {
             id: count

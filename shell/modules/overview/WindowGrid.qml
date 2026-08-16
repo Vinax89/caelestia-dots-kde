@@ -283,7 +283,10 @@ Item {
                                     }
                                     IconImage {
                                         anchors.centerIn: parent
-                                        implicitSize: thumb.height * 0.5
+                                        // A missing screencast is a secondary fallback state, not
+                                        // the card's focal content. Keep the app mark recognizable
+                                        // without letting it overwhelm large overview cards.
+                                        implicitSize: Math.min(128, thumb.width * 0.18, thumb.height * 0.28)
                                         asynchronous: true
                                         visible: thumb.screencastSerial === 0
                                         source: modelData.iconName ? Icons.getAppIcon(modelData.iconName, "image-missing") : (modelData.class ? Icons.getAppIcon(modelData.class, "image-missing") : "")
