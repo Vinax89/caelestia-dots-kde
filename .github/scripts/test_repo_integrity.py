@@ -362,10 +362,19 @@ class SafetyContractTests(unittest.TestCase):
         self.assertIn("PACKAGE_MANIFEST", uninstaller)
         self.assertIn("-s \"$PACKAGE_MANIFEST\"", uninstaller)
 
-    def test_third_party_patching_is_opt_in(self) -> None:
+    def test_no_third_party_patching(self) -> None:
+        """Recording/screenshots moved to src/bin wrappers (upstream 5a94cba4),
+        so the build must not patch site-packages at all -- stronger than the
+        old opt-in contract. The OpenCV compat links stay, but confined to a
+        private dir instead of a system library path."""
         builder = self.read("scripts/08-build-shell.sh")
-        self.assertIn("CAELESTIA_ENABLE_THIRDPARTY_PATCHES", builder)
-        self.assertIn("Skipping unsupported third-party Python patches", builder)
+        self.assertNotIn("CAELESTIA_ENABLE_THIRDPARTY_PATCHES", builder)
+        self.assertNotIn("site-packages", builder)
+        self.assertNotIn(".caelestia-original", builder)
+        # Compat symlinks must target the private dir, never /usr/lib
+        self.assertIn("caelestia_compat_lib_dir", builder)
+        self.assertIn('$caelestia_compat_lib_dir/libopencv_imgproc.so.413', builder)
+        self.assertNotIn("ln -sfn \"$opencv_imgproc\" /usr/lib", builder)
 
     def test_updater_rejects_unreviewed_updates(self) -> None:
         """The guard must fire before update.sh touches anything.
