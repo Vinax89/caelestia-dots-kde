@@ -216,7 +216,9 @@ class BarConfig : public ConfigObject {
     Q_OBJECT
     QML_ANONYMOUS
 
-    CONFIG_PROPERTY(qreal, scale, 1.0)
+    // Slightly restrained by default so the persistent bar reads as chrome,
+    // not a second content row. Users can still scale it up in Nexus.
+    CONFIG_PROPERTY(qreal, scale, 0.64)
     CONFIG_PROPERTY(qreal, previewScale, 1.0)
     CONFIG_PROPERTY(bool, previewScaleWithBar, false)
     CONFIG_PROPERTY(bool, perElementPreviewScale, false)

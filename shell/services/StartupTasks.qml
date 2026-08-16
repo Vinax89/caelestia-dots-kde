@@ -21,6 +21,7 @@ Item {
                 "01-magic-lamp"
                 "02-krohnkite-setup"
                 "03-wallpaper-fill"
+                "04-plasma-panel-autohide"
             )
 
             for script_name in "\${TASKS[@]}"; do

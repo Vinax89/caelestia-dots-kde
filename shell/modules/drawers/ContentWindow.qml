@@ -73,7 +73,7 @@ StyledWindow {
 
     name: "drawers"
 
-    // StyledWindow hardcodes WlrLayershell.namespace to "panel" (or "desktop"
+    // StyledWindow defaults WlrLayershell.namespace to "panel" (or "desktop"
     // for isDesktopWidget) — name above is a local label with no effect on the
     // Wayland namespace at all, despite reading like it should be one.
     //
@@ -88,12 +88,17 @@ StyledWindow {
     // so it falls through to its "no panel found" heuristic: check whether the
     // icon rect touches a screen edge by exact pixel equality, and default to
     // Bottom if none do. Our published rects sit a few pixels in from the true
-    // edge (padding), so that check never passes and every orientation silently
-    // got Bottom's animation math — a barely-there warp for a bottom bar, a
-    // visibly wrong one for left/right, and a degenerate, invisible one for
-    // top, since Bottom's math assumes the icon is below the window, the
-    // opposite of where it actually is.
-    WlrLayershell.namespace: "panel"
+    // edge (padding), so that check never passes. More importantly, a Normal
+    // surface can be associated with the current virtual desktop during a
+    // workspace transition. On a screen that still has a Plasma panel, that
+    // makes the native panel appear to replace Caelestia after scrolling.
+    // "dock" is KWin's recognized layer-shell scope for a persistent panel and
+    // also lets effects find the correct panel geometry.
+    WlrLayershell.namespace: "dock"
+    // This is a full-screen host for the bar, drawers, and overlays. Reserving
+    // its own geometry as a dock would push windows away from the entire host;
+    // Exclusions.qml owns the narrow, per-edge work-area reservations instead.
+    exclusiveZone: 0
     mask: {
         if (hasOpenOverlay) return fullRegion;
         if (hasFullscreen) return emptyRegion;

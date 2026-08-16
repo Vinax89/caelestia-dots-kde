@@ -9,6 +9,10 @@ import qs.utils
 Item {
     id: root
 
+    // Keep launcher routing local to this bar. On KDE, clicking a layer-shell
+    // panel does not reliably update the compositor's focused output.
+    required property DrawerVisibilities visibilities
+
     implicitWidth: Math.round(Tokens.font.body.large.pointSize * 1.2)
     implicitHeight: Math.round(Tokens.font.body.large.pointSize * 1.2)
 
@@ -16,8 +20,10 @@ Item {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         onClicked: {
-            const visibilities = Visibilities.getForActive();
-            visibilities.launcher = !visibilities.launcher;
+            const shouldOpen = !root.visibilities.launcher;
+            for (const state of Visibilities.screens.values())
+                state.launcher = false;
+            root.visibilities.launcher = shouldOpen;
         }
     }
 

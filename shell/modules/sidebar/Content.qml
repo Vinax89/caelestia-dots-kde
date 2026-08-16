@@ -225,6 +225,7 @@ Item {
                         visible: opacity > 0
                         props: root.props
                         visibilities: root.visibilities
+                        showTitle: !headerContainer.visible
 
                         Behavior on x { Anim { type: Anim.DefaultSpatial } }
                         Behavior on opacity { Anim { type: Anim.DefaultSpatial } }
