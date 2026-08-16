@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 #include <csignal>
+#include <signal.h>
 #include <cstdlib>
 #include <filesystem>
 #include <sys/prctl.h>
@@ -70,6 +71,11 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    if (const char* home = getenv("HOME"); !home || !*home) {
+        std::cerr << "[installer] HOME is unset; refusing to continue." << std::endl;
+        return 1;
+    }
+
     // Detect bundle dir from arg or exe path
     if (argc > 1) {
         g_bundle_dir = argv[1];
@@ -110,9 +116,18 @@ int main(int argc, char** argv) {
             std::cerr << "[installer] WARNING: scripts directory missing at " << scripts_dir << std::endl;
     }
 
-    signal(SIGWINCH, handle_sigwinch);
-    signal(SIGINT, handle_sigint);
-    signal(SIGTERM, handle_sigterm);
+    // sigaction with explicit flags: signal() semantics are
+    // implementation-defined, and we want SA_RESTART (interrupted reads
+    // restart; the handlers only set flags checked by check_signals()).
+    struct sigaction sa {};
+    sa.sa_handler = handle_sigwinch;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGWINCH, &sa, nullptr);
+    sa.sa_handler = handle_sigint;
+    sigaction(SIGINT, &sa, nullptr);
+    sa.sa_handler = handle_sigterm;
+    sigaction(SIGTERM, &sa, nullptr);
 
     // Phase 1: Splash
     std::cerr << "[installer] phase 1: splash_screen" << std::endl;
@@ -139,6 +154,20 @@ int main(int argc, char** argv) {
 
         // Export all answers as environment variables for the bash scripts
         for (const auto& pair : g_answers) {
+            if (!is_valid_env_name(pair.first)) {
+                std::cerr << "[installer] ignoring invalid menu environment name: "
+                          << pair.first << std::endl;
+                continue;
+            }
+            // A menu id that collides with a loader/runtime variable would
+            // silently hijack every child script; keep those names ours.
+            if (pair.first == "PATH" || pair.first == "IFS" || pair.first == "ENV"
+                || pair.first == "BASH_ENV" || pair.first == "SUDO_ASKPASS"
+                || pair.first.rfind("LD_", 0) == 0) {
+                std::cerr << "[installer] ignoring reserved menu environment name: "
+                          << pair.first << std::endl;
+                continue;
+            }
             setenv(pair.first.c_str(), pair.second.c_str(), 1);
         }
     } else {
@@ -180,10 +209,25 @@ int main(int argc, char** argv) {
 
     cleanup_installer_runtime();
 
-    // Cleanup cmake build cache as it contains absolute paths.
-    std::error_code error;
-    std::filesystem::remove_all(g_bundle_dir + "/shell/build", error);
-    std::filesystem::remove_all(g_bundle_dir + "/shell/plugin/build", error);
+    // Cleanup cmake build cache as it contains absolute paths. Only prune
+    // inside a directory that actually looks like the repo bundle -- a bogus
+    // argv[1] must never turn remove_all loose somewhere else.
+    {
+        const std::string menu_probe = g_bundle_dir + "/installer/menu.json";
+        const std::string script_probe = g_bundle_dir + "/scripts/00a-system-update.sh";
+        std::error_code probe_error;
+        const bool looks_like_bundle = g_bundle_dir.size() > 1
+            && std::filesystem::exists(menu_probe, probe_error)
+            && std::filesystem::exists(script_probe, probe_error);
+        if (looks_like_bundle) {
+            std::error_code error;
+            std::filesystem::remove_all(g_bundle_dir + "/shell/build", error);
+            std::filesystem::remove_all(g_bundle_dir + "/shell/plugin/build", error);
+        } else {
+            std::cerr << "[installer] bundle dir lacks installer/ and scripts/ markers; "
+                         "skipping build-cache cleanup" << std::endl;
+        }
+    }
 
     if (g_logout) {
         cout << "\n\n\nLogging out...\n";

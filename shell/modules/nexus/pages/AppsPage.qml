@@ -36,7 +36,7 @@ PageBase {
             first: true
             text: qsTr("Force System Defaults (xdg-open)")
             subtext: qsTr("Override applications to use KDE system defaults")
-            
+
             checked: GlobalConfig.general.apps.audio.join(" ") === "xdg-open" &&
                      GlobalConfig.general.apps.playback.join(" ") === "xdg-open" &&
                      GlobalConfig.general.apps.explorer.join(" ") === "xdg-open"

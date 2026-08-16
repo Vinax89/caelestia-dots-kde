@@ -178,13 +178,15 @@ def check_imports(filepath: Path, lines: list[str], rel: str) -> list[Violation]
 
 
 def fix_imports(lines: list[str]) -> list[str]:
-    """Sort imports and return the modified lines."""
+    """Sort imports only when their convention order actually differs."""
     first, last, relative, module = parse_imports(lines)
     if first is None:
         return lines
 
-    module.sort(key=lambda x: (x[1], x[2], x[3]))
-    sorted_imports = relative + [entry[0] for entry in module]
+    sorted_module = sorted(module, key=lambda x: (x[1], x[2]))
+    if module == sorted_module:
+        return lines
+    sorted_imports = relative + [entry[0] for entry in sorted_module]
     return lines[:first] + sorted_imports + lines[last + 1 :]
 
 

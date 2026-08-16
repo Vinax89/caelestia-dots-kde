@@ -21,16 +21,16 @@ echo ""
 
 #  Darkly Theme
 if [[ "${APPLY_DARKLY:-true}" == "true" ]]; then
-    #  Darkly: Plasma style 
+    #  Darkly: Plasma style
     echo "  Applying Darkly plasma style..."
     kwriteconfig6 --file plasmarc --group "Theme" --key "name" "Darkly" 2>/dev/null || true
 
-    #  Darkly: Application style (Qt widget style) 
+    #  Darkly: Application style (Qt widget style)
     echo "  Applying Darkly application style..."
     kwriteconfig6 --file kdeglobals --group "KDE" --key "widgetStyle" "darkly" 2>/dev/null || true
     kwriteconfig6 --file kdeglobals --group "General" --key "ColorScheme" "Darkly" 2>/dev/null || true
 
-    #  Darkly: Window decoration 
+    #  Darkly: Window decoration
     echo "  Applying Darkly window decoration..."
     kwriteconfig6 --file kwinrc --group "org.kde.kdecoration2" \
         --key "library" "org.kde.darkly" 2>/dev/null || \
@@ -57,7 +57,7 @@ else
     echo "  [SKIP] Skipping custom fonts application."
 fi
 
-#  Cliphist Service 
+#  Cliphist Service
 echo "  Setting up cliphist background service..."
 mkdir -p "$HOME/.config/systemd/user"
 cat > "$HOME/.config/systemd/user/cliphist.service" << 'EOF'
@@ -80,17 +80,19 @@ echo "  [OK]  Cliphist background service enabled."
 
 echo "[OK]  KDE settings applied."
 
-#  Set Default Wallpaper 
+#  Set Default Wallpaper
 echo "  Setting default wallpaper to Minimal-Paper.png..."
 WALLPAPER_PATH="$BUNDLE_DIR/shell/assets/wallpapers/Minimal-Paper.png"
 if [[ -f "$WALLPAPER_PATH" ]]; then
+    # Escape the path for embedding in a JS single-quoted string
+    WALLPAPER_PATH_JS=$(printf '%s' "$WALLPAPER_PATH" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g")
     qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
         var allDesktops = desktops();
         for (i=0; i < allDesktops.length; i++) {
             d = allDesktops[i];
             d.wallpaperPlugin = 'org.kde.image';
             d.currentConfigGroup = Array('Wallpaper', 'org.kde.image', 'General');
-            d.writeConfig('Image', 'file://' + '$WALLPAPER_PATH');
+            d.writeConfig('Image', 'file://' + '$WALLPAPER_PATH_JS');
         }
     " 2>/dev/null || true
     # Also save it for Caelestia

@@ -15,6 +15,10 @@ class ServiceConfig : public ConfigObject {
     QML_ANONYMOUS
 
     CONFIG_GLOBAL_PROPERTY(QString, weatherLocation)
+    // When no weatherLocation is set, approximate it via the IP geolocation
+    // service (ipinfo.io). Off means weather stays unavailable until a
+    // location is configured, so no IP is shared with a third party.
+    CONFIG_GLOBAL_PROPERTY(bool, weatherIpGeolocation, true)
     // Guess based on locale
     CONFIG_GLOBAL_PROPERTY(bool, useFahrenheit,
         QLocale().measurementSystem() == QLocale::ImperialUSSystem ||

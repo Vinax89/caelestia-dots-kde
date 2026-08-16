@@ -6,7 +6,7 @@ Item {
     id: root
 
     required property Item target
-    property string vAnchor: "bottom" 
+    property string vAnchor: "bottom"
     property string hAnchor: "right"
     property real offsetScale: 0
     required property Item contentItem

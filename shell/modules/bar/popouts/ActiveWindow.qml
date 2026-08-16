@@ -51,11 +51,11 @@ Item {
 
             AnimatedImage {
                 id: preview
-                
+
                 cache: false
                 source: root.gifPath
                 fillMode: root.gifPath.includes("morning.gif") ? Image.PreserveAspectFit : Image.PreserveAspectCrop
-                
+
                 width: previewSize
                 height: previewSize
             }

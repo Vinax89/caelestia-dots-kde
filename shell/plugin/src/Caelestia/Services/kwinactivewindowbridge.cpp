@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QSaveFile>
 #include <QTemporaryFile>
 #include <QTimer>
 #include <QtDBus/QDBusConnection>
@@ -131,7 +132,7 @@ function notifyActiveWindowReal() {
     if (window && (window.resourceClass === "quickshell" || window.resourceClass === "plasmashell")) {
         return; // Ignore shell panels taking focus
     }
-    
+
     if (!window) {
         if (lastActiveUuid !== null) {
             lastActiveUuid = null;
@@ -264,10 +265,11 @@ KWinActiveWindowBridge::KWinActiveWindowBridge(QObject* parent)
             }
 
             QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR", "/tmp");
-            QFile f(runtimeDir + "/qs_kwin_windows.json");
+            QSaveFile f(runtimeDir + "/qs_kwin_windows.json");
             if (f.open(QIODevice::WriteOnly)) {
-                f.write(m_pendingWindowListJson.toUtf8());
-                f.close();
+                const auto data = m_pendingWindowListJson.toUtf8();
+                if (f.write(data) != data.size() || !f.commit())
+                    qWarning() << "Failed to atomically write KWin window state:" << f.errorString();
             }
             m_pendingWindowListJson.clear();
         }

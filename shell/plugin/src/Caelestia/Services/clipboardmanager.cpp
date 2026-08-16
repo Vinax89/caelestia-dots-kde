@@ -17,7 +17,7 @@
 Q_LOGGING_CATEGORY(lcClipboard, "caelestia.services.clipboard", QtInfoMsg)
 
 namespace caelestia::services {
-  
+
 ClipboardManager::ClipboardManager(QObject* parent)
     : QObject(parent) {
     QString runtimeDir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);

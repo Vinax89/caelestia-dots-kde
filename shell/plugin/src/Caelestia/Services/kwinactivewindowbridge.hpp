@@ -14,7 +14,7 @@ class KWinActiveWindowBridgeAdaptor : public QDBusAbstractAdaptor {
     Q_CLASSINFO("D-Bus Interface", "dev.caelestia.KWinActiveWindow")
 public:
     explicit KWinActiveWindowBridgeAdaptor(QObject *parent);
-    
+
 public slots:
     Q_NOREPLY void notifyActiveWindow(const QString &uuid, const QString &title, const QString &appClass, const QString &activeOutputName, bool isFullscreen, bool isMaximized);
     Q_NOREPLY void notifyWindowList(const QString &windowsJson);

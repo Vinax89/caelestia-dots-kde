@@ -250,7 +250,7 @@ Item {
             if (appId !== root.currentSteamAppId || !root.currentSteamData) {
                 root.currentSteamAppId = appId;
                 root.fetchSteamData(appId);
-                return; 
+                return;
             }
             if (root.currentSteamData) {
                 root.sendActivity({
@@ -293,7 +293,7 @@ Item {
             let os = SysInfo.osPrettyName || SysInfo.osName || "Linux";
             let kernel = SysInfo.kernel ? SysInfo.kernel : "";
             let qsVersion = CUtils.version ? " (v" + CUtils.version + ")" : "";
-            
+
             let detailsStr = os;
             if (kernel) detailsStr += " • " + kernel;
 
@@ -327,7 +327,7 @@ Item {
             if (steamData && steamData[appId] && steamData[appId].success) {
                 gameName = steamData[appId].data.name;
             }
-                
+
             Requests.get("https://store.steampowered.com/appreviews/" + appId + "?json=1", function(revRes) {
                 let revData = null;
                 try { revData = JSON.parse(revRes); } catch(e) {}
@@ -398,7 +398,7 @@ Item {
         if (data.name && data.name !== "") activity.name = data.name;
         if (data.state && data.state !== "") activity.state = data.state;
         if (data.details && data.details !== "") activity.details = data.details;
-        
+
         const assets = {};
         if (data.large_image && data.large_image !== "") assets.large_image = data.large_image;
         if (data.large_text && data.large_text !== "") assets.large_text = data.large_text;

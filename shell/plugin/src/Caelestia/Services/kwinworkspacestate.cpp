@@ -52,7 +52,7 @@ void KWinWorkspaceState::fetchInitialState() {
     QDBusMessage msg = QDBusMessage::createMethodCall("org.kde.KWin", "/VirtualDesktopManager", "org.freedesktop.DBus.Properties", "Get");
     msg << "org.kde.KWin.VirtualDesktopManager" << "desktops";
     QDBusReply<QDBusVariant> reply = QDBusConnection::sessionBus().call(msg);
-    
+
     if (reply.isValid()) {
         QVariant var = reply.value().variant();
         if (var.canConvert<QDBusArgument>()) {
@@ -64,7 +64,7 @@ void KWinWorkspaceState::fetchInitialState() {
     QDBusMessage currentMsg = QDBusMessage::createMethodCall("org.kde.KWin", "/VirtualDesktopManager", "org.freedesktop.DBus.Properties", "Get");
     currentMsg << "org.kde.KWin.VirtualDesktopManager" << "current";
     QDBusReply<QDBusVariant> currentReply = QDBusConnection::sessionBus().call(currentMsg);
-    
+
     if (currentReply.isValid()) {
         m_currentUuid = currentReply.value().variant().toString();
     }
@@ -121,7 +121,7 @@ void KWinWorkspaceState::switchTo(const QString& id) {
             break;
         }
     }
-    
+
     if (!targetUuid.isEmpty()) {
         QDBusMessage msg = QDBusMessage::createMethodCall("org.kde.KWin", "/VirtualDesktopManager", "org.freedesktop.DBus.Properties", "Set");
         msg << "org.kde.KWin.VirtualDesktopManager" << "current" << QVariant::fromValue(QDBusVariant(targetUuid));
@@ -143,7 +143,7 @@ void KWinWorkspaceState::removeWorkspace(const QString& id) {
             break;
         }
     }
-    
+
     if (!targetUuid.isEmpty()) {
         QDBusMessage msg = QDBusMessage::createMethodCall("org.kde.KWin", "/VirtualDesktopManager", "org.kde.KWin.VirtualDesktopManager", "removeDesktop");
         msg << targetUuid;

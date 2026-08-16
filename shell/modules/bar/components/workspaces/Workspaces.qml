@@ -163,9 +163,9 @@ Item {
                 }
                 onWheel: event => {
                     if (!Config.bar.scrollActions.workspaces) return;
-                    
+
                     const isKWin = typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.windowList;
-                    
+
                     if (event.angleDelta.y > 0 || event.angleDelta.x > 0) {
                         if (isKWin) {
                             KWinActiveWindowBridge.previousDesktop();

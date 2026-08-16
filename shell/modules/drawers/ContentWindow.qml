@@ -191,7 +191,7 @@ StyledWindow {
             }
             onTriggered: {
                 let anyActive = root.active || root.activeFocusItem !== null;
-                
+
                 if (anyActive) {
                     parent._wasActive = true;
                 } else if (parent._wasActive && !anyActive) {
@@ -709,7 +709,7 @@ StyledWindow {
             rLeft: !GlobalConfig.appearance.islands ? root.borderRounding : 0
             rRight: !GlobalConfig.appearance.islands ? root.borderRounding : 0
         }
-        BlurMask { 
+        BlurMask {
             target: bar
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -719,7 +719,7 @@ StyledWindow {
             vAnchor: bar.vAnchor
             hAnchor: bar.hAnchor
         }
-        BlurMask { 
+        BlurMask {
             target: panels.sidebar
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -731,7 +731,7 @@ StyledWindow {
             offsetScale: panels.sidebar.offsetScale
             deformMatrix: sidebarBg.deformMatrix
         }
-        BlurMask { 
+        BlurMask {
             target: panels.notifications
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -742,7 +742,7 @@ StyledWindow {
             hAnchor: panels.notifications.hAnchor
             deformMatrix: notifsBg.deformMatrix
         }
-        BlurMask { 
+        BlurMask {
             target: panels.osdWrapper
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -754,7 +754,7 @@ StyledWindow {
             offsetScale: panels.osd.offsetScale
             deformMatrix: osdBg.deformMatrix
         }
-        BlurMask { 
+        BlurMask {
             target: panels.sessionWrapper
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -766,7 +766,7 @@ StyledWindow {
             offsetScale: panels.session.offsetScale
             deformMatrix: sessionBg.deformMatrix
         }
-        BlurMask { 
+        BlurMask {
             target: panels.launcher
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -778,7 +778,7 @@ StyledWindow {
             offsetScale: panels.launcher.offsetScale
             deformMatrix: launcherBg.deformMatrix
         }
-        BlurMask { 
+        BlurMask {
             target: panels.dashboard
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -790,7 +790,7 @@ StyledWindow {
             offsetScale: panels.dashboard.offsetScale
             deformMatrix: dashBg.deformMatrix
         }
-        BlurMask { 
+        BlurMask {
             target: panels.popoutsWrapper
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop
@@ -802,7 +802,7 @@ StyledWindow {
             offsetScale: panels.popoutsWrapper.offsetScale
             deformMatrix: popoutBg.deformMatrix
         }
-        BlurMask { 
+        BlurMask {
             target: panels.utilities
             contentItem: root.contentItem
             blurOffsetTop: root.blurOffsetTop

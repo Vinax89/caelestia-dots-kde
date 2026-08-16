@@ -9,7 +9,7 @@ namespace Draw {
     const string reset = esc + "0m";
     const string bold = esc + "1m";
     const string dim = esc + "2m";
-    
+
     // Colors
     string color(const string& name) {
         if (name.empty()) {
@@ -42,7 +42,7 @@ namespace Draw {
         // Use terminal default foreground so light/dark themes remain readable.
         return esc + "39m";
     }
-    
+
     // Box chars
     const string h_line = "-";
     const string v_line = "|";
@@ -64,11 +64,11 @@ namespace Draw {
         string c = color(border_color);
         string tc = title_color.empty() ? reset : color(title_color);
         string out = c;
-        
+
         string h_str(w - 2, '-');
         out += to(y, x) + corner + h_str + corner;
         out += to(y + h - 1, x) + corner + h_str + corner;
-        
+
         for (int i = 1; i < h - 1; i++) {
             out += to(y + i, x) + v_line;
             out += to(y + i, x + w - 1) + v_line;

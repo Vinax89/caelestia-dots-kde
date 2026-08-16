@@ -40,7 +40,7 @@ PageBase {
             checked: Config.utilities.showOnHover
             onToggled: GlobalConfig.utilities.showOnHover = checked
         }
-        
+
         StepperRow {
             Layout.topMargin: Tokens.spacing.extraSmall / 2 - parent.spacing
             Layout.fillWidth: true

@@ -24,12 +24,12 @@ StyledWindow {
     readonly property real centerScale: Math.max(0.8, Math.min(1, root.height / 1440))
     readonly property int centerWidth: root.screen ? Tokens.sizes.lock.centerWidth * centerScale : 0
     readonly property int passwordMaxWidth: centerWidth * 0.8
-    
+
     readonly property string rawMessage: agent.flow ? agent.flow.message : ""
     readonly property var splitMessage: {
         let msg = rawMessage.trim();
         let cmd = "";
-        
+
         let pkexecMatch = msg.match(/Authentication is needed to run `(.+?)' as the super user/);
         if (pkexecMatch) {
             cmd = pkexecMatch[1];
@@ -51,7 +51,7 @@ StyledWindow {
                 msg = msg.replace(backtickMatch[0], "").replace(/\s+/g, " ").trim();
             }
         }
-        
+
         return { message: msg, command: cmd };
     }
     readonly property string mainMessage: splitMessage.message
@@ -166,7 +166,7 @@ StyledWindow {
             anchors.fill: parent
             radius: dialogContainer.initialRadius
             color: Colours.layer(Colours.palette.m3surface, 0)
-            
+
             layer.enabled: true
             layer.effect: MultiEffect {
                 shadowEnabled: true
@@ -201,7 +201,7 @@ StyledWindow {
                 implicitHeight: titleLayout.implicitHeight + Tokens.padding.large * 2
                 color: Colours.layer(Colours.palette.m3surfaceContainer, 1)
                 radius: Tokens.rounding.large
-                
+
                 ColumnLayout {
                     id: titleLayout
 
@@ -240,7 +240,7 @@ StyledWindow {
                     implicitHeight: commandLabel.implicitHeight + Tokens.padding.small * 2
                     color: Colours.layer(Colours.palette.m3surfaceContainerHigh, 1)
                     radius: Tokens.rounding.small
-                    
+
                     StyledText {
                         id: commandLabel
 
@@ -278,17 +278,17 @@ StyledWindow {
                 implicitHeight: passwordInputLayout.implicitHeight + Tokens.padding.small
                 color: Colours.layer(Colours.palette.m3surfaceContainer, 1)
                 radius: Tokens.rounding.full
-                
+
                 focus: true
 
                 Behavior on implicitWidth { Anim {} }
-                    
+
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.IBeamCursor
                     onClicked: passwordRect.forceActiveFocus()
                 }
-                
+
                 Keys.onPressed: event => {
                     if (event.key === Qt.Key_Enter || event.key === Qt.Key_Return) {
                         if (agent.flow && root.buffer) {
@@ -335,13 +335,13 @@ StyledWindow {
                     anchors.fill: parent
                     anchors.margins: Tokens.padding.extraSmall
                     spacing: Tokens.spacing.medium
-                    
+
                     Item {
                         id: iconWrapper
                         Layout.fillHeight: true
 
                         implicitWidth: height
-                        
+
                         MaterialIcon {
                             anchors.centerIn: parent
                             text: "lock"
@@ -349,7 +349,7 @@ StyledWindow {
                             fontStyle: Tokens.font.icon.builders.medium.scale(centerScale).build()
                         }
                     }
-                    
+
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -408,7 +408,7 @@ StyledWindow {
                             }
                         }
                     }
-                    
+
                     Item {
                         id: enterButton
 
@@ -424,10 +424,10 @@ StyledWindow {
                             shape: root.buffer ? MaterialShape.Arrow : MaterialShape.Circle
                             scale: !root.buffer ? 1 : enterMouse.pressed ? 0.6 : enterMouse.containsMouse ? 0.8 : 0.7
                             rotation: 90
-                            
+
                             Behavior on scale { Anim { type: Anim.FastSpatial } }
                             Behavior on color { CAnim {} }
-                            
+
                             MouseArea {
                                 id: enterMouse
 

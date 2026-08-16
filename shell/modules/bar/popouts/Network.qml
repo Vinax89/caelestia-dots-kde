@@ -57,7 +57,7 @@ ColumnLayout {
     // Wireless section
     StyledText {
         visible: root.view === "wireless"
-        
+
         Layout.topMargin: visible ? Tokens.padding.medium * root.scaleOffset : 0
         Layout.rightMargin: Tokens.padding.extraSmall * root.scaleOffset
         text: qsTr("Wireless")
@@ -66,7 +66,7 @@ ColumnLayout {
 
     Toggle {
         visible: root.view === "wireless"
-        
+
         label: qsTr("Enabled")
         checked: Nmcli.wifiEnabled
         toggle.onToggled: Nmcli.enableWifi(checked)
@@ -74,7 +74,7 @@ ColumnLayout {
 
     StyledText {
         visible: root.view === "wireless"
-        
+
         Layout.topMargin: visible ? Tokens.spacing.small * root.scaleOffset : 0
         Layout.rightMargin: Tokens.padding.extraSmall * root.scaleOffset
         text: qsTr("%1 networks available").arg(Nmcli.networks.length) // qmllint disable missing-property
@@ -100,7 +100,7 @@ ColumnLayout {
             readonly property bool loading: networkItem.isConnecting
 
             visible: root.view === "wireless"
-            
+
             Layout.fillWidth: true
             Layout.rightMargin: Tokens.padding.extraSmall * root.scaleOffset
             spacing: Tokens.spacing.small * root.scaleOffset
@@ -202,7 +202,7 @@ ColumnLayout {
 
     StyledRect {
         visible: root.view === "wireless"
-        
+
         Layout.topMargin: visible ? Tokens.spacing.small * root.scaleOffset : 0
         Layout.fillWidth: true
         implicitHeight: rescanBtn.implicitHeight + Tokens.padding.small * root.scaleOffset
@@ -386,7 +386,7 @@ ColumnLayout {
     // Ethernet section
     StyledText {
         visible: root.view === "ethernet"
-        
+
         Layout.topMargin: visible ? Tokens.padding.medium * root.scaleOffset : 0
         Layout.rightMargin: Tokens.padding.extraSmall * root.scaleOffset
         text: qsTr("Ethernet")
@@ -395,7 +395,7 @@ ColumnLayout {
 
     StyledText {
         visible: root.view === "ethernet"
-        
+
         Layout.topMargin: visible ? Tokens.spacing.small * root.scaleOffset : 0
         Layout.rightMargin: Tokens.padding.extraSmall * root.scaleOffset
         text: qsTr("%1 devices available").arg(Nmcli.ethernetDevices.length)
@@ -420,7 +420,7 @@ ColumnLayout {
             readonly property bool loading: false
 
             visible: root.view === "ethernet"
-            
+
             Layout.fillWidth: true
             Layout.rightMargin: Tokens.padding.extraSmall * root.scaleOffset
             spacing: Tokens.spacing.small * root.scaleOffset

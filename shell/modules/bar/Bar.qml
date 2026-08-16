@@ -65,7 +65,7 @@ Item {
             let localPos = mapToItem(layout, x, y);
             if (localPos.x >= 0 && localPos.x <= layout.width && localPos.y >= 0 && localPos.y <= layout.height) {
                 let ch = layout.childAt(localPos.x, localPos.y);
-                if (ch && ch.hasOwnProperty("id")) return ch; 
+                if (ch && ch.hasOwnProperty("id")) return ch;
             }
         }
         return null;
@@ -187,7 +187,7 @@ Item {
             }
         } else if (id === "dock") {
             if (popouts.hasCurrent && (popouts.currentName === "dockcontext" || popouts.currentName === "activewindow")) return;
-            
+
             const item = ch.item;
             if (item && typeof item.handleHover === "function") {
                 const relPos = pos - top;
@@ -217,7 +217,7 @@ Item {
 
     function handleWheel(pos: real, angleDelta: point): void {
         const ch = getLoaderAt(isHorizontal ? pos : width / 2, isHorizontal ? height / 2 : pos) as WrappedLoader;
-        
+
         if (ch?.id === "dock") {
             let mappedChPos = mapFromItem(ch, 0, 0);
             const top = isHorizontal ? mappedChPos.x : mappedChPos.y;
@@ -261,7 +261,7 @@ Item {
         anchors.top: !isHorizontal ? parent.top : undefined
         anchors.verticalCenter: isHorizontal ? parent.verticalCenter : undefined
         anchors.horizontalCenter: !isHorizontal ? parent.horizontalCenter : undefined
-        
+
         anchors.leftMargin: isHorizontal ? root.vPadding : 0
         anchors.topMargin: !isHorizontal ? root.vPadding : 0
 
@@ -326,7 +326,7 @@ Item {
         anchors.bottom: !isHorizontal ? parent.bottom : undefined
         anchors.verticalCenter: isHorizontal ? parent.verticalCenter : undefined
         anchors.horizontalCenter: !isHorizontal ? parent.horizontalCenter : undefined
-        
+
         anchors.rightMargin: isHorizontal ? root.vPadding : 0
         anchors.bottomMargin: !isHorizontal ? root.vPadding : 0
 
@@ -489,13 +489,13 @@ Item {
         asynchronous: false
         Layout.alignment: root.isHorizontal ? Qt.AlignVCenter : Qt.AlignHCenter
 
-        
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
+
 
         Layout.preferredWidth: implicitWidth
         Layout.preferredHeight: implicitHeight

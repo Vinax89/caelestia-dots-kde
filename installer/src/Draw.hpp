@@ -6,10 +6,10 @@ namespace Draw {
     extern const std::string reset;
     extern const std::string bold;
     extern const std::string dim;
-    
+
     // Colors
     std::string color(const std::string& name);
-    
+
     // Box chars
     extern const std::string h_line;
     extern const std::string v_line;

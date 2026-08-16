@@ -4,7 +4,9 @@
 #include <qlocalsocket.h>
 #include <qloggingcategory.h>
 #include <qfilesystemwatcher.h>
-#include <qfile.h>
+#include <qfileinfo.h>
+#include <qsavefile.h>
+#include <unistd.h>
 
 Q_LOGGING_CATEGORY(lcHyprState, "caelestia.services.hyprlandstate", QtInfoMsg)
 
@@ -24,10 +26,10 @@ HyprlandState::HyprlandState(QObject* parent)
         QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR", "/tmp");
         QString filePath = runtimeDir + "/qs_kwin_windows.json";
         if (!QFile::exists(filePath)) {
-            QFile f(filePath);
+            QSaveFile f(filePath);
             if (f.open(QIODevice::WriteOnly)) {
-                f.write("[]");
-                f.close();
+                if (f.write("[]") != 2 || !f.commit())
+                    qCWarning(lcHyprState) << "Failed to initialize" << filePath << f.errorString();
             }
         }
         if (QFile::exists(filePath)) {
@@ -40,12 +42,18 @@ HyprlandState::HyprlandState(QObject* parent)
         return;
     }
 
+    const auto safeSocketDir = [](const QString& path) {
+        const QFileInfo info(path);
+        const auto unsafe = QFile::WriteGroup | QFile::WriteOther;
+        return info.isDir() && info.ownerId() == static_cast<uint>(geteuid())
+            && !(info.permissions() & unsafe);
+    };
     auto hyprDir = QString("%1/hypr/%2").arg(qEnvironmentVariable("XDG_RUNTIME_DIR"), his);
-    if (!QDir(hyprDir).exists()) {
+    if (!safeSocketDir(hyprDir)) {
         hyprDir = "/tmp/hypr/" + his;
 
-        if (!QDir(hyprDir).exists()) {
-            qCWarning(lcHyprState) << "Hyprland socket directory does not exist. Unable to connect to Hyprland socket.";
+        if (!safeSocketDir(hyprDir)) {
+            qCWarning(lcHyprState) << "Refusing unsafe or missing Hyprland socket directory:" << hyprDir;
             return;
         }
     }
@@ -109,7 +117,7 @@ void HyprlandState::updateWindowList() {
                 const auto addr = obj.value("address").toString();
                 newByAddress.insert(addr, variant);
                 newAddresses.append(addr);
-                
+
                 if (obj.value("focused").toBool()) {
                     newActiveWindow = variant;
                 }
@@ -117,12 +125,12 @@ void HyprlandState::updateWindowList() {
             m_windowList = newList;
             m_windowByAddress = newByAddress;
             m_addresses = newAddresses;
-            
+
             if (m_activeWindow != newActiveWindow) {
                 m_activeWindow = newActiveWindow;
                 emit activeWindowChanged();
             }
-            
+
             emit windowListChanged();
         }
         return;
@@ -313,12 +321,19 @@ HyprlandState::SocketPtr HyprlandState::makeRequest(
 
     auto socket = SocketPtr::create(this);
 
+    const auto response = QSharedPointer<QByteArray>::create();
+    const auto completed = QSharedPointer<bool>::create(false);
     QObject::connect(socket.data(), &QLocalSocket::connected, this, [=, this]() {
-        QObject::connect(socket.data(), &QLocalSocket::readyRead, this, [socket, callback]() {
-            const auto response = socket->readAll();
-            callback(true, std::move(response));
-            socket->close();
+        QObject::connect(socket.data(), &QLocalSocket::readyRead, this, [socket, response]() {
+            response->append(socket->readAll());
         });
+        QObject::connect(socket.data(), &QLocalSocket::disconnected, this,
+            [socket, response, completed, callback]() {
+                if (*completed)
+                    return;
+                *completed = true;
+                callback(true, std::move(*response));
+            });
 
         socket->write(request.toUtf8());
         socket->flush();
@@ -326,7 +341,16 @@ HyprlandState::SocketPtr HyprlandState::makeRequest(
 
     QObject::connect(socket.data(), &QLocalSocket::errorOccurred, this, [=](QLocalSocket::LocalSocketError err) {
         qCWarning(lcHyprState) << "makeRequest: error making request:" << err << "| request:" << request;
-        callback(false, {});
+        if (err == QLocalSocket::PeerClosedError) {
+            response->append(socket->readAll());
+            if (!*completed) {
+                *completed = true;
+                callback(true, std::move(*response));
+            }
+        } else if (!*completed) {
+            *completed = true;
+            callback(false, {});
+        }
         socket->close();
     });
 

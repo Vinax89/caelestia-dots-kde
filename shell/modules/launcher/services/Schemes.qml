@@ -35,7 +35,7 @@ Searcher {
         id: schemes
 
         model: SchemeLoader.schemes
-        
+
         Scheme {}
     }
 

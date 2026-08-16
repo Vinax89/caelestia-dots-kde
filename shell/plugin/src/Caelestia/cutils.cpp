@@ -1,6 +1,7 @@
 #include "cutils.hpp"
 
 #include <QtConcurrent/qtconcurrentrun.h>
+#include <algorithm>
 #include <qcryptographichash.h>
 #include <QtQuick/qquickitemgrabresult.h>
 #include <QtQuick/qquickwindow.h>
@@ -17,6 +18,47 @@
 Q_LOGGING_CATEGORY(lcCUtils, "caelestia.cutils", QtInfoMsg)
 
 namespace caelestia {
+
+namespace {
+bool isWithinRoot(const QString& path, const QString& root) {
+    const QFileInfo rootInfo(root);
+    const QString canonicalRoot = rootInfo.canonicalFilePath();
+    if (canonicalRoot.isEmpty())
+        return false;
+
+    const QFileInfo pathInfo(path);
+    const QString absolutePath = pathInfo.absoluteFilePath();
+    QString existing = absolutePath;
+    while (!QFileInfo::exists(existing)) {
+        const QString parent = QFileInfo(existing).absolutePath();
+        if (parent == existing)
+            return false;
+        existing = parent;
+    }
+
+    const QString canonicalExisting = QFileInfo(existing).canonicalFilePath();
+    if (canonicalExisting.isEmpty())
+        return false;
+
+    const QString relative = QDir(existing).relativeFilePath(absolutePath);
+    const QString canonicalPath = QDir::cleanPath(
+        QDir(canonicalExisting).filePath(relative));
+    return canonicalPath == canonicalRoot
+        || canonicalPath.startsWith(canonicalRoot + QLatin1Char('/'));
+}
+
+bool isAllowedPath(const QString& path) {
+    const QStringList roots = {
+        QDir::homePath(),
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation),
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation),
+        QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation)
+    };
+    return std::any_of(roots.cbegin(), roots.cend(), [&path](const QString& root) {
+        return !root.isEmpty() && isWithinRoot(path, root);
+    });
+}
+}
 
 class CUtils::Private {
 public:
@@ -56,14 +98,17 @@ void CUtils::saveItem(QQuickItem* target, const QUrl& path, const QRect& rect, Q
     this->saveItem(target, path, rect, onSaved, QJSValue());
 }
 
+
 void CUtils::saveItem(QQuickItem* target, const QUrl& path, const QRect& rect, QJSValue onSaved, QJSValue onFailed) {
     if (!target) {
         qCWarning(lcCUtils) << "saveItem: a target is required";
         return;
     }
 
-    if (!path.isLocalFile()) {
-        qCWarning(lcCUtils) << "saveItem:" << path << "is not a local file";
+    if (!path.isLocalFile() || !isAllowedPath(path.toLocalFile())) {
+        qCWarning(lcCUtils) << "saveItem: refusing path outside allowed local roots" << path;
+        if (onFailed.isCallable())
+            onFailed.call();
         return;
     }
 
@@ -71,16 +116,20 @@ void CUtils::saveItem(QQuickItem* target, const QUrl& path, const QRect& rect, Q
         qCWarning(lcCUtils) << "saveItem: unable to save target" << target << "without a window";
         return;
     }
-
-    auto scaledRect = rect;
-    const qreal scale = target->window()->devicePixelRatio();
+    const auto scale = target->window()->devicePixelRatio();
+    QRect scaledRect = rect;
     if (rect.isValid() && !qFuzzyCompare(scale + 1.0, 2.0)) {
         scaledRect =
             QRectF(rect.left() * scale, rect.top() * scale, rect.width() * scale, rect.height() * scale).toRect();
     }
 
     const QSharedPointer<const QQuickItemGrabResult> grabResult = target->grabToImage();
-
+    if (!grabResult) {
+        qCWarning(lcCUtils) << "saveItem: target is not currently renderable";
+        if (onFailed.isCallable())
+            onFailed.call();
+        return;
+    }
     QObject::connect(grabResult.data(), &QQuickItemGrabResult::ready, this,
         [grabResult, scaledRect, path, onSaved, onFailed, this]() {
             const auto future = QtConcurrent::run([=]() {
@@ -92,7 +141,9 @@ void CUtils::saveItem(QQuickItem* target, const QUrl& path, const QRect& rect, Q
 
                 const QString file = path.toLocalFile();
                 const QString parent = QFileInfo(file).absolutePath();
-                return QDir().mkpath(parent) && image.save(file);
+                if (!isAllowedPath(file) || !QDir().mkpath(parent) || !isAllowedPath(file))
+                    return false;
+                return image.save(file);
             });
 
             auto* watcher = new QFutureWatcher<bool>(this);
@@ -124,12 +175,11 @@ void CUtils::saveItem(QQuickItem* target, const QUrl& path, const QRect& rect, Q
 }
 
 bool CUtils::copyFile(const QUrl& source, const QUrl& target, bool overwrite) {
-    if (!source.isLocalFile()) {
-        qCWarning(lcCUtils) << "copyFile: source" << source << "is not a local file";
-        return false;
-    }
-    if (!target.isLocalFile()) {
-        qCWarning(lcCUtils) << "copyFile: target" << target << "is not a local file";
+    if (!source.isLocalFile() || !target.isLocalFile()
+        || !isAllowedPath(source.toLocalFile())
+        || !isAllowedPath(target.toLocalFile())) {
+        qCWarning(lcCUtils) << "copyFile: refusing path outside allowed local roots"
+                            << source << target;
         return false;
     }
 
@@ -144,8 +194,8 @@ bool CUtils::copyFile(const QUrl& source, const QUrl& target, bool overwrite) {
 }
 
 bool CUtils::deleteFile(const QUrl& path) {
-    if (!path.isLocalFile()) {
-        qCWarning(lcCUtils) << "deleteFile: path" << path << "is not a local file";
+    if (!path.isLocalFile() || !isAllowedPath(path.toLocalFile())) {
+        qCWarning(lcCUtils) << "deleteFile: refusing path outside allowed local roots" << path;
         return false;
     }
 

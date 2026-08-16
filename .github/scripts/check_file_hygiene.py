@@ -55,8 +55,10 @@ def ok(msg: str) -> None:
     print(f"{GREEN}[OK]{RESET}   {msg}")
 
 
-def is_text_file(filepath: Path) -> bool:
-    """Heuristic: a NUL byte in the first 8 KB means binary.
+def file_kind(filepath: Path) -> str:
+    """Classify a file as "text", "binary" or "unreadable".
+
+    Heuristic: a NUL byte in the first 8 KB means binary.
 
     Sniffing a prefix rather than decoding the whole file matters in --all mode,
     where the alternative is decoding every .mp4, .wav and .png in an 88 MB tree.
@@ -65,16 +67,21 @@ def is_text_file(filepath: Path) -> bool:
         with filepath.open("rb") as handle:
             chunk = handle.read(8192)
     except OSError:
-        return False
+        return "unreadable"
     if b"\0" in chunk:
-        return False
+        return "binary"
     try:
         chunk.decode("utf-8")
     except UnicodeDecodeError as exc:
         # Tolerate a multi-byte character split by the 8 KB read boundary; only
         # a failure earlier in the buffer is evidence of a binary file.
-        return len(chunk) == 8192 and exc.start >= len(chunk) - 4
-    return True
+        boundary_split = len(chunk) == 8192 and exc.start >= len(chunk) - 4
+        return "text" if boundary_split else "binary"
+    return "text"
+
+
+def is_text_file(filepath: Path) -> bool:
+    return file_kind(filepath) == "text"
 
 
 def should_skip(rel_path: str, patterns: list[str] | None = None) -> bool:
@@ -186,11 +193,9 @@ def check_large_files(changed_files: list[str]) -> None:
 
 def check_merge_conflicts(changed_files: list[str]) -> None:
     """Check for unresolved merge conflict markers in changed files."""
-    conflict_markers = (
-        re.compile(rb"^<{7} "),
-        re.compile(rb"^={7}$"),
-        re.compile(rb"^>{7} "),
-    )
+    start_marker = re.compile(rb"^<{7} ")
+    separator_marker = re.compile(rb"^={7}$")
+    end_marker = re.compile(rb"^>{7} ")
 
     for rel_path in changed_files:
         if should_skip(rel_path):
@@ -203,6 +208,7 @@ def check_merge_conflicts(changed_files: list[str]) -> None:
         # extension first avoids sniffing every asset in --all mode.
         if filepath.suffix not in TEXT_FILE_EXTS:
             continue
+
         if not is_text_file(filepath):
             continue
 
@@ -211,11 +217,16 @@ def check_merge_conflicts(changed_files: list[str]) -> None:
         except OSError:
             continue
 
+        in_conflict = False
         for line_no, line in enumerate(content.split(b"\n"), 1):
-            for marker in conflict_markers:
-                if marker.match(line):
-                    error(f"Unresolved merge conflict in {rel_path}:{line_no}")
-                    break
+            if start_marker.match(line):
+                in_conflict = True
+                error(f"Unresolved merge conflict in {rel_path}:{line_no}")
+            elif in_conflict and separator_marker.match(line):
+                error(f"Unresolved merge conflict in {rel_path}:{line_no}")
+            elif end_marker.match(line):
+                error(f"Unresolved merge conflict in {rel_path}:{line_no}")
+                in_conflict = False
 
 
 def check_trailing_whitespace(changed_files: list[str]) -> None:
@@ -287,8 +298,15 @@ def check_binary_in_text_dirs(changed_files: list[str]) -> None:
         for check_dir in text_only_dirs:
             if rel_path.replace("\\", "/").startswith(check_dir + "/"):
                 filepath = ROOT / rel_path
-                if filepath.is_file() and not is_text_file(filepath):
+                if not filepath.is_file():
+                    break
+                kind = file_kind(filepath)
+                if kind == "binary":
                     error(f"Binary file in text-only directory: {rel_path}")
+                elif kind == "unreadable":
+                    # A read failure is not evidence of binary content; surface
+                    # it instead of mislabeling the file.
+                    warn(f"Could not read {rel_path} to classify it")
                 break
 
 

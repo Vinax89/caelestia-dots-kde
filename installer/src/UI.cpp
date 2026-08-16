@@ -386,7 +386,12 @@ while (!g_quit) {
     }
 
     void summary_screen() {
-        string cache_dir = string(getenv("XDG_CACHE_HOME") ? getenv("XDG_CACHE_HOME") : (string(getenv("HOME")) + "/.cache")) + "/caelestia-kde";
+        const char* home = getenv("HOME");
+        if (!home || !*home) {
+            cerr << "[installer] HOME is unset; cannot show the summary." << endl;
+            return;
+        }
+        string cache_dir = string(getenv("XDG_CACHE_HOME") ? getenv("XDG_CACHE_HOME") : (string(home) + "/.cache")) + "/caelestia-kde";
         string steps_file = cache_dir + "/failed_steps.txt";
         string pkgs_file = cache_dir + "/failed_packages.txt";
         string patches_file = cache_dir + "/failed_patches.txt";
@@ -603,6 +608,7 @@ namespace UI {
             const auto& m = meta[index];
             string display = m.title;
 
+
             if (m.type == "submenu") {
                 display += " ->";
             } else if (m.type == "boolean") {
@@ -621,7 +627,7 @@ namespace UI {
             }
 
             string line = (index == selected ? "> " : "  ") + display;
-            if (static_cast<int>(line.length()) < max_len + 2) {
+            if (max_len > 0 && static_cast<int>(line.length()) < max_len + 2) {
                 line.append(static_cast<size_t>(max_len + 2 - static_cast<int>(line.length())), ' ');
             }
             return line;
@@ -664,33 +670,45 @@ namespace UI {
             bool geometry_changed = left != last_left || top != last_top || w != last_w || h != last_h;
             bool mode_changed = typing_mode != last_typing_mode;
 
-            cout << Draw::sync_start();
-            if (needs_full_redraw || geometry_changed || mode_changed) {
-                cout << Draw::clear();
-                Draw::box(left, top, w, h, box_title, box_color, title_color);
+            // Same floor as draw_progress_ui: the layout arithmetic goes
+            // negative below this size. Show a notice instead of a corrupted
+            // screen and keep waiting on input so a resize recovers.
+            if (g_term_width < 24 || g_term_height < 10 || h < 3) {
+                cout << Draw::sync_start() << Draw::clear();
+                Draw::text(0, g_term_height > 0 ? g_term_height / 2 : 0,
+                           "Terminal too small for the menu; resize to continue",
+                           "default");
+                cout << Draw::sync_end() << flush;
+                needs_full_redraw = true; // repaint fully once the terminal recovers
+            } else {
+                cout << Draw::sync_start();
+                if (needs_full_redraw || geometry_changed || mode_changed) {
+                    cout << Draw::clear();
+                    Draw::box(left, top, w, h, box_title, box_color, title_color);
 
-                string inst = "Arrow keys to navigate, Enter/Space to select/toggle";
-                if (static_cast<int>(inst.length()) > w - 4) {
-                    inst = inst.substr(0, static_cast<size_t>(w - 7)) + "...";
-                }
-                Draw::text(left + 2, top + 2, inst, text_color);
+                    string inst = "Arrow keys to navigate, Enter/Space to select/toggle";
+                    if (static_cast<int>(inst.length()) > w - 4) {
+                        inst = inst.substr(0, static_cast<size_t>(w - 7)) + "...";
+                    }
+                    Draw::text(left + 2, top + 2, inst, text_color);
 
-                for (int i = 0; i < num_items; ++i) {
-                    draw_row(i, left, start_y, top, h, max_len, box_color, text_color);
+                    for (int i = 0; i < num_items; ++i) {
+                        draw_row(i, left, start_y, top, h, max_len, box_color, text_color);
+                    }
+                } else if (selected != last_selected) {
+                    draw_row(last_selected, left, start_y, top, h, max_len, box_color, text_color);
+                    draw_row(selected, left, start_y, top, h, max_len, box_color, text_color);
                 }
-            } else if (selected != last_selected) {
-                draw_row(last_selected, left, start_y, top, h, max_len, box_color, text_color);
-                draw_row(selected, left, start_y, top, h, max_len, box_color, text_color);
+
+                cout << Draw::sync_end() << flush;
+
+                last_selected = selected;
+                last_typing_mode = typing_mode;
+                last_left = left;
+                last_top = top;
+                last_w = w;
+                last_h = h;
             }
-
-            cout << Draw::sync_end() << flush;
-
-            last_selected = selected;
-            last_typing_mode = typing_mode;
-            last_left = left;
-            last_top = top;
-            last_w = w;
-            last_h = h;
 
             string key = Input::wait_key();
             auto& item = menu_items[selected];

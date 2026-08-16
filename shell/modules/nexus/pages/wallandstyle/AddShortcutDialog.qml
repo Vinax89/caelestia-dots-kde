@@ -88,7 +88,7 @@ Popup {
         RowLayout {
             Layout.fillWidth: true
             Layout.topMargin: 8
-            
+
             Controls.TextButton {
                 text: qsTr("Cancel")
                 onClicked: root.close()

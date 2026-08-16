@@ -184,6 +184,7 @@ AudioCollector& AudioCollector::instance() {
 }
 
 void AudioCollector::clearBuffer() {
+    const QMutexLocker locker(&m_bufferMutex);
     auto* writeBuffer = m_writeBuffer.load(std::memory_order_relaxed);
     std::fill(writeBuffer->begin(), writeBuffer->end(), 0.0f);
 
@@ -192,6 +193,7 @@ void AudioCollector::clearBuffer() {
 }
 
 void AudioCollector::loadChunk(const qint16* samples, quint32 count) {
+    const QMutexLocker locker(&m_bufferMutex);
     if (count > ac::CHUNK_SIZE) {
         count = ac::CHUNK_SIZE;
     }
@@ -206,6 +208,7 @@ void AudioCollector::loadChunk(const qint16* samples, quint32 count) {
 }
 
 quint32 AudioCollector::readChunk(float* out, quint32 count) {
+    const QMutexLocker locker(&m_bufferMutex);
     if (count == 0 || count > ac::CHUNK_SIZE) {
         count = ac::CHUNK_SIZE;
     }
@@ -217,6 +220,7 @@ quint32 AudioCollector::readChunk(float* out, quint32 count) {
 }
 
 quint32 AudioCollector::readChunk(double* out, quint32 count) {
+    const QMutexLocker locker(&m_bufferMutex);
     if (count == 0 || count > ac::CHUNK_SIZE) {
         count = ac::CHUNK_SIZE;
     }

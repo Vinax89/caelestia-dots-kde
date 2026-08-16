@@ -77,9 +77,9 @@ PageBase {
         for (let i = 0; i < entries.length; i++) {
             let entry = entries[i];
             if (entry.id === "spacer") continue;
-            
+
             activeCounts[entry.id] = (activeCounts[entry.id] || 0) + 1;
-            
+
             if (entry.enabled) {
                 let zone = entry.zone || "left";
                 if (zone === "left") leftModel.append({ "compId": entry.id, "isPlaceholder": false });
@@ -147,7 +147,7 @@ PageBase {
 
     function save() {
         let newEntries = [];
-        
+
         for (let i = 0; i < leftModel.count; i++) {
             if (!leftModel.get(i).isPlaceholder) {
                 newEntries.push({ id: leftModel.get(i).compId, enabled: true, zone: "left" });
@@ -168,7 +168,7 @@ PageBase {
                 newEntries.push({ id: libraryModel.get(i).compId, enabled: false, zone: "left" });
             }
         }
-        
+
         GlobalConfig.bar.entries = newEntries;
     }
 
@@ -204,14 +204,14 @@ PageBase {
                 font: Tokens.font.body.small
                 color: Colours.palette.m3onSurfaceVariant
             }
-            
+
             // Left Zone
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, leftList.contentHeight + root.zonePadding * 2)
                 color: Colours.palette.m3surfaceContainer
                 radius: Tokens.rounding.large
-                
+
                 Text {
                     text: qsTr("Left Zone")
                     font: Tokens.font.label.large
@@ -229,7 +229,7 @@ PageBase {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
                         root.globalDragHoveredList = "left";
-                        
+
                         if (sourceItem.sourceList !== "left") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < leftModel.count; i++) {
@@ -257,14 +257,14 @@ PageBase {
                     delegate: root.panelDelegate
                 }
             }
-            
+
             // Middle Zone
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, middleList.contentHeight + root.zonePadding * 2)
                 color: Colours.palette.m3surfaceContainer
                 radius: Tokens.rounding.large
-                
+
                 Text {
                     text: qsTr("Middle Zone")
                     font: Tokens.font.label.large
@@ -282,7 +282,7 @@ PageBase {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
                         root.globalDragHoveredList = "middle";
-                        
+
                         if (sourceItem.sourceList !== "middle") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < middleModel.count; i++) {
@@ -310,14 +310,14 @@ PageBase {
                     delegate: root.panelDelegate
                 }
             }
-            
+
             // Right Zone
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, rightList.contentHeight + root.zonePadding * 2)
                 color: Colours.palette.m3surfaceContainer
                 radius: Tokens.rounding.large
-                
+
                 Text {
                     text: qsTr("Right Zone")
                     font: Tokens.font.label.large
@@ -335,7 +335,7 @@ PageBase {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
                         root.globalDragHoveredList = "right";
-                        
+
                         if (sourceItem.sourceList !== "right") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < rightModel.count; i++) {
@@ -378,7 +378,7 @@ PageBase {
 
                 ColumnLayout {
                     spacing: 0
-                    
+
                     Text {
                         text: qsTr("Library")
                         font: Tokens.font.title.small
@@ -407,7 +407,7 @@ PageBase {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, libList.contentHeight + root.zonePadding * 2)
                 color: "transparent"
-                
+
                 Text {
                     text: qsTr("Empty")
                     font: Tokens.font.label.large
@@ -424,9 +424,9 @@ PageBase {
                     onEntered: drag => {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
-                        
+
                         root.globalDragHoveredList = "library";
-                        
+
                         if (sourceItem.sourceList !== "library") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < libraryModel.count; i++) {
@@ -459,7 +459,7 @@ PageBase {
     }
 
     property Component panelDelegate: Component {
-        
+
         Item {
             id: delegateWrapper
 
@@ -467,20 +467,20 @@ PageBase {
             required property string compId
             required property bool isPlaceholder
             readonly property bool isAvailable: (componentMeta[compId]?.available ?? true)
-            
+
             property string sourceList: {
                 if (ListView.view === leftList) return "left";
                 if (ListView.view === middleList) return "middle";
                 if (ListView.view === rightList) return "right";
                 return "library";
             }
-            
+
             width: ListView.view.width
             height: (root.isGlobalDragging && root.globalDragSourceList === sourceList && root.globalDragSourceIndex === index && root.globalDragHoveredList !== sourceList) ? 0 : 50
             visible: height > 0
-            
+
             Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-            
+
             property bool isDraggingThis: activeDragArea.drag.active
 
             z: isDraggingThis ? 100 : 1
@@ -491,11 +491,11 @@ PageBase {
                 onEntered: drag => {
                     let sourceItem = drag.source;
                     if (!sourceItem) return;
-                    
+
                     let from = -1;
                     let to = delegateWrapper.index;
                     let targetModel = root.getModel(sourceList);
-                    
+
                     if (sourceItem.sourceList === sourceList) {
                         from = root.globalDragSourceIndex;
                     } else {
@@ -503,7 +503,7 @@ PageBase {
                             if (targetModel.get(i).isPlaceholder) { from = i; break; }
                         }
                     }
-                    
+
                     if (from !== -1 && to !== -1 && from !== to) {
                         targetModel.move(from, to, 1);
                         if (sourceItem.sourceList === sourceList) {
@@ -531,7 +531,7 @@ PageBase {
                     hoverEnabled: true
                     drag.target: isPlaceholder || !delegateWrapper.isAvailable ? null : activeDelegate
                     drag.axis: Drag.XAndYAxis
-                    
+
                     onPressed: {
                         if (isPlaceholder || !delegateWrapper.isAvailable) return;
                         root.isGlobalDragging = true;
@@ -539,31 +539,31 @@ PageBase {
                         root.globalDragSourceIndex = index;
                         root.globalDragHoveredList = sourceList;
                     }
-                    
+
                     onReleased: {
                         if (isPlaceholder || !delegateWrapper.isAvailable) return;
-                        
+
                         let finalHovered = root.globalDragHoveredList;
                         root.isGlobalDragging = false;
-                        
+
                         let targetModel = root.getModel(finalHovered);
                         let sourceModel = root.getModel(sourceList);
-                        
+
                         if (finalHovered !== sourceList && finalHovered !== "" && targetModel) {
                             let pIndex = -1;
                             for (let i = 0; i < targetModel.count; i++) {
                                 if (targetModel.get(i).isPlaceholder) { pIndex = i; break; }
                             }
-                            
+
                             let proceed = true;
-                            
+
                             if (pIndex !== -1 && proceed) {
                                 targetModel.remove(pIndex);
                                 targetModel.insert(pIndex, { compId: compId, isPlaceholder: false });
                                 sourceModel.remove(root.globalDragSourceIndex);
                             }
                         }
-                        
+
                         for (let i = leftModel.count - 1; i >= 0; i--) {
                             if (leftModel.get(i).isPlaceholder) leftModel.remove(i);
                         }
@@ -576,7 +576,7 @@ PageBase {
                         for (let i = libraryModel.count - 1; i >= 0; i--) {
                             if (libraryModel.get(i).isPlaceholder) libraryModel.remove(i);
                         }
-                        
+
                         activeDelegate.x = 0;
                         activeDelegate.y = 0;
                         save();
@@ -598,12 +598,12 @@ PageBase {
                     anchors.margins: Tokens.padding.medium
                     spacing: Tokens.spacing.small
                     visible: !isPlaceholder
-                    
+
                     MaterialIcon {
                         text: componentMeta[compId]?.icon ?? "widgets"
                         color: sourceList !== "library" ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
                     }
-                    
+
                     Text {
                         Layout.fillWidth: true
                         text: {

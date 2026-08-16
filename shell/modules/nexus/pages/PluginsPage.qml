@@ -8,7 +8,7 @@ import qs.modules.nexus.common
 
 PageBase {
     id: root
-    
+
     title: qsTr("Plugins")
 
     ColumnLayout {

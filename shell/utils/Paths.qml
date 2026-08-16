@@ -16,9 +16,9 @@ Singleton {
     readonly property string state: `${Quickshell.env("XDG_STATE_HOME") || `${home}/.local/state`}/caelestia`
     readonly property string cache: `${Quickshell.env("XDG_CACHE_HOME") || `${home}/.cache`}/caelestia`
     readonly property string config: `${Quickshell.env("XDG_CONFIG_HOME") || `${home}/.config`}/caelestia`
-    
+
     readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || `/tmp/caelestia-${Quickshell.env("USER")}`
-    
+
     function runtimeTemp(name: string): string {
         return `${runtimeDir}/caelestia-${name}`;
     }

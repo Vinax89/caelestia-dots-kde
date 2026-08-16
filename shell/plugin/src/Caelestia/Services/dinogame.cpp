@@ -55,11 +55,11 @@ void DinoGameBackend::startGame() {
     emit isPlayingChanged();
     m_isGameOver = false;
     emit isGameOverChanged();
-    
+
     m_dinoY = 0;
     emit dinoYChanged();
     m_dinoVelocityY = 0;
-    
+
     emit gameStarted();
     m_timer->start();
 }
@@ -69,7 +69,7 @@ void DinoGameBackend::gameOver() {
     emit isPlayingChanged();
     m_isGameOver = true;
     emit isGameOverChanged();
-    
+
     m_timer->stop();
     emit gameDied();
 

@@ -65,6 +65,7 @@ private:
     std::vector<float> m_buffer1;
     std::vector<float> m_buffer2;
     std::atomic<std::vector<float>*> m_readBuffer;
+    mutable QMutex m_bufferMutex;
     std::atomic<std::vector<float>*> m_writeBuffer;
 
     void reload();

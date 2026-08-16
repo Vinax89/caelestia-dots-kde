@@ -244,6 +244,14 @@ PageBase {
                     }
                 }
 
+                ToggleRow {
+                    text: qsTr("Detect location via IP")
+                    subtext: qsTr("Estimates your location from your IP address through ipinfo.io when no fixed location is saved")
+                    checked: GlobalConfig.services.weatherIpGeolocation
+
+                    onToggled: GlobalConfig.services.weatherIpGeolocation = checked
+                }
+
                 StyledRect {
                     Layout.fillWidth: true
                     radius: Tokens.rounding.large

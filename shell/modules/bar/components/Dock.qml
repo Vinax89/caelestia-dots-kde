@@ -125,17 +125,17 @@ Item {
     function saveNewOrder(): void {
         const newArr = [];
         const newFavs = [];
-        
+
         for (let i = 0; i < root.currentOrder.length; ++i) {
             const mData = root.currentOrder[i];
             if (!mData) continue;
-            
+
             if (mData.isPinned) {
                 newFavs.push(mData.id);
             }
             newArr.push(mData);
         }
-        
+
         // Only update if arrays are different length or different order
         const currentFavs = GlobalConfig.launcher.favouriteApps || [];
         let changed = currentFavs.length !== newFavs.length;
@@ -147,7 +147,7 @@ Item {
                 }
             }
         }
-        
+
         if (changed) {
             GlobalConfig.launcher.favouriteApps = newFavs;
         }
@@ -170,10 +170,10 @@ Item {
 
         implicitWidth: bar.isHorizontal ? (__computedContentWidth + padding * 2) : bar.thickness
         implicitHeight: bar.isHorizontal ? bar.thickness : (__computedContentWidth + padding * 2)
-        
+
         width: bar.isHorizontal ? Math.min(implicitWidth, maxHorizontalSize) : implicitWidth
         height: !bar.isHorizontal ? Math.min(implicitHeight, maxVerticalSize) : implicitHeight
-        
+
         property string currentZone: {
             if (!bar) return "middle";
             if (bar.leftEntries.some(e => e.id === "dock")) return "left";
@@ -184,11 +184,11 @@ Item {
         // Actual space available from the dock's position to the next zone boundary
         property real availableSize: {
             if (!bar) return 9999;
-            
+
             const W = bar.isHorizontal ? bar.width : bar.height;
             const spacing = Tokens.spacing.medium;
             const pad = bar.vPadding;
-            
+
             let otherSize = 0;
             if (root.parent && root.parent.parent) {
                 const layout = root.parent.parent;
@@ -199,7 +199,7 @@ Item {
                     }
                 }
             }
-            
+
             let result = 0;
             if (currentZone === "left") {
                 const M = bar.middleZoneSize;
@@ -207,7 +207,7 @@ Item {
                 let maxZone = W - 2*pad;
                 if (M > 0) maxZone = W / 2 - M / 2 - spacing - pad;
                 else if (R > 0) maxZone = W - R - spacing - 2*pad;
-                
+
                 result = Math.max(0, maxZone - otherSize);
             } else if (currentZone === "right") {
                 const L = bar.leftZoneSize;
@@ -215,7 +215,7 @@ Item {
                 let maxZone = W - 2*pad;
                 if (M > 0) maxZone = W / 2 - M / 2 - spacing - pad;
                 else if (L > 0) maxZone = W - L - spacing - 2*pad;
-                
+
                 result = Math.max(0, maxZone - otherSize);
             } else {
                 const L = bar.leftZoneSize;
@@ -223,10 +223,10 @@ Item {
                 let maxZone = W - 2*pad;
                 if (L > 0) maxZone -= (L + spacing);
                 if (R > 0) maxZone -= (R + spacing);
-                
+
                 result = Math.max(0, maxZone - otherSize);
             }
-            
+
             return result;
         }
 
@@ -247,7 +247,7 @@ Item {
 
         Item {
             id: layout
-            
+
             anchors.centerIn: parent
             implicitWidth: container.__computedContentWidth
             implicitHeight: container.__computedContentWidth
@@ -276,7 +276,7 @@ Item {
                 moveDisplaced: Transition {
                     NumberAnimation { properties: "x,y"; duration: 250; easing.type: Easing.OutCubic }
                 }
-                
+
                 model: DelegateModel {
                     id: visualModel
 
@@ -386,23 +386,23 @@ Item {
                         drag.axis: bar.isHorizontal ? Drag.XAxis : Drag.YAxis
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         cursorShape: Qt.PointingHandCursor
-                        
+
                         onPressed: mouse => {
                             held = true;
                             root.isDragging = true;
                             stateLayer.press(mouse.x, mouse.y);
                         }
-                        
+
                         onClicked: mouse => {
                             if (mouse.button === Qt.LeftButton) {
                                 if (modelData.isPinned) {
                                     bounceAnim.start();
                                 }
-                                
+
                                 if (modelData.toplevels.length > 0) {
                                     let activeIdx = -1;
                                     let activeAddr = "";
-                                    
+
                                     if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.activeWindow) {
                                         activeAddr = KWinActiveWindowBridge.activeWindow.address ? String(KWinActiveWindowBridge.activeWindow.address) : "";
                                         Logger.log("Dock debug: KWin activeWindow address is:", activeAddr);
@@ -425,11 +425,11 @@ Item {
                                             break;
                                         }
                                     }
-                                    
+
                                     Logger.log("Dock debug: Final activeIdx:", activeIdx);
-                                    
+
                                     const isKWin = (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.windowList);
-                                    
+
                                     if (modelData.toplevels.length === 1) {
                                         let addr = String(modelData.toplevels[0].address);
                                         if (activeIdx === 0) {
@@ -460,7 +460,7 @@ Item {
                                     let newLaunching = Object.assign({}, root.launchingApps);
                                     newLaunching[modelData.appClass || modelData.id] = true;
                                     root.launchingApps = newLaunching;
-                                    
+
                                     const subCmd = modelData.entry.runInTerminal
                                         ? [...GlobalConfig.general.apps.terminal, `${Quickshell.shellDir}/assets/wrap_term_launch.sh`, ...modelData.entry.command]
                                         : modelData.entry.command;
@@ -477,7 +477,7 @@ Item {
                                 bar.popouts.hasCurrent = true;
                             }
                         }
-                        
+
                         onReleased: {
                             held = false;
                             root.isDragging = false;
@@ -485,7 +485,7 @@ Item {
                             delegateItem.y = 0;
                             root.saveNewOrder();
                         }
-                        
+
                         onCanceled: {
                             held = false;
                             root.isDragging = false;
@@ -535,7 +535,7 @@ Item {
                         source: modelData ? WinIcons.sourceFor(modelData.entry, modelData.appClass, modelData.iconName, modelData.pid ?? 0) : ""
                         asynchronous: true
                         visible: !(Config.bar.dock.recolourIcons ?? false)
-                        
+
                         SequentialAnimation {
                             id: bounceAnim
 
@@ -568,10 +568,10 @@ Item {
                         spacing: 2
                         orientation: ListView.Horizontal
                         interactive: false
-                        
+
                         height: 2
                         width: contentWidth
-                        
+
                         remove: Transition {
                             NumberAnimation { property: "scale"; from: 1; to: 0; duration: 250; easing.type: Easing.InBack }
                             NumberAnimation { property: "y"; from: 0; to: -15; duration: 250; easing.type: Easing.InBack }
@@ -582,24 +582,24 @@ Item {
                         removeDisplaced: Transition {
                             NumberAnimation { properties: "x,y"; duration: 250; easing.type: Easing.OutCubic }
                         }
-                        
+
                         model: {
                             const dummy = root.modelUpdateTrigger;
                             if (!modelData) return 0;
                             return Math.min(2, modelData.toplevels.length);
                         }
-                        
+
                         delegate: Rectangle {
                             required property int index
 
                             width: (index === 0 && delegateItem.isActive) ? 16 : 2
-    
+
                                 height: 2
-    
+
                                 radius: 1
-    
+
                                 color: delegateItem.isActive ? Colours.palette.m3primary : Colours.palette.m3onSurface
-    
+
                                 scale: 0
                                 y: -15
                                 Component.onCompleted: {
@@ -626,22 +626,22 @@ Item {
         const itemSize = container.itemSize;
         const itemWidthWithSpacing = itemSize + spacing;
         const adjustedPos = isHorizontal ? relPos - container.x - padding : relPos - container.y - padding;
-        
+
         // Only close if cursor is completely outside dock bounds
         if (adjustedPos < 0 || adjustedPos >= modelDataArray.length * itemWidthWithSpacing) {
             bar.popouts.hasCurrent = false;
             return;
         }
-        
+
         const index = Math.floor(adjustedPos / itemWidthWithSpacing);
-        
+
         if (index >= 0 && index < modelDataArray.length) {
             bar.popouts.currentName = "dockhover";
             const centerOffset = index * itemWidthWithSpacing + itemSize / 2;
-            const absoluteCenter = isHorizontal 
-                ? container.mapToItem(null, padding + centerOffset, 0).x 
+            const absoluteCenter = isHorizontal
+                ? container.mapToItem(null, padding + centerOffset, 0).x
                 : container.mapToItem(null, 0, padding + centerOffset).y;
-            
+
             bar.popouts.currentCenter = absoluteCenter;
             bar.popouts.dockModel = modelDataArray[index];
             bar.popouts.hasCurrent = true;
@@ -659,7 +659,7 @@ Item {
         const apps = [];
 
         const pinnedIds = GlobalConfig.launcher.favouriteApps || [];
-        
+
         for (const pid of pinnedIds) {
             for (const entry of DesktopEntries.applications.values) {
                 if (Strings.testRegexList([pid], entry.id)) {
@@ -677,19 +677,19 @@ Item {
                 }
             }
         }
-        
+
         for (const toplevel of root._toplevels) {
             const ipc = toplevel;
             if (!ipc) continue;
             const appClass = ipc.class || ipc.initialClass;
             if (!appClass) continue;
-            
+
             if (appClass.toLowerCase().includes("xwaylandvideobridge")) continue;
-            
+
             let found = false;
             for (const app of apps) {
                 const isToplevelSteamGame = appClass.toLowerCase().startsWith("steam_app_");
-                
+
                 if (isToplevelSteamGame) {
                     if (app.appClass.toLowerCase() === appClass.toLowerCase()) {
                         app.toplevels.push(toplevel);
@@ -701,8 +701,8 @@ Item {
                     if (isAppSteamGame) continue;
 
                     const baseId = app.id.toLowerCase().replace(".desktop", "");
-                    if (app.appClass.toLowerCase() === appClass.toLowerCase() || 
-                        app.id.toLowerCase().includes(appClass.toLowerCase()) || 
+                    if (app.appClass.toLowerCase() === appClass.toLowerCase() ||
+                        app.id.toLowerCase().includes(appClass.toLowerCase()) ||
                         appClass.toLowerCase().includes(baseId)) {
                         app.toplevels.push(toplevel);
                         found = true;
@@ -710,12 +710,12 @@ Item {
                     }
                 }
             }
-            
+
             if (!found) {
                 const isToplevelSteamGame = appClass.toLowerCase().startsWith("steam_app_");
                 let entry = null;
                 let iconName = appClass;
-                
+
                 if (isToplevelSteamGame) {
                     const appId = appClass.substring(10);
                     iconName = `steam_icon_${appId}`;
@@ -752,7 +752,7 @@ Item {
                 });
             }
         }
-        
+
         let newLaunching = Object.assign({}, root.launchingApps);
         let launchingChanged = false;
 
@@ -768,7 +768,7 @@ Item {
                 }
             }
         }
-        
+
         if (launchingChanged) {
             root.launchingApps = newLaunching;
         }
@@ -784,7 +784,7 @@ Item {
                 }
             }
         }
-        
+
         if (changed) {
             for (let i = dockModel.count - 1; i >= 0; i--) {
                 let found = false;
@@ -795,7 +795,7 @@ Item {
                     dockModel.remove(i);
                 }
             }
-            
+
             for (let i = 0; i < apps.length; i++) {
                 let found = false;
                 for (let j = 0; j < dockModel.count; j++) {
@@ -805,7 +805,7 @@ Item {
                     dockModel.append({ appId: apps[i].id });
                 }
             }
-            
+
             for (let i = 0; i < apps.length; i++) {
                 let currentId = apps[i].id;
                 if (dockModel.get(i).appId !== currentId) {
@@ -819,7 +819,7 @@ Item {
                 }
             }
         }
-        
+
         root.modelDataArray = apps;
         root.modelUpdateTrigger += 1;
     }

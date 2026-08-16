@@ -6,6 +6,7 @@
 #include <qnetworkcookiejar.h>
 #include <qnetworkreply.h>
 #include <qnetworkrequest.h>
+#include <QSet>
 
 #include <qtimer.h>
 #include <chrono>
@@ -22,6 +23,13 @@ void Requests::get(const QUrl& url, QJSValue onSuccess, QJSValue onError, QJSVal
         qCWarning(lcRequests) << "get: onSuccess is not callable";
         return;
     }
+    if (url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) != 0
+        || url.host().isEmpty()) {
+        qCWarning(lcRequests) << "get: refusing non-HTTPS or hostless URL" << url;
+        if (onError.isCallable())
+            onError.call({ QStringLiteral("only HTTPS URLs are allowed") });
+        return;
+    }
 
     QNetworkRequest request(url);
     request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
@@ -30,11 +38,21 @@ void Requests::get(const QUrl& url, QJSValue onSuccess, QJSValue onError, QJSVal
     request.setRawHeader("Pragma", "no-cache");
     request.setRawHeader("Connection", "close");
 
+    static const QSet<QByteArray> allowedHeaders = {
+        "Accept", "Content-Type", "User-Agent"
+    };
     if (headers.isObject()) {
         QJSValueIterator it(headers);
         while (it.hasNext()) {
             it.next();
-            request.setRawHeader(it.name().toUtf8(), it.value().toString().toUtf8());
+            const QByteArray name = it.name().toUtf8();
+            const QByteArray value = it.value().toString().toUtf8();
+            if (!allowedHeaders.contains(name)
+                || value.contains('\r') || value.contains('\n')) {
+                qCWarning(lcRequests) << "get: refusing unsafe HTTP header" << name;
+                continue;
+            }
+            request.setRawHeader(name, value);
         }
     }
 

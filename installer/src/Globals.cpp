@@ -26,6 +26,20 @@ int run_shell(const std::string& command) {
     return status;
 }
 
+bool is_valid_env_name(const std::string& name) {
+    if (name.empty())
+        return false;
+    const unsigned char first = static_cast<unsigned char>(name.front());
+    if (!(std::isalpha(first) || name.front() == '_'))
+        return false;
+    for (char c : name) {
+        const unsigned char value = static_cast<unsigned char>(c);
+        if (!(std::isalnum(value) || c == '_'))
+            return false;
+    }
+    return true;
+}
+
 void cleanup_installer_runtime() {
     if (g_installer_runtime_dir.empty())
         return;

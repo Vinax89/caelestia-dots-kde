@@ -126,7 +126,7 @@ CustomMouseArea {
 
         if (root.focusGrab && (root.focusGrab.active || popouts.isDetached)) {
             let inside = false;
-            
+
             if (inBarArea(event.x, event.y)) inside = true;
             else if (visibilities.launcher && inBottomPanel(panels.launcher, event.x, event.y, false, Config.launcher.hoverThickness, Config.launcher.hoverWidth) && withinPanelWidth(panels.launcher, event.x, event.y)) inside = true;
             else if (visibilities.session && inRightPanel(panels.sessionWrapper, event.x, event.y)) inside = true;
@@ -321,7 +321,7 @@ CustomMouseArea {
         const isUtilitiesOnLeft = Config.bar.position === "right";
         const inUtilitiesAreaClosed = isUtilitiesOnLeft ? x <= (screen.width / 2) : (x >= (screen.width / 2) && (Config.bar.position === "bottom" ? x <= (screen.width - 200) : true));
         const inUtilitiesAreaOpen = x >= 0 && x <= screen.width;
-        
+
         const inUtilitiesArea = Config.bar.position === "bottom"
             ? inTopPanel(panels.utilities, x, y, Config.utilities.hoverThickness, Config.utilities.hoverWidth) && (root.visibilities.utilities ? inUtilitiesAreaOpen : inUtilitiesAreaClosed)
             : inBottomPanel(panels.utilities, x, y, true, Config.utilities.hoverThickness, Config.utilities.hoverWidth) && (root.visibilities.utilities ? inUtilitiesAreaOpen : inUtilitiesAreaClosed);

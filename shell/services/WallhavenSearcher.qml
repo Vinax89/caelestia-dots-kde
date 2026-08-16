@@ -13,11 +13,23 @@ Singleton {
 
     readonly property string apiBase: "https://wallhaven.cc/api/v1"
 
-    // User-configurable API key (NSFW content requires this)
-    property string apiKey: GlobalConfig.services.wallhavenApiKey ?? ""
-    property int requestSerial: 0
+    // The keyring is authoritative; migrate the legacy config value once.
+    property string legacyApiKey: GlobalConfig.services.wallhavenApiKey ?? ""
+    property string keyringApiKey: ""
+    property string apiKey: keyringApiKey
+    property Process keyringLookup: Process {
+        command: ["secret-tool", "lookup", "service", "caelestia", "key", "wallhaven-api-key"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.keyringApiKey = (text || "").trim();
+                root.migrateLegacyApiKey();
+            }
+        }
+    }
 
     // Search state
+    property int requestSerial: 0
     property bool loading: false
     property string lastQuery: ""
     property int currentPage: 1
@@ -47,6 +59,28 @@ Singleton {
     signal downloadComplete(string id, string path)
     signal downloadFailed(string id, string error)
 
+    function migrateLegacyApiKey(): void {
+        const key = root.legacyApiKey.trim();
+        if (!key)
+            return;
+        if (root.keyringApiKey) {
+            GlobalConfig.services.wallhavenApiKey = "";
+            return;
+        }
+        const qml = 'import QtQuick\nimport Quickshell.Io\n' +
+            'Process { property string migrationKey: ' + JSON.stringify(key) +
+            '; command: ["secret-tool", "store", "--label=Caelestia Wallhaven API key", "service", "caelestia", "key", "wallhaven-api-key"]' +
+            '; stdinEnabled: true; onStarted: { write(migrationKey); stdinEnabled = false; }' +
+            ' onExited: code => { if (code === 0) { root.keyringApiKey = migrationKey; GlobalConfig.services.wallhavenApiKey = ""; } destroy(); } }';
+        try {
+            const proc = Qt.createQmlObject(qml, root, "wallhavenKeyMigration");
+            proc.running = true;
+        } catch (e) {
+            console.error("Wallhaven: unable to migrate API key to keyring", e);
+        }
+    }
+
+
     function resetDownloadState(id = "") {
         activeDownloadId = id;
         activeDownloadProgress = 0;
@@ -70,7 +104,6 @@ Singleton {
         const match = data.match(/(\d{1,3}(?:\.\d+)?)%/);
         if (!match)
             return;
-
         const percent = Math.max(0, Math.min(100, parseFloat(match[1])));
         const progress = percent / 100;
         if (isNaN(progress) || progress < activeDownloadProgress)
@@ -91,7 +124,7 @@ Singleton {
         }
 
         if (apiKey) {
-            paramList.push(`apikey=${apiKey}`);
+            paramList.push(`apikey=${encodeURIComponent(apiKey)}`);
         }
 
         return url + paramList.join("&");
@@ -129,9 +162,10 @@ Singleton {
         if (filters.colors)
             params.colors = filters.colors;
 
-        const requestId = ++root.requestSerial;
+        const url = buildUrl("/search", params);
         Logger.log("Wallhaven search:", redactedUrl(url));
 
+        const requestId = ++root.requestSerial;
         Requests.get(url, text => {
             if (requestId !== root.requestSerial)
                 return;
@@ -170,8 +204,9 @@ Singleton {
             "page": "1"
         };
 
-        const requestId = ++root.requestSerial;
+        const url = buildUrl("/search", params);
         Logger.log("Wallhaven random:", redactedUrl(url));
+        const requestId = ++root.requestSerial;
 
         Requests.get(url, text => {
             if (requestId !== root.requestSerial)

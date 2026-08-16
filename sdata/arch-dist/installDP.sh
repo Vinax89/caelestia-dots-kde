@@ -7,9 +7,9 @@ log()  { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 err()  { echo -e "\033[0;31m[ERR]\033[0m  $*"; }
 
 clone_verified() {
-    local url="$1" dest="$2"
+    local url="$1" dest="$2" allow_unverified="${3:-0}"
     git clone --depth 1 "$url" "$dest" || return 1
-    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_SOURCE:-0}" != "1" ]]; then
+    if [[ "$allow_unverified" != "1" ]]; then
         git -C "$dest" verify-commit HEAD >/dev/null 2>&1 || {
             rm -rf -- "$dest"
             err "Refusing unsigned source checkout: $url"
@@ -29,7 +29,7 @@ if ! command -v yay >/dev/null 2>&1; then
     log "yay not found - installing..."
     sudo pacman -S --needed --noconfirm base-devel git || true
     tmpdir="$(mktemp -d)"
-    clone_verified https://aur.archlinux.org/yay-bin.git "$tmpdir"
+    clone_verified https://aur.archlinux.org/yay-bin.git "$tmpdir" 1
     (
         cd "$tmpdir" || exit 1
         makepkg -si --noconfirm
@@ -115,7 +115,7 @@ if ! yay -S --needed --noconfirm "${PACKAGES[@]}"; then
         if ! yay -S --needed --noconfirm "$pkg"; then
             log "yay failed to install $pkg. Attempting manual build from AUR..."
             tmpdir="$(mktemp -d)"
-            if clone_verified "https://aur.archlinux.org/${pkg}.git" "$tmpdir"; then
+            if clone_verified "https://aur.archlinux.org/${pkg}.git" "$tmpdir" 1; then
                 (
                     cd "$tmpdir" || exit 1
                     makepkg -si --noconfirm

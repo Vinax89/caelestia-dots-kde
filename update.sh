@@ -16,6 +16,7 @@ verify_update_commit() {
     local verify_home fingerprints status valid_fingerprint
     verify_home="$(mktemp -d "${TMPDIR:-/tmp}/caelestia-verify.XXXXXX")" || die "Could not create verification directory"
     chmod 700 "$verify_home"
+    trap 'rm -rf -- "${verify_home:-}"' EXIT
     curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$verify_home/trusted.asc" || die "Could not download trusted public key"
     fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$verify_home/trusted.asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
     grep -Fxq "$trusted_fingerprint" <<< "$fingerprints" || die "Trusted signer fingerprint mismatch"
@@ -23,6 +24,7 @@ verify_update_commit() {
     status="$(GNUPGHOME="$verify_home" git -C "$BUNDLE_DIR" -c gpg.program=gpg verify-commit --raw HEAD 2>&1 || true)"
     valid_fingerprint="$(printf '%s\n' "$status" | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
     rm -rf -- "$verify_home"
+    trap - EXIT
     [[ "$valid_fingerprint" == "$trusted_fingerprint" ]] || die "Update commit is not trusted"
 }
 
@@ -290,6 +292,11 @@ else
     stdbuf -oL -eL "$QUICKSHELL_PATH" -d -n -p "$HOME/.config/quickshell/caelestia/shell.qml" >/dev/null 2>&1 &
 fi
 
+sleep 1
+if ! pgrep -x quickshell >/dev/null 2>&1 && ! pgrep -x qs >/dev/null 2>&1; then
+    echo "Shell restart failed: no quickshell process is running." >&2
+    exit 1
+fi
 echo "Shell restarted successfully!"
 echo
 echo "If the shell doesn't start, please restart it manually by running: $CAELESTIA_BIN shell -d"

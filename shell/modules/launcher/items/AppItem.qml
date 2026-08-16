@@ -166,18 +166,18 @@ Item {
                 const appId = root.modelData?.id;
                 if (!appId)
                     return;
-                
+
                 if (isPinned) {
                     Quickshell.execDetached([
-                        "sh", "-c", 
-                        `rm -f ~/Desktop/"$1" ~/Desktop/"$1.desktop"`, 
+                        "sh", "-c",
+                        `rm -f ~/Desktop/"$1" ~/Desktop/"$1.desktop"`,
                         "--", appId
                     ]);
                     isPinned = false;
                 } else {
                     Quickshell.execDetached([
-                        "sh", "-c", 
-                        `FILE=$(find /usr/share/applications ~/.local/share/applications /var/lib/flatpak/exports/share/applications -name "$1" -o -name "$1.desktop" 2>/dev/null | head -n 1); if [ -n "$FILE" ]; then cp "$FILE" ~/Desktop/; BASENAME=$(basename "$FILE"); chmod +x ~/Desktop/"$BASENAME"; fi`, 
+                        "sh", "-c",
+                        `FILE=$(find /usr/share/applications ~/.local/share/applications /var/lib/flatpak/exports/share/applications -name "$1" -o -name "$1.desktop" 2>/dev/null | head -n 1); if [ -n "$FILE" ]; then cp "$FILE" ~/Desktop/; BASENAME=$(basename "$FILE"); chmod +x ~/Desktop/"$BASENAME"; fi`,
                         "--", appId
                     ]);
                     isPinned = true;

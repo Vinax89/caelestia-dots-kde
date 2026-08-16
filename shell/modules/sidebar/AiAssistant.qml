@@ -363,7 +363,7 @@ Item {
                 prompt += "The user has started typing: \"" + draft + "\"\n\n";
         }
 
-        var cmd = [claudeCodeBinPath(), "-p", prompt, "--output-format", "json", "--dangerously-skip-permissions"];
+        var cmd = [claudeCodeBinPath(), "-p", prompt, "--output-format", "json"];
         var qml =
             "import QtQuick\n" +
             "import Quickshell.Io\n" +
@@ -565,9 +565,9 @@ Item {
         const which = p || provider;
         const cmd = ["secret-tool", "lookup", "service", "caelestia", "key", root.keyringAttr(which)];
         const qml = 'import QtQuick\nimport Quickshell.Io\n' +
-            'Process {\n    id: kp\n    command: ' + JSON.stringify(cmd) + '\n' +
-            '    stdout: StdioCollector { onStreamFinished: root.onKeyringKey(' + JSON.stringify(which) + ', (text || "").trim(), kp); }\n' +
-            '    onExited: code => { if (code !== 0) kp.destroy(); }\n}';
+            'Process {\n    id: kp\n    property bool keyReadFinished: false\n    command: ' + JSON.stringify(cmd) + '\n' +
+            '    stdout: StdioCollector { onStreamFinished: { kp.keyReadFinished = true; root.onKeyringKey(' + JSON.stringify(which) + ', (text || "").trim(), kp); } }\n' +
+            '    onExited: code => { if (code !== 0 && !kp.keyReadFinished) kp.destroy(); }\n}';
         try {
             const o = Qt.createQmlObject(qml, root, "keyringProc");
             o.running = true;
@@ -884,6 +884,11 @@ Item {
         return false;
     }
 
+    function caelestiaSubcommandAllowed(subcommand) {
+        return ["install", "update", "shell", "scheme", "wallpaper",
+                "toggle", "record", "clipboard", "emoji"].indexOf(subcommand) !== -1;
+    }
+
     function runAgentCommand(cmd, type) {
         var commandStr = Array.isArray(cmd) ? JSON.stringify(cmd) : '["sh", "-c", ' + JSON.stringify("exec </dev/null; " + cmd) + ']';
         var processQml = "import QtQuick\n" +
@@ -1113,7 +1118,7 @@ Item {
         var safeMsg = firstMessage.substring(0, 200);
         var prompt = "Output ONLY a concise 2-4 word title for the following message. No quotes, no trailing punctuation, no explanation.\n\nMessage: " + safeMsg;
 
-        var cmd = [claudeCodeBinPath(), "-p", prompt, "--output-format", "json", "--dangerously-skip-permissions"];
+        var cmd = [claudeCodeBinPath(), "-p", prompt, "--output-format", "json"];
         var commandStr = JSON.stringify(cmd);
         var cwdStr = JSON.stringify(claudeCodeCwd());
         var chatIdStr = JSON.stringify(chatId);
@@ -1182,8 +1187,7 @@ Item {
                 promptToSend = transcript;
         }
 
-        var cmd = [bin, "-p", promptToSend, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"];
-
+        var cmd = [bin, "-p", promptToSend, "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
         var mdl = GlobalConfig.ai.defaultClaudeCodeModel || "default";
         if (mdl && mdl !== "default") {
             cmd.push("--model");
@@ -2087,11 +2091,14 @@ Item {
                                         currentActionText = "Checking weather...";
                                         var weatherStr = Weather.city + ": " + Weather.temp + " (" + Weather.description + "). Humidity: " + Weather.humidity + "%, Wind: " + Weather.windSpeed + " km/h";
                                         accumulatedToolResults += "Tool: get_weather\nResult: Local weather from system dashboard: " + weatherStr + "\n\n";
-
                                     } else if (toolName === "caelestia_command") {
                                         var subcmd = String(args.subcommand || "");
                                         var subargs = String(args.args || "").trim();
-                                        if (!root.systemActionsAllowed(toolName, ("caelestia " + subcmd + " " + subargs).trim())) {
+                                        if (!root.caelestiaSubcommandAllowed(subcmd)) {
+                                            Logger.log("[AI] blocked unsupported caelestia subcommand: " + subcmd);
+                                            accumulatedToolResults += "Tool: caelestia_command\nResult: Refused. Unsupported subcommand.\n\n";
+                                            runningToolsCount--;
+                                        } else if (!root.systemActionsAllowed(toolName, ("caelestia " + subcmd + " " + subargs).trim())) {
                                             runningToolsCount--;
                                         } else {
                                             currentActionText = "Running caelestia...";

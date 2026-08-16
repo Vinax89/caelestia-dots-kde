@@ -316,6 +316,10 @@ stop_spinner() {
         wait "$SPINNER_PID" 2>/dev/null || true
         SPINNER_PID=""
     fi
+    if [[ -n "${BUILD_LOG_DIR:-}" ]]; then
+        rm -rf -- "$BUILD_LOG_DIR"
+        BUILD_LOG_DIR=""
+    fi
 }
 trap stop_spinner EXIT
 
@@ -392,7 +396,11 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
     fi
 
     BUILD_DIR="$BUNDLE_DIR/installer/build"
-    BUILD_LOG="/tmp/caelestia_build.log"
+    BUILD_LOG_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-build-XXXXXX")" || {
+        echo "[FATAL] Failed to create a private build-log directory." >&2
+        exit 1
+    }
+    BUILD_LOG="$BUILD_LOG_DIR/build.log"
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     (

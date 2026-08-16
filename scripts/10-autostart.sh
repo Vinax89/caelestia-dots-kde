@@ -106,7 +106,7 @@ elif command -v kbuildsycoca5 >/dev/null 2>&1; then
 fi
 echo "  [OK]  Quickshell Wayland interface declaration created."
 
-#  kde-material-you-colors systemd service 
+#  kde-material-you-colors systemd service
 # Creates and enables a systemd user service for kde-material-you-colors.
 echo "  Deploying systemd service for KDE Material You Colors..."
 

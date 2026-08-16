@@ -145,7 +145,7 @@ bool isLockscreenEdges() {
     static bool result = false;
     if (!checked) {
         checked = true;
-        
+
         QFile cmdline(QStringLiteral("/proc/self/cmdline"));
         if (cmdline.open(QIODevice::ReadOnly)) {
             QByteArray data = cmdline.readAll();

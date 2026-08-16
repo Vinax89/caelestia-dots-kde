@@ -12,17 +12,17 @@ Item {
             STATE_FILE="$HOME/.local/share/caelestia/state/startup_tasks.txt"
             mkdir -p "$(dirname "$STATE_FILE")"
             touch "$STATE_FILE"
-            
+
             TASKS_DIR="$HOME/.config/quickshell/caelestia/services/startuptasks"
             MODIFIED=false
             RAN_TASKS=""
-            
+
             TASKS=(
                 "01-magic-lamp"
                 "02-krohnkite-setup"
                 "03-wallpaper-fill"
             )
-            
+
             for script_name in "\${TASKS[@]}"; do
                 script="$TASKS_DIR/$script_name.sh"
                 if [[ -f "$script" ]]; then
@@ -36,7 +36,7 @@ Item {
                     fi
                 fi
             done
-            
+
             if [[ "$MODIFIED" == "true" ]]; then
                 qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
             fi
