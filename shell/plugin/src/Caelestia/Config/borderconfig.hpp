@@ -10,7 +10,9 @@ class BorderConfig : public ConfigObject {
     Q_OBJECT
     QML_ANONYMOUS
 
-    CONFIG_PROPERTY(int, thickness, 10)
+    // A narrow frame preserves the connected Caelestia surface without
+    // visually boxing in windows on high-DPI and mixed-scale displays.
+    CONFIG_PROPERTY(int, thickness, 4)
     CONFIG_PROPERTY(int, rounding, 25)
     CONFIG_PROPERTY(int, smoothing, 20)
 
