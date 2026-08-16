@@ -70,7 +70,7 @@ void SchemeLoader::loadSchemes() {
     auto process = new QProcess(this);
     process->setProgram("caelestia");
     process->setArguments({"scheme", "list"});
-    
+
     connect(process, &QProcess::finished, this, [this, process](int exitCode, QProcess::ExitStatus status) {
         process->deleteLater();
         if (status == QProcess::CrashExit || exitCode != 0) {
@@ -81,17 +81,17 @@ void SchemeLoader::loadSchemes() {
         const auto response = process->readAllStandardOutput();
         const auto doc = QJsonDocument::fromJson(response);
         if (!doc.isObject()) return;
-        
+
         const auto obj = doc.object();
         QVariantList flat;
-        
+
         for (auto it = obj.begin(); it != obj.end(); ++it) {
             const auto schemeName = it.key();
             const auto flavours = it.value().toObject();
             for (auto fit = flavours.begin(); fit != flavours.end(); ++fit) {
                 const auto flavourName = fit.key();
                 const auto colours = fit.value().toObject();
-                
+
                 flat.append(QVariantMap{
                     {"name", schemeName},
                     {"flavour", flavourName},
@@ -99,7 +99,7 @@ void SchemeLoader::loadSchemes() {
                 });
             }
         }
-        
+
         std::sort(flat.begin(), flat.end(), [](const QVariant& a, const QVariant& b) {
             const auto ma = a.toMap();
             const auto mb = b.toMap();
@@ -111,7 +111,7 @@ void SchemeLoader::loadSchemes() {
         m_schemes = flat;
         emit schemesChanged();
     });
-    
+
     process->start();
 }
 

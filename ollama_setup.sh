@@ -90,42 +90,26 @@ tmp_installer="$(mktemp)"
 trap 'rm -f "$tmp_installer"' EXIT
 curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp_installer" https://ollama.com/install.sh
 
-actual_sha=""
-if command -v sha256sum >/dev/null 2>&1; then
-    actual_sha="$(sha256sum "$tmp_installer" | cut -d' ' -f1)"
+if [[ ! "${OLLAMA_INSTALL_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo -e "${RED}OLLAMA_INSTALL_SHA256 must be a pinned 64-character SHA-256 checksum.${NC}" >&2
+    echo -e "Fetch the installer, review it, and set OLLAMA_INSTALL_SHA256 before running this setup." >&2
+    exit 1
+fi
+if ! command -v sha256sum >/dev/null 2>&1; then
+    echo -e "${RED}sha256sum is required to verify the Ollama installer.${NC}" >&2
+    exit 1
 fi
 
-if [ -n "${OLLAMA_INSTALL_SHA256:-}" ]; then
-    if [ -z "$actual_sha" ]; then
-        echo -e "${RED}sha256sum is required to verify OLLAMA_INSTALL_SHA256.${NC}" >&2
-        exit 1
-    fi
-    if [ "$actual_sha" != "$OLLAMA_INSTALL_SHA256" ]; then
-        echo -e "${RED}Ollama installer checksum mismatch.${NC}" >&2
-        echo "  expected: $OLLAMA_INSTALL_SHA256" >&2
-        echo "  actual:   $actual_sha" >&2
-        exit 1
-    fi
-    echo -e "${GREEN}Installer matches the pinned checksum.${NC}"
-else
-    echo -e "${YELLOW}About to run the official Ollama install script as root.${NC}"
-    echo -e "  source:   https://ollama.com/install.sh"
-    echo -e "  saved to: $tmp_installer"
-    echo -e "  sha256:   ${actual_sha:-<sha256sum unavailable>}"
-    echo -e "  size:     $(wc -c < "$tmp_installer") bytes"
-    echo
-    echo -e "Review it first if you like:  ${BLUE}less $tmp_installer${NC}"
-    echo -e "To skip this prompt in future, pin the hash above:"
-    echo -e "  ${BLUE}OLLAMA_INSTALL_SHA256=${actual_sha:-<hash>} ./ollama_setup.sh${NC}"
-    echo
-    read -r -p "Run the Ollama install script now? [y/N]: " _ollama_confirm
-    case "${_ollama_confirm,,}" in
-        y|yes) ;;
-        *) echo -e "${YELLOW}Skipping Ollama installation.${NC}"; exit 0 ;;
-    esac
+actual_sha="$(sha256sum "$tmp_installer" | cut -d' ' -f1)"
+if [[ "$actual_sha" != "${OLLAMA_INSTALL_SHA256,,}" ]]; then
+    echo -e "${RED}Ollama installer checksum mismatch; refusing to run it as root.${NC}" >&2
+    echo "  expected: $OLLAMA_INSTALL_SHA256" >&2
+    echo "  actual:   $actual_sha" >&2
+    exit 1
 fi
+echo -e "${GREEN}Ollama installer matches the pinned checksum.${NC}"
 
-sh "$tmp_installer"
+sudo sh "$tmp_installer"
 
 fi  # end: packaged install unavailable
 

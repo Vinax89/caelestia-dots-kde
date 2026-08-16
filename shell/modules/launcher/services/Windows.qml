@@ -33,9 +33,9 @@ QtObject {
     function updateItems(): void {
         const activeAddress = KWinActiveWindowBridge.activeWindow ? KWinActiveWindowBridge.activeWindow.address : "";
         const winList = (KWinActiveWindowBridge.windowList || []).filter(w => !(w.class && w.class.toLowerCase().includes("xwaylandvideobridge")));
-        
+
         let currentItems = root.items.slice();
-        
+
         // 1. Remove closed windows
         currentItems = currentItems.filter(item => {
             for (let i = 0; i < winList.length; i++) {
@@ -43,7 +43,7 @@ QtObject {
             }
             return false;
         });
-        
+
         // Helper to format
         const formatClient = (client) => {
             return {
@@ -74,7 +74,7 @@ QtObject {
                 currentItems.push(formatClient(client));
             }
         }
-        
+
         // 3. Move active window to index 0
         if (activeAddress) {
             for (let i = 0; i < currentItems.length; i++) {
@@ -85,7 +85,7 @@ QtObject {
                 }
             }
         }
-        
+
         items = currentItems;
 
         // A window closing (e.g. from the switcher's own close button) can leave

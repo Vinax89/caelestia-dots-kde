@@ -54,7 +54,7 @@ Item {
 
                 implicitHeight: 36
                 implicitWidth: contentLayout.implicitWidth + 24
-                
+
                 background: Rectangle {
                     // Fade alpha to 0 instead of the literal "transparent" string,
                     // which would animate RGB through black.
@@ -69,7 +69,7 @@ Item {
 
                     spacing: 8
                     anchors.centerIn: parent
-                    
+
                     MaterialIcon {
                         text: modelData.icon
                         color: tabBtn.current ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface

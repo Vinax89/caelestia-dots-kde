@@ -2,7 +2,7 @@
 
 #include <qdatetime.h>
 #include <qdir.h>
-#include <qfile.h>
+#include <qsavefile.h>
 #include <qfileinfo.h>
 #include <qjsondocument.h>
 #include <qmetaobject.h>
@@ -72,7 +72,7 @@ void RootConfig::setupFileBackend(const QString& path, const QString& screen) {
     connect(m_saveTimer, &QTimer::timeout, this, [this] {
         QDir().mkpath(QFileInfo(m_filePath).absolutePath());
 
-        QFile file(m_filePath);
+        QSaveFile file(m_filePath);
         if (!file.open(QIODevice::WriteOnly)) {
             auto err = QStringLiteral("Failed to write %1: %2").arg(m_filePath, file.errorString());
             qCWarning(lcConfig, "%s", qUtf8Printable(err));
@@ -81,8 +81,13 @@ void RootConfig::setupFileBackend(const QString& path, const QString& screen) {
         }
 
         auto json = toJsonObject();
-        file.write(QJsonDocument(json).toJson(QJsonDocument::Indented));
-        file.close();
+        const auto data = QJsonDocument(json).toJson(QJsonDocument::Indented);
+        if (file.write(data) != data.size() || !file.commit()) {
+            auto err = QStringLiteral("Failed to commit %1: %2").arg(m_filePath, file.errorString());
+            qCWarning(lcConfig, "%s", qUtf8Printable(err));
+            emit saveFailed(err, m_screen);
+            return;
+        }
 
         // Update watches — save may have created directories
         updateWatch();

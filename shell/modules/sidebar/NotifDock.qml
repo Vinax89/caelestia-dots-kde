@@ -169,24 +169,24 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.rightMargin: clearLoader.opacity > 0 ? clearLoader.width + Tokens.padding.medium * 2 : 0
-        
+
         height: toggleLayout.implicitHeight + Tokens.padding.large * 2
         radius: Tokens.rounding.large
         color: Colours.tPalette.m3surfaceContainer
-        
+
         RowLayout {
             id: toggleLayout
 
             anchors.fill: parent
             anchors.margins: Tokens.padding.large
             spacing: Tokens.spacing.medium
-            
+
             StyledRect {
                 implicitWidth: implicitHeight
                 implicitHeight: icon.implicitHeight + Tokens.padding.large
                 radius: Tokens.rounding.full
                 color: Visibilities.isCaelestiaMode ? Colours.palette.m3secondary : Colours.palette.m3secondaryContainer
-                
+
                 MaterialIcon {
                     id: icon
 
@@ -196,18 +196,18 @@ Item {
                     fontStyle: Tokens.font.icon.large
                 }
             }
-            
+
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 0
-                
+
                 StyledText {
                     Layout.fillWidth: true
                     text: "Caelestia Mode"
                     font: Tokens.font.body.medium
                     elide: Text.ElideRight
                 }
-                
+
                 StyledText {
                     Layout.fillWidth: true
                     text: Visibilities.isCaelestiaMode ? "Spinning kurukuru activated" : "Classic dinosaur character"
@@ -216,7 +216,7 @@ Item {
                     elide: Text.ElideRight
                 }
             }
-            
+
             StyledSwitch {
                 checked: Visibilities.isCaelestiaMode
                 onToggled: {

@@ -30,6 +30,8 @@ int run_shell(const std::string& command);
 extern bool g_confirm_arg;
 
 void load_bundle_dir();
+
+bool is_valid_env_name(const std::string& name);
 void load_theme();
 
 struct Config {

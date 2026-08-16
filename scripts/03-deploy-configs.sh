@@ -53,23 +53,35 @@ mkdir -p "$BACKUP_DIR/shellrc" "$BACKUP_DIR/.config" "$BACKUP_DIR/local"
 # Backup selected config dirs that may be overwritten/removed during install/uninstall
 for cfg in btop fastfetch fish foot kitty micro thunar; do
     if [[ -e "$HOME/.config/$cfg" ]]; then
-        cp -a "$HOME/.config/$cfg" "$BACKUP_DIR/.config/$cfg" 2>/dev/null || true
+        if ! cp -a "$HOME/.config/$cfg" "$BACKUP_DIR/.config/$cfg"; then
+            echo "[FATAL] Failed to back up $HOME/.config/$cfg; refusing to deploy." >&2
+            exit 1
+        fi
     fi
 done
 
 # Backup Konsole config/profiles (system tweaks may modify these)
 if [[ -f "$HOME/.config/konsolerc" ]]; then
-    cp -a "$HOME/.config/konsolerc" "$BACKUP_DIR/.config/konsolerc" 2>/dev/null || true
+    if ! cp -a "$HOME/.config/konsolerc" "$BACKUP_DIR/.config/konsolerc"; then
+        echo "[FATAL] Failed to back up $HOME/.config/konsolerc; refusing to deploy." >&2
+        exit 1
+    fi
 fi
 if [[ -d "$HOME/.local/share/konsole" ]]; then
-    cp -a "$HOME/.local/share/konsole" "$BACKUP_DIR/local/konsole" 2>/dev/null || true
+    if ! cp -a "$HOME/.local/share/konsole" "$BACKUP_DIR/local/konsole"; then
+        echo "[FATAL] Failed to back up $HOME/.local/share/konsole; refusing to deploy." >&2
+        exit 1
+    fi
 fi
 
 backup_shell_rc() {
     local src="$1"
     local key="$2"
     if [[ -f "$src" ]]; then
-        cp "$src" "$BACKUP_DIR/shellrc/$key"
+        if ! cp "$src" "$BACKUP_DIR/shellrc/$key"; then
+            echo "[FATAL] Failed to back up $src; refusing to deploy." >&2
+            exit 1
+        fi
         printf 'present\n' > "$BACKUP_DIR/shellrc/$key.state"
     else
         printf 'missing\n' > "$BACKUP_DIR/shellrc/$key.state"
@@ -81,23 +93,41 @@ backup_shell_rc "$HOME/.zshrc" "zshrc"
 backup_shell_rc "$HOME/.config/fish/config.fish" "fish_config"
 
 deploy_config_dir() {
-    local source="$1" target="$2" parent staging
+    local source="$1" target="$2" parent staging new_target old_target
     parent="$(dirname "$target")"
     mkdir -p "$parent"
     staging="$(mktemp -d "$parent/.caelestia-deploy.XXXXXX")"
-    if ! cp -a "$source" "$staging/$(basename "$target")"; then
+    new_target="$staging/$(basename "$target")"
+    old_target="$parent/.caelestia-old.$$.${RANDOM}"
+    if ! cp -a "$source" "$new_target"; then
         rm -rf -- "$staging"
         return 1
     fi
+    if [[ -e "$target" || -L "$target" ]]; then
+        if ! mv -- "$target" "$old_target"; then
+            rm -rf -- "$staging"
+            return 1
+        fi
+    fi
+    if mv -- "$new_target" "$target"; then
+        rm -rf -- "$staging" "$old_target"
+        return 0
+    fi
     rm -rf -- "$target"
-    mv -- "$staging/$(basename "$target")" "$target"
-    rmdir -- "$staging"
+    if [[ -e "$old_target" || -L "$old_target" ]]; then
+        mv -- "$old_target" "$target" || true
+    fi
+    rm -rf -- "$staging"
+    return 1
 }
 
 echo "  Deploying Caelestia configs..."
 for config in btop fastfetch foot kitty micro thunar; do
     if [[ -d "$DOTS_DIR/$config" ]]; then
-        deploy_config_dir "$DOTS_DIR/$config" "$HOME/.config/$config"
+        if ! deploy_config_dir "$DOTS_DIR/$config" "$HOME/.config/$config"; then
+            echo "[FATAL] Failed to deploy $config; existing config was preserved." >&2
+            exit 1
+        fi
         echo "    Deployed: $config"
     fi
 done
@@ -110,7 +140,10 @@ for config in fish fastfetch; do
     fi
 
     if [[ -d "$FISH_DIR/$config" ]]; then
-        deploy_config_dir "$FISH_DIR/$config" "$HOME/.config/$config"
+        if ! deploy_config_dir "$FISH_DIR/$config" "$HOME/.config/$config"; then
+            echo "[FATAL] Failed to deploy $config; existing config was preserved." >&2
+            exit 1
+        fi
         echo "    Deployed: $config"
     fi
 done
@@ -118,13 +151,19 @@ done
 # Backup existing starship config
 if [[ -f "$HOME/.config/starship.toml" ]]; then
     mkdir -p "$BACKUP_DIR/.config"
-    cp "$HOME/.config/starship.toml" "$BACKUP_DIR/.config/starship.toml"
+    if ! cp "$HOME/.config/starship.toml" "$BACKUP_DIR/.config/starship.toml"; then
+        echo "[FATAL] Failed to back up starship.toml; refusing to deploy." >&2
+        exit 1
+    fi
 fi
 
 # Deploy starship.toml
 if [[ -f "$DOTS_DIR/starship.toml" ]]; then
     mkdir -p "$HOME/.config"
-    cp "$DOTS_DIR/starship.toml" "$HOME/.config/starship.toml"
+    if ! install -m 0644 "$DOTS_DIR/starship.toml" "$HOME/.config/starship.toml"; then
+        echo "[FATAL] Failed to deploy starship.toml." >&2
+        exit 1
+    fi
     echo "    Deployed: starship.toml"
 fi
 
@@ -141,7 +180,10 @@ if [[ -d "$SRC_DIR/bin" ]]; then
     # Copy scripts, but skip C++ source files and build files
     for file in "$SRC_DIR/bin/"*; do
         if [[ ! "$file" == *.cpp && ! "$file" == *CMakeLists.txt && ! -d "$file" ]]; then
-            cp --remove-destination "$file" "$HOME/.local/bin/" 2>/dev/null || true
+            if ! cp --remove-destination "$file" "$HOME/.local/bin/"; then
+                echo "[FATAL] Failed to deploy $(basename "$file")." >&2
+                exit 1
+            fi
         fi
     done
 fi

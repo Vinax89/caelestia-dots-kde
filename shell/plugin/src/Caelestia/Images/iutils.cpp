@@ -59,7 +59,7 @@ bool IUtils::fileExists(const QString& path) const {
 bool IUtils::isGif(const QString& path) {
     if (path.isEmpty())
         return false;
-    
+
     const QString suffix = QFileInfo(path).suffix().toLower();
     return suffix == QStringLiteral("gif");
 }
@@ -67,7 +67,7 @@ bool IUtils::isGif(const QString& path) {
 bool IUtils::isVideo(const QString& path) {
     if (path.isEmpty())
         return false;
-    
+
     const QString suffix = QFileInfo(path).suffix().toLower();
     static const QStringList videoExtensions = { "mp4", "webm", "mkv", "avi", "mov", "wmv", "flv" };
     return videoExtensions.contains(suffix);

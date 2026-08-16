@@ -18,16 +18,16 @@ class DinoGameBackend : public QObject {
     Q_PROPERTY(bool isGameOver READ isGameOver NOTIFY isGameOverChanged)
     Q_PROPERTY(bool isDucking READ isDucking WRITE setIsDucking NOTIFY isDuckingChanged)
     Q_PROPERTY(bool isInverted READ isInverted NOTIFY isInvertedChanged)
-    
+
     Q_PROPERTY(qreal score READ score NOTIFY scoreChanged)
     Q_PROPERTY(qreal highScore READ highScore NOTIFY highScoreChanged)
     Q_PROPERTY(qreal dinoY READ dinoY NOTIFY dinoYChanged)
     Q_PROPERTY(qreal groundX READ groundX NOTIFY groundXChanged)
     Q_PROPERTY(int frameCount READ frameCount NOTIFY frameCountChanged)
-    
+
     Q_PROPERTY(QVariantList obstacles READ obstacles NOTIFY obstaclesChanged)
     Q_PROPERTY(QVariantList clouds READ clouds NOTIFY cloudsChanged)
-    
+
     Q_PROPERTY(qreal width READ width WRITE setWidth NOTIFY widthChanged)
 
 public:
@@ -66,7 +66,7 @@ signals:
     void obstaclesChanged();
     void cloudsChanged();
     void widthChanged();
-    
+
     void gameStarted();
     void gameDied();
 
@@ -83,7 +83,7 @@ private:
     bool m_isGameOver = false;
     bool m_isDucking = false;
     bool m_isInverted = false;
-    
+
     qreal m_score = 0;
     qreal m_highScore = 0;
     qreal m_dinoY = 0;
@@ -92,10 +92,10 @@ private:
     qreal m_gameSpeed = 6.0;
     int m_frameCount = 0;
     qreal m_width = 250;
-    
+
     int m_cloudTimer = 0;
     int m_obstacleTimer = 0;
-    
+
     const qreal m_gravity = 0.8;
     const qreal m_duckGravity = 1.5;
     const qreal m_jumpForce = -13.0;

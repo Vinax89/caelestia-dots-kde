@@ -33,13 +33,13 @@ PageBase {
             implicitHeight: row.implicitHeight + Tokens.padding.large * 2
             radius: Tokens.rounding.large
             color: Colours.tPalette.m3surfaceContainer
-            
+
             StateLayer {
                 anchors.fill: parent
                 radius: parent.radius
                 onClicked: root.nState.openSubPage(9)
             }
-            
+
             RowLayout {
                 id: row
 
@@ -48,13 +48,13 @@ PageBase {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.margins: Tokens.padding.large
                 spacing: Tokens.spacing.large
-                
+
                 MaterialIcon {
                     text: "settings_suggest"
                     fontStyle: Tokens.font.icon.extraLarge
                     color: Colours.palette.m3onSurface
                 }
-                
+
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: Tokens.spacing.extraSmall
@@ -70,7 +70,7 @@ PageBase {
                         color: Colours.palette.m3onSurfaceVariant
                     }
                 }
-                
+
                 MaterialIcon {
                     text: "chevron_right"
                     fontStyle: Tokens.font.icon.large
@@ -181,14 +181,14 @@ PageBase {
 
             Repeater {
                 model: Schemes.list
-                
+
                 StyledRect {
                     id: delegateRect
 
                     required property var modelData
-                    
+
                     readonly property bool isSelected: `${modelData?.name} ${modelData?.flavour}` === Schemes.currentScheme
-                    
+
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     implicitHeight: schemeRow.implicitHeight + Tokens.padding.large * 2
@@ -196,24 +196,24 @@ PageBase {
                     color: isSelected ? Colours.palette.m3secondaryContainer : Colours.tPalette.m3surfaceContainer
                     border.width: isSelected ? 2 : 1
                     border.color: isSelected ? Colours.palette.m3secondary : Colours.palette.m3surfaceVariant
-                    
+
                     StateLayer {
                         radius: parent.radius
                         onClicked: delegateRect.modelData?.onClicked(null)
                     }
-                    
+
                     RowLayout {
                         id: schemeRow
 
                         anchors.fill: parent
                         anchors.margins: Tokens.padding.large
                         spacing: Tokens.spacing.large
-                        
+
                         StyledRect {
                             id: preview
                             Layout.preferredWidth: Tokens.sizes.launcher.itemHeight
                             Layout.preferredHeight: Tokens.sizes.launcher.itemHeight
-                            
+
                             border.width: 1
                             border.color: Qt.alpha(`#${delegateRect.modelData?.colours?.outline}`, 0.5)
 
@@ -239,11 +239,11 @@ PageBase {
                                 }
                             }
                         }
-                        
+
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: Tokens.spacing.extraSmall
-                            
+
                             StyledText {
                                 Layout.fillWidth: true
                                 text: delegateRect.modelData?.flavour ?? ""
@@ -257,7 +257,7 @@ PageBase {
                                 color: delegateRect.isSelected ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
                             }
                         }
-                        
+
                         MaterialIcon {
                             Layout.alignment: Qt.AlignVCenter
                             visible: delegateRect.isSelected
@@ -285,14 +285,14 @@ PageBase {
 
             Repeater {
                 model: M3Variants.list
-                
+
                 StyledRect {
                     id: varDelegateRect
 
                     required property var modelData
-                    
+
                     readonly property bool isSelected: modelData?.variant === Schemes.currentVariant
-                    
+
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredWidth: 1
@@ -301,12 +301,12 @@ PageBase {
                     color: isSelected ? Colours.palette.m3secondaryContainer : Colours.tPalette.m3surfaceContainer
                     border.width: isSelected ? 2 : 1
                     border.color: isSelected ? Colours.palette.m3secondary : Colours.palette.m3surfaceVariant
-                    
+
                     StateLayer {
                         radius: parent.radius
                         onClicked: varDelegateRect.modelData?.onClicked(null)
                     }
-                    
+
                     RowLayout {
                         id: varCol
 
@@ -315,18 +315,18 @@ PageBase {
                         anchors.right: parent.right
                         anchors.margins: Tokens.padding.large
                         spacing: Tokens.spacing.large
-                        
+
                         MaterialIcon {
                             Layout.alignment: Qt.AlignTop
                             text: varDelegateRect.modelData?.icon ?? ""
                             fontStyle: Tokens.font.icon.extraLarge
                             color: varDelegateRect.isSelected ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
                         }
-                        
+
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: Tokens.spacing.extraSmall
-                            
+
                             StyledText {
                                 Layout.fillWidth: true
                                 text: varDelegateRect.modelData?.name ?? ""

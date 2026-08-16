@@ -43,7 +43,7 @@ MouseArea {
     parent: {
         let node = root.attachTo;
         let interactionsNode = null;
-        
+
         while (node && node.parent) {
             if (node.utilitiesShortcutActive !== undefined) {
                 interactionsNode = node;
@@ -126,12 +126,12 @@ MouseArea {
             y: root.thisSideY === Menu.Bottom ? menu.height - menu.implicitHeight : 0
             width: menu.implicitWidth
             height: menu.implicitHeight
-            
+
             transform: Scale {
                 yScale: menu.animScale
                 origin.y: root.thisSideY === Menu.Bottom ? menu.implicitHeight : 0
             }
-            
+
             radius: parent.radius
             // Fade alpha to 0 instead of the literal "transparent" string, which
             // would animate RGB through black via StyledRect's inherited

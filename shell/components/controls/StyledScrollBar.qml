@@ -48,7 +48,7 @@ ScrollBar {
             }
         }
     }
-    
+
     implicitWidth: isVertical ? Tokens.padding.extraSmall : 0
     implicitHeight: isVertical ? 0 : Tokens.padding.extraSmall
 
@@ -57,7 +57,7 @@ ScrollBar {
         anchors.right: isVertical ? parent.right : undefined
         anchors.top: isVertical ? undefined : parent.top
         anchors.bottom: isVertical ? undefined : parent.bottom
-        
+
         opacity: {
             if (root.size === 1)
                 return 0;

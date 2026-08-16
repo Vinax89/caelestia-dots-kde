@@ -65,7 +65,7 @@ ColumnLayout {
                         anchors.top: parent.top
                         color: Colours.palette.m3primary
                         radius: Tokens.rounding.small
-                        
+
                         Rectangle {
                             width: parent.width
                             height: parent.radius
@@ -89,9 +89,9 @@ ColumnLayout {
                             anchors.bottom: parent.bottom
                             anchors.left: parent.left
                             anchors.right: parent.right
-                            
+
                             height: parent.height * (UPower.displayDevice.isLaptopBattery ? UPower.displayDevice.percentage : 0)
-                            
+
                             Behavior on height {
                                 NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
                             }
@@ -103,9 +103,9 @@ ColumnLayout {
                                 anchors.bottom: parent.bottom
                                 anchors.left: parent.left
                                 anchors.right: parent.right
-                                
+
                                 color: Colours.palette.m3primary
-                                
+
                                 bottomLeftRadius: Tokens.rounding.medium - 3
                                 bottomRightRadius: Tokens.rounding.medium - 3
                                 topLeftRadius: height >= batteryBody.height - 3 ? Tokens.rounding.medium - 3 : 0
@@ -121,7 +121,7 @@ ColumnLayout {
                                 anchors.right: parent.right
                                 height: Math.min(25, parent.height)
                                 clip: true
-                                
+
                                 opacity: {
                                     if (UPower.onBattery) return 0;
                                     if (parent.height <= 30) return 0;
@@ -130,15 +130,15 @@ ColumnLayout {
                                 }
 
                                 Behavior on opacity { NumberAnimation { duration: 300 } }
-                                
+
                                 Rectangle {
                                     width: 140 * root.scaleOffset; height: 140 * root.scaleOffset
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     y: 8 * root.scaleOffset
-                                    
+
                                     color: Colours.palette.m3primary
                                     radius: 50 * root.scaleOffset
-                                    
+
                                     RotationAnimation on rotation {
                                         loops: Animation.Infinite
                                         from: 0; to: 360

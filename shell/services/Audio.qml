@@ -117,7 +117,7 @@ Singleton {
     function playSoundSource(sourcePath: string, enabled: bool, volume: real): void {
         if (!GlobalConfig.audio.sounds.enabled || !enabled)
             return;
-            
+
         let sfx = root._sfxCache[sourcePath];
         if (!sfx) {
             sfx = sfxComponent.createObject(root, { source: sourcePath, volume: volume });

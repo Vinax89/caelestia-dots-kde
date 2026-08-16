@@ -12,7 +12,7 @@ ShellRoot {
 
     Variants {
         model: Quickshell.screens
-        
+
         LockBackgroundWindow {
             required property var modelData
 

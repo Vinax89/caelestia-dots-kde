@@ -10,7 +10,7 @@ StyledRect {
     id: root
 
     required property NexusState nState
-    
+
     signal searchCommitted()
     signal upPressed()
     signal downPressed()
@@ -62,11 +62,11 @@ StyledRect {
             Keys.onReturnPressed: {
                 root.searchCommitted();
             }
-            
+
             Keys.onUpPressed: {
                 root.upPressed();
             }
-            
+
             Keys.onDownPressed: {
                 root.downPressed();
             }

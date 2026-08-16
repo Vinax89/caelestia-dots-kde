@@ -203,7 +203,7 @@ Item {
             contentHeight: parent.height
             flickableDirection: Flickable.HorizontalFlick
             clip: true
-            
+
             ScrollBar.horizontal: StyledScrollBar {
                 flickable: tabsFlickable
                 active: tabsFlickable.moving || tabsFlickable.dragging
@@ -241,7 +241,7 @@ Item {
                                     idx = Math.min(idx + 1, root.wallpaperTabs.length - 1);
                                 else if (event.angleDelta.y > 0 || event.angleDelta.x > 0)
                                     idx = Math.max(idx - 1, 0);
-                                
+
                                 root.currentWallpaperTab = root.wallpaperTabs[idx].id;
                             }
 

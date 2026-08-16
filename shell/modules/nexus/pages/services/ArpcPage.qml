@@ -143,7 +143,7 @@ PageBase {
                     Layout.preferredHeight: 32
                     radius: Tokens.rounding.small
                     color: Colours.layer(Colours.palette.m3surfaceVariant, 2)
-                    
+
                     StyledTextField {
                         id: tokenInput
 
@@ -532,7 +532,7 @@ PageBase {
                 Item {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 40
-                    
+
                     IconTextButton {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter

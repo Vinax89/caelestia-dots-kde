@@ -31,7 +31,8 @@ ensure_konsave() {
     if [[ ! -x "$KONSAVE_VENV_DIR/bin/konsave" ]]; then
         python3 -m venv "$KONSAVE_VENV_DIR" >/dev/null 2>&1 ||
             die "Failed to create a local virtual environment for konsave."
-        "$KONSAVE_VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || true
+        "$KONSAVE_VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 ||
+            die "Failed to update pip in the local konsave environment."
         "$KONSAVE_VENV_DIR/bin/python" -m pip install --upgrade konsave >/dev/null 2>&1 ||
             die "Failed to install konsave."
     fi
@@ -108,7 +109,10 @@ export:
 EOF
 
 # Remove any stale profile left over from a previous run so -s doesn't collide.
-"$KONSAVE_BIN" -r "$PROFILE_NAME" -f >/dev/null 2>&1 || true
+if profile_list="$("$KONSAVE_BIN" -l 2>/dev/null)" && grep -Fq -- "$PROFILE_NAME" <<<"$profile_list"; then
+    "$KONSAVE_BIN" -r "$PROFILE_NAME" -f >/dev/null 2>&1 ||
+        die "Failed to remove the stale konsave profile; refusing to overwrite a backup."
+fi
 
 info "Saving konsave profile '$PROFILE_NAME'..."
 "$KONSAVE_BIN" -s "$PROFILE_NAME" -f >/dev/null 2>&1 || die "Failed to save the current KDE profile."

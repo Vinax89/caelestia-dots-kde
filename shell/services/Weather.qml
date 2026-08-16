@@ -17,6 +17,7 @@ Singleton {
     property string locationSearchQuery: ""
     property bool locationSearchLoading: false
     property string locationSearchError: ""
+    property bool geoFallbackDisclosed: false
     property list<var> locationSearchResults: []
     property int locationSearchToken: 0
 
@@ -172,7 +173,11 @@ Singleton {
             } else {
                 fetchCoordsFromCity(configLocation, true);
             }
-        } else if (!loc || timer.elapsed() > 900) {
+        } else if (GlobalConfig.services.weatherIpGeolocation && (!loc || timer.elapsed() > 900)) {
+            if (!root.geoFallbackDisclosed) {
+                root.geoFallbackDisclosed = true;
+                Quickshell.execDetached(["notify-send", "Weather location", "Using approximate IP-based location from ipinfo.io. Disable it in Settings to stop sharing your IP."]);
+            }
             Requests.get("https://ipinfo.io/json", text => {
                 const response = JSON.parse(text);
                 if (response.loc) {

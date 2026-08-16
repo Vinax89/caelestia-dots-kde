@@ -41,7 +41,7 @@ Singleton {
     // undefined - causing "Cannot call method 'toString' of undefined" and
     // "Unable to assign [undefined] to ..." warnings wherever it was used.
     readonly property int mockActiveWs: 1
-    
+
     readonly property var monitors: {
         let _ = root.monitorState;
         if (Object.keys(root._monitorCache).length === 0) {
@@ -89,12 +89,12 @@ Singleton {
     readonly property var focusedWorkspace: ({ id: root.mockActiveWs, name: root.mockActiveWs.toString() })
     readonly property var focusedMonitor: {
         let _ = root.monitorState;
-        
+
         let targetName = "";
         if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.activeOutputName) {
             targetName = KWinActiveWindowBridge.activeOutputName;
         }
-        
+
         if (targetName !== "") {
             for (let key in root._monitorCache) {
                 if (root._monitorCache[key].name === targetName) {
@@ -102,13 +102,13 @@ Singleton {
                 }
             }
         }
-        
+
         for (let key in root._monitorCache) {
             if (root._monitorCache[key].focused) {
                 return root._monitorCache[key];
             }
         }
-        
+
         let keys = Object.keys(root._monitorCache);
         if (keys.length > 0) return root._monitorCache[keys[0]];
         return null;
@@ -325,11 +325,11 @@ Singleton {
             if (lastSpecialWorkspace) {
                 const workspace = workspaces.values.find(w => w.name === lastSpecialWorkspace);
                 if (workspace && workspace.lastIpcObject.windows > 0) {
-                    dispatch(usingLua ? `hl.dsp.focus({ workspace = "${lastSpecialWorkspace}" })` : `workspace ${lastSpecialWorkspace}`);
+                    dispatch(usingLua ? `hl.dsp.focus({ workspace = ${JSON.stringify(lastSpecialWorkspace)} })` : `workspace ${lastSpecialWorkspace}`);
                     return;
                 }
             }
-            dispatch(usingLua ? `hl.dsp.focus({ workspace = "${openSpecials[0].name}" })` : `workspace ${openSpecials[0].name}`);
+            dispatch(usingLua ? `hl.dsp.focus({ workspace = ${JSON.stringify(openSpecials[0].name)} })` : `workspace ${openSpecials[0].name}`);
             return;
         }
 
@@ -343,7 +343,7 @@ Singleton {
                 nextIndex = (currentIndex - 1 + openSpecials.length) % openSpecials.length;
         }
 
-        dispatch(usingLua ? `hl.dsp.focus({ workspace = "${openSpecials[nextIndex].name}" })` : `workspace ${openSpecials[nextIndex].name}`);
+        dispatch(usingLua ? `hl.dsp.focus({ workspace = ${JSON.stringify(openSpecials[nextIndex].name)} })` : `workspace ${openSpecials[nextIndex].name}`);
     }
 
     function monitorNames(): list<string> {

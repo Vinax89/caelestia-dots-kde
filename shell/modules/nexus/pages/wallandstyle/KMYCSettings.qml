@@ -13,7 +13,7 @@ import qs.modules.nexus.common
 
 PageBase {
     id: root
-    
+
     title: "Advanced Colors"
     isSubPage: true
 
@@ -78,7 +78,7 @@ PageBase {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (line.startsWith('#') || line === '' || line.startsWith('[')) continue;
-            
+
             const parts = line.split('=');
             if (parts.length >= 2) {
                 const key = parts[0].trim();
@@ -86,7 +86,7 @@ PageBase {
                 const bVal = value.toLowerCase() === "true";
                 const fVal = parseFloat(value);
                 const iVal = parseInt(value, 10);
-                
+
                 switch (key) {
                     case "pywal": root.pywal = bVal; break;
                     case "pywal_light": root.pywalLight = bVal; break;
@@ -318,7 +318,7 @@ PageBase {
                 onMoved: v => root.setOption("dark_blend_multiplier", v.toFixed(2))
             }
         }
-        
+
         SectionHeader {
             text: "Window Decorations (Requires Plugins)"
         }

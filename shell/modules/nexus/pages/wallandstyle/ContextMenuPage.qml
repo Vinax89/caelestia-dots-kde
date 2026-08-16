@@ -190,13 +190,13 @@ PageBase {
                 font: Tokens.font.body.small
                 color: Colours.palette.m3onSurfaceVariant
             }
-            
+
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, activeList.contentHeight + root.zonePadding * 2)
                 color: Colours.palette.m3surfaceContainer
                 radius: Tokens.rounding.large
-                
+
                 Text {
                     text: qsTr("Empty Menu")
                     font: Tokens.font.label.large
@@ -214,7 +214,7 @@ PageBase {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
                         root.globalDragHoveredList = "active";
-                        
+
                         if (sourceItem.sourceList !== "active") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < activeModel.count; i++) {
@@ -256,7 +256,7 @@ PageBase {
 
                 ColumnLayout {
                     spacing: 0
-                    
+
                     Text {
                         text: qsTr("Library")
                         font: Tokens.font.title.small
@@ -290,7 +290,7 @@ PageBase {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, libList.contentHeight + root.zonePadding * 2)
                 color: "transparent"
-                
+
                 Text {
                     text: qsTr("Empty")
                     font: Tokens.font.label.large
@@ -307,9 +307,9 @@ PageBase {
                     onEntered: drag => {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
-                        
+
                         root.globalDragHoveredList = "library";
-                        
+
                         if (sourceItem.sourceList !== "library") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < libraryModel.count; i++) {
@@ -355,9 +355,9 @@ PageBase {
             width: ListView.view.width
             height: (root.isGlobalDragging && root.globalDragSourceList === sourceList && root.globalDragSourceIndex === index && root.globalDragHoveredList !== sourceList) ? 0 : 50
             visible: height > 0
-            
+
             Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-            
+
             property bool isDraggingThis: activeDragArea.drag.active
 
             z: isDraggingThis ? 100 : 1
@@ -368,11 +368,11 @@ PageBase {
                 onEntered: drag => {
                     let sourceItem = drag.source;
                     if (!sourceItem) return;
-                    
+
                     let from = -1;
                     let to = delegateWrapper.index;
                     let targetModel = root.getModel(sourceList);
-                    
+
                     if (sourceItem.sourceList === sourceList) {
                         from = root.globalDragSourceIndex;
                     } else {
@@ -380,7 +380,7 @@ PageBase {
                             if (targetModel.get(i).isPlaceholder) { from = i; break; }
                         }
                     }
-                    
+
                     if (from !== -1 && to !== -1 && from !== to) {
                         targetModel.move(from, to, 1);
                         if (sourceItem.sourceList === sourceList) {
@@ -408,7 +408,7 @@ PageBase {
                     hoverEnabled: true
                     drag.target: isPlaceholder ? null : activeDelegate
                     drag.axis: Drag.XAndYAxis
-                    
+
                     onPressed: {
                         if (isPlaceholder) return;
                         root.isGlobalDragging = true;
@@ -416,36 +416,36 @@ PageBase {
                         root.globalDragSourceIndex = index;
                         root.globalDragHoveredList = sourceList;
                     }
-                    
+
                     onReleased: {
                         if (isPlaceholder) return;
-                        
+
                         let finalHovered = root.globalDragHoveredList;
                         root.isGlobalDragging = false;
-                        
+
                         let targetModel = root.getModel(finalHovered);
                         let sourceModel = root.getModel(sourceList);
-                        
+
                         if (finalHovered !== sourceList && finalHovered !== "" && targetModel) {
                             let pIndex = -1;
                             for (let i = 0; i < targetModel.count; i++) {
                                 if (targetModel.get(i).isPlaceholder) { pIndex = i; break; }
                             }
-                            
+
                             if (pIndex !== -1) {
                                 targetModel.remove(pIndex);
                                 targetModel.insert(pIndex, { compId: compId, isPlaceholder: false, raw: raw });
                                 sourceModel.remove(root.globalDragSourceIndex);
                             }
                         }
-                        
+
                         for (let i = activeModel.count - 1; i >= 0; i--) {
                             if (activeModel.get(i).isPlaceholder) activeModel.remove(i);
                         }
                         for (let i = libraryModel.count - 1; i >= 0; i--) {
                             if (libraryModel.get(i).isPlaceholder) libraryModel.remove(i);
                         }
-                        
+
                         activeDelegate.x = 0;
                         activeDelegate.y = 0;
                         save();
@@ -467,12 +467,12 @@ PageBase {
                     anchors.margins: Tokens.padding.medium
                     spacing: Tokens.spacing.small
                     visible: !isPlaceholder
-                    
+
                     MaterialIcon {
                         text: root.componentMeta[compId]?.icon || "application-x-executable"
                         color: sourceList !== "library" ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
                     }
-                    
+
                     Text {
                         Layout.fillWidth: true
                         text: root.componentMeta[compId]?.name || "Unknown Component"
@@ -480,7 +480,7 @@ PageBase {
                         color: sourceList !== "library" ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
                         elide: Text.ElideRight
                     }
-                    
+
                     TextButton {
                         visible: raw.type === "custom"
                         text: qsTr("Delete")

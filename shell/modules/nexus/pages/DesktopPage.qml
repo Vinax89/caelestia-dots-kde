@@ -14,7 +14,7 @@ PageBase {
 
     ColumnLayout {
         anchors.horizontalCenter: parent.horizontalCenter
-        
+
         property bool showTilingLogout: false
 
         property bool isTilingEnabled: Config.general.krohnkiteEnabled
@@ -28,13 +28,13 @@ PageBase {
             text: qsTr("Show KDE Desktop")
             subtext: qsTr("Disable Caelestia desktop and use native Plasma 6 desktop instead")
             checked: !Config.background.wallpaperEnabled
-            onToggled: { 
-                GlobalConfig.background.wallpaperEnabled = !checked; 
+            onToggled: {
+                GlobalConfig.background.wallpaperEnabled = !checked;
                 for (let i = 0; i < Quickshell.screens.length; i++) {
                     let sConf = GlobalConfig.forScreen(Quickshell.screens[i].name);
                     if (sConf) sConf.background.resetOption("wallpaperEnabled");
                 }
-                GlobalConfig.save(); 
+                GlobalConfig.save();
             }
         }
 
@@ -44,13 +44,13 @@ PageBase {
             text: qsTr("Show Desktop Icons")
             subtext: qsTr("Enable icons for Caelestia desktop")
             checked: Config.background.desktopIconsEnabled
-            onToggled: { 
-                GlobalConfig.background.desktopIconsEnabled = checked; 
+            onToggled: {
+                GlobalConfig.background.desktopIconsEnabled = checked;
                 for (let i = 0; i < Quickshell.screens.length; i++) {
                     let sConf = GlobalConfig.forScreen(Quickshell.screens[i].name);
                     if (sConf) sConf.background.resetOption("desktopIconsEnabled");
                 }
-                GlobalConfig.save(); 
+                GlobalConfig.save();
             }
             enabled: Config.background.wallpaperEnabled
         }

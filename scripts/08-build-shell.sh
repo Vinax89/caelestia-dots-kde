@@ -26,7 +26,8 @@ if [[ "${CAELESTIA_SETUP_RUNNING:-0}" == "0" ]]; then
         # -C "$BUNDLE_DIR": these ran against the caller's working directory, so
         # invoking the script by absolute path from anywhere but the repo failed
         # with a bare "Failed to initialize all submodules".
-        git -C "$BUNDLE_DIR" submodule sync --recursive >/dev/null 2>&1 || true
+        git -C "$BUNDLE_DIR" submodule sync --recursive >/dev/null 2>&1 ||
+            die "Failed to synchronize submodule URLs"
         if ! submodule_err="$(git -C "$BUNDLE_DIR" submodule update --init --recursive --force 2>&1)"; then
             printf '%s\n' "$submodule_err" >&2
             die "Failed to initialize all submodules"
@@ -212,8 +213,31 @@ else
 fi
 
 if [[ "${CAELESTIA_ENABLE_THIRDPARTY_PATCHES:-false}" == "true" ]]; then
+INVOKER_ID="$(id -u):$(id -g)"
+thirdparty_failed=0
+
+restore_thirdparty_ownership() {
+    # The patch blocks below run python as root and leave root-owned files in
+    # the invoking user's site-packages and cache; hand them back so later
+    # unprivileged runs (pip --user, re-patching, uninstall) are not blocked.
+    sudo chown -R "$INVOKER_ID" "$HOME"/.local/lib/python*.**/site-packages/caelestia 2>/dev/null || true
+    sudo chown -R "$INVOKER_ID" "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde" 2>/dev/null || true
+}
+
+end_thirdparty_block() {
+    restore_thirdparty_ownership
+    if (( thirdparty_failed )); then
+        exit 1
+    fi
+}
+
+# Pre-create as the user so root-side failure appends cannot leave a
+# root-owned failed_patches.txt behind.
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde"
+touch "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_patches.txt"
+
 info "Patching caelestia-cli record/screenshot (requires root)..."
-sudo bash -s -- "$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" << 'EOF'
+sudo bash -s -- "$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" << 'EOF' || thirdparty_failed=1
 USER_HOME="$1"
 USER_CACHE="$2"
 
@@ -354,12 +378,14 @@ except Exception as e:
     sys.exit(1)
 PYEOF
 then
-    echo "Caelestia CLI Record/Dolphin Patch" >> "$USER_CACHE/caelestia-kde/failed_patches.txt"
+    echo "Caelestia CLI Record/Dolphin Patch" >> "$USER_CACHE/caelestia-kde/failed_patches.txt" || exit 1
+    exit 1
 fi
 EOF
+end_thirdparty_block
 
 info "Patching caelestia-cli shell/emoji/clipboard/search for path-based config resolution (requires root)..."
-sudo bash -s -- "$HOME" << 'EOF'
+sudo bash -s -- "$HOME" << 'EOF' || thirdparty_failed=1
 USER_HOME="$1"
 SHELL_CONFIG="$USER_HOME/.config/quickshell/caelestia/shell.qml"
 
@@ -404,13 +430,15 @@ PYEOF
 then
     echo "Caelestia CLI path-based config resolution patch applied successfully"
 else
-    mkdir -p "$USER_HOME/.cache/caelestia-kde" 2>/dev/null || true
-    echo "Caelestia CLI path-based config resolution patch failed" >> "$USER_HOME/.cache/caelestia-kde/failed_patches.txt" 2>/dev/null || true
+    mkdir -p "$USER_HOME/.cache/caelestia-kde" || exit 1
+    echo "Caelestia CLI path-based config resolution patch failed" >> "$USER_HOME/.cache/caelestia-kde/failed_patches.txt" || exit 1
+    exit 1
 fi
 EOF
+end_thirdparty_block
 
 info "Patching caelestia-cli wallpaper.py for video support (requires root)..."
-sudo bash -s -- "$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" << 'EOF'
+sudo bash -s -- "$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" << 'EOF' || thirdparty_failed=1
 USER_HOME="$1"
 USER_CACHE="$2"
 
@@ -485,9 +513,11 @@ except Exception as e:
     sys.exit(1)
 PYEOF
 then
-    echo "Caelestia CLI Wallpaper Patch" >> "$USER_CACHE/caelestia-kde/failed_patches.txt"
+    echo "Caelestia CLI Wallpaper Patch" >> "$USER_CACHE/caelestia-kde/failed_patches.txt" || exit 1
+    exit 1
 fi
 EOF
+end_thirdparty_block
 else
     warn "Skipping unsupported third-party Python patches. Set CAELESTIA_ENABLE_THIRDPARTY_PATCHES=true to opt in."
 fi
@@ -502,19 +532,31 @@ rm -rf "$TMP_DIR"
 mkdir -p "$TMP_DIR"
 
 if rsync -a --chmod=u+w --exclude='.git' "$BUNDLE_DIR/src/yet-another-monochrome-icon-set/" "$TMP_DIR/"; then
-    rm -rf "$DEST_DIR"
-    mv "$TMP_DIR" "$DEST_DIR"
-    info "Yet another monochrome icon set copied successfully."
+    OLD_DEST="${DEST_DIR}.old.$$"
+    if [[ -e "$DEST_DIR" || -L "$DEST_DIR" ]] && ! mv -- "$DEST_DIR" "$OLD_DEST"; then
+        rm -rf -- "$TMP_DIR"
+        die "Failed to stage the existing icon set."
+    fi
+    if mv -- "$TMP_DIR" "$DEST_DIR"; then
+        rm -rf -- "$OLD_DEST"
+        info "Yet another monochrome icon set copied successfully."
+    else
+        rm -rf -- "$DEST_DIR"
+        [[ -e "$OLD_DEST" || -L "$OLD_DEST" ]] && mv -- "$OLD_DEST" "$DEST_DIR" || true
+        die "Failed to install the monochrome icon set."
+    fi
 else
     rm -rf "$TMP_DIR"
-    warn "Failed to copy yet-another-monochrome-icon-set."
+    die "Failed to copy yet-another-monochrome-icon-set."
 fi
 
 # Save current commit and branch for the update checker
 mkdir -p ~/.config/quickshell/caelestia
 if [ -d "$BUNDLE_DIR/.git" ]; then
-    git -C "$BUNDLE_DIR" rev-parse HEAD > ~/.config/quickshell/caelestia/.current_commit 2>/dev/null || true
-    git -C "$BUNDLE_DIR" rev-parse --abbrev-ref HEAD > ~/.config/quickshell/caelestia/.update_branch 2>/dev/null || true
+    current_commit="$(git -C "$BUNDLE_DIR" rev-parse HEAD)" || die "Failed to determine the installed commit"
+    current_branch="$(git -C "$BUNDLE_DIR" rev-parse --abbrev-ref HEAD)" || die "Failed to determine the installed branch"
+    printf '%s\n' "$current_commit" > ~/.config/quickshell/caelestia/.current_commit || die "Failed to record the installed commit"
+    printf '%s\n' "$current_branch" > ~/.config/quickshell/caelestia/.update_branch || die "Failed to record the installed branch"
 fi
 
 ok "Caelestia Shell and KDE Bridges built and installed successfully to user directory."

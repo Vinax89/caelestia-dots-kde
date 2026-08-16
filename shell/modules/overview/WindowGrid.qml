@@ -205,7 +205,7 @@ Item {
                                         if (dropAction !== Qt.IgnoreAction) {
                                             return; // Handled by DropArea
                                         }
-                                        
+
                                         if (typeof KWinWorkspaceState === "undefined" || typeof KWinActiveWindowBridge === "undefined") return;
                                         const targetWsId = KWinWorkspaceState.workspaces[listView.currentIndex].index;
                                         if (targetWsId !== page.wsId) {
@@ -406,7 +406,7 @@ Item {
             acceptedButtons: Qt.NoButton
             onWheel: event => {
                 if (!Config.bar.scrollActions.workspaces) return;
-                
+
                 if (event.angleDelta.y > 0 || event.angleDelta.x > 0) {
                     if (listView.currentIndex > 0) {
                         listView.currentIndex -= 1;

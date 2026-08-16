@@ -36,8 +36,8 @@ Region {
 
     // ( + is relative right/down, - is relative left/up )
 
-    // Top-left   
-    property real tlX: 0 // Shift the whole corner mask horizontally 
+    // Top-left
+    property real tlX: 0 // Shift the whole corner mask horizontally
 
     property real tlY: 0 // Shift the whole corner mask vertically
 

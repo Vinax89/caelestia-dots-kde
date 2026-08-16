@@ -5,7 +5,9 @@
 #include <qjsonarray.h>
 #include <qlocalsocket.h>
 #include <qloggingcategory.h>
+#include <qfileinfo.h>
 #include <qvariant.h>
+#include <unistd.h>
 
 Q_LOGGING_CATEGORY(lcHypr, "caelestia.internal.hypr", QtInfoMsg)
 
@@ -24,12 +26,18 @@ HyprExtras::HyprExtras(QObject* parent)
         return;
     }
 
+    const auto safeSocketDir = [](const QString& path) {
+        const QFileInfo info(path);
+        const auto unsafe = QFile::WriteGroup | QFile::WriteOther;
+        return info.isDir() && info.ownerId() == static_cast<uint>(geteuid())
+            && !(info.permissions() & unsafe);
+    };
     auto hyprDir = QString("%1/hypr/%2").arg(qEnvironmentVariable("XDG_RUNTIME_DIR"), his);
-    if (!QDir(hyprDir).exists()) {
+    if (!safeSocketDir(hyprDir)) {
         hyprDir = "/tmp/hypr/" + his;
 
-        if (!QDir(hyprDir).exists()) {
-            qCWarning(lcHypr) << "Hyprland socket directory does not exist. Unable to connect to Hyprland socket.";
+        if (!safeSocketDir(hyprDir)) {
+            qCWarning(lcHypr) << "Refusing unsafe or missing Hyprland socket directory:" << hyprDir;
             return;
         }
     }

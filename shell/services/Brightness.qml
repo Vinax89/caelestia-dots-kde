@@ -223,7 +223,7 @@ Singleton {
                 updateProc.command = ["ddcutil", "-b", busNum, "getvcp", "10", "--brief"];
             else
                 updateProc.command = ["sh", "-c", "echo a b c $(brightnessctl g) $(brightnessctl m)"];
-            
+
             updateProc.running = true;
         }
 

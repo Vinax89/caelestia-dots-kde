@@ -30,12 +30,12 @@ for i in $(seq 1 5); do
     kwriteconfig6 --file kwinrc --group "Desktops" --key "Name_$i" "Desktop $i"
 done
 
-#  ydotoold (on-screen keyboard key injection)
-# ydotoold needs access to /dev/uinput. Add a udev rule to allow the 'input'
-# group to access it, then add the user to that group.
+# ydotoold (on-screen keyboard key injection) uses uaccess so only the
+# currently active local session receives /dev/uinput access. Do not grant
+# every user in the input group raw access to all input devices.
 echo "  Applying system-level configurations (requires root)..."
-sudo bash -s -- "$USER" << 'EOF'
-TARGET_USER="$1"
+sudo bash -s << 'EOF'
+set -euo pipefail
 
 if systemctl is-enabled --quiet keyd.service 2>/dev/null || \
    systemctl is-active --quiet keyd.service 2>/dev/null; then
@@ -44,36 +44,19 @@ if systemctl is-enabled --quiet keyd.service 2>/dev/null || \
 fi
 
 echo "  Setting up ydotoold (OSK key injection daemon)..."
-
-if [[ ! -f /etc/udev/rules.d/80-uinput.rules ]]; then
-    echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' > /etc/udev/rules.d/80-uinput.rules
-    udevadm control --reload-rules 2>/dev/null || true
-    udevadm trigger 2>/dev/null || true
-    echo "  [OK]  udev rule for uinput created."
-fi
-
-if ! groups "$TARGET_USER" | grep -q '\binput\b'; then
-    usermod -aG input "$TARGET_USER"
-    echo "  [OK]  Added $TARGET_USER to 'input' group (takes effect on next login)."
-else
-    echo "  [OK]  $TARGET_USER already in 'input' group."
-fi
-
-if [[ -e /dev/uinput ]]; then
-    UINPUT_PERMS=$(stat -c "%a" /dev/uinput 2>/dev/null)
-    UINPUT_GROUP=$(stat -c "%G" /dev/uinput 2>/dev/null)
-    if [[ "$UINPUT_PERMS" != *"660" ]] || [[ "$UINPUT_GROUP" != "input" ]]; then
-        chmod 660 /dev/uinput 2>/dev/null || true
-        chgrp input /dev/uinput 2>/dev/null || true
-    fi
-fi
+cat > /etc/udev/rules.d/80-uinput.rules <<'RULE'
+KERNEL=="uinput", TAG+="uaccess"
+RULE
+udevadm control --reload-rules 2>/dev/null || true
+udevadm trigger --subsystem-match=misc --sysname-match=uinput 2>/dev/null || true
+echo "  [OK]  udev uaccess rule for uinput created."
 EOF
 
 # Deploy ydotoold-wrapper script to ~/.local/bin
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/ydotoold-wrapper" << 'WRAPPER'
 #!/bin/bash
-# ydotoold-wrapper  starts ydotoold with uinput access (user is in 'input' group)
+# ydotoold-wrapper starts ydotoold with the active-session uaccess rule above.
 SOCKET="${YDOTOOL_SOCKET:-/run/user/$(id -u)/.ydotool_socket}"
 if [ -S "$SOCKET" ] && pidof ydotoold > /dev/null 2>&1; then
     exit 0

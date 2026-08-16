@@ -31,7 +31,7 @@ namespace Term {
 
     void restore() {
         if (initialized) {
-            tcsetattr(STDIN_FILENO, TCSANOW, &initial_settings);
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &initial_settings);
             cout << "\x1b[0m\x1b[?1049l\x1b[?25h" << flush; // reset, exit alt screen, show cursor
             initialized = false;
         }
@@ -44,8 +44,8 @@ namespace Term {
             settings.c_lflag &= ~(ECHO | ICANON); // disable echo and canonical mode
             settings.c_cc[VMIN] = 0;
             settings.c_cc[VTIME] = 0;
-            tcsetattr(STDIN_FILENO, TCSANOW, &settings);
-            
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &settings);
+
             cout << "\x1b[?1049h\x1b[?25l" << flush; // enter alt screen, hide cursor
             initialized = true;
             atexit(restore);

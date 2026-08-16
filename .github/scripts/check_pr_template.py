@@ -97,9 +97,8 @@ def main() -> int:
         return 0
 
     print(f"{BOLD}=== PR Description Check ==={RESET}")
-
-    # Only one real check: is there actual content in the description section?
-    check_section_filled(body, "What does this change?")
+    if not check_section_filled(body, "What does this change?"):
+        error("PR description contains an empty or placeholder required section")
 
     # Bare minimum: is there ANY content at all?
     if not body or len(body.strip()) < 20:

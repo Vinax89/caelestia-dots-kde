@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml.XmlListModel
 import Quickshell
 import Caelestia
 import Caelestia.Config
@@ -68,8 +69,6 @@ Item {
 
     function doFetch(distroId) {
         var feedUrl = "https://archlinux.org/feeds/news/";
-        // Map known distro IDs to their news/blog feeds. Falls back to
-        // Arch Linux news for unrecognised distributions.
         var feedMap = {
             "fedora": "https://fedoramagazine.org/feed/",
             "arch": "https://archlinux.org/feeds/news/",
@@ -78,75 +77,48 @@ Item {
             "manjaro": "https://archlinux.org/feeds/news/",
             "ubuntu": "https://ubuntu.com/blog/feed",
             "debian": "https://www.debian.org/News/news.en.rss",
-            "opensuse": "https://news.opensuse.org/feed/",
+            "opensuse": "https://news.opensuse.org/feed/"
         };
         if (feedMap[distroId])
             feedUrl = feedMap[distroId];
-
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", feedUrl);
-        xhr.timeout = 15000;
-        xhr.onerror = function() {
-            isFetching = false;
-            errorMessage = qsTr("Failed to fetch news.");
-        };
-        xhr.ontimeout = function() {
-            isFetching = false;
-            errorMessage = qsTr("News request timed out.");
-        };
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === XMLHttpRequest.DONE) {
-                isFetching = false;
-                if (xhr.status === 200) {
-                    parseNews(xhr.responseText);
-                } else {
-                    errorMessage = qsTr("Failed to fetch news (Status: %1)").arg(xhr.status);
-                }
-            }
-        };
-        xhr.send();
+        feedModel.source = feedUrl;
     }
 
-    function parseNews(xmlString) {
-        newsModel.clear();
+    XmlListModel {
+        id: feedModel
 
-        var itemRegex = /<item>([\s\S]*?)<\/item>/g;
-        var titleRegex = /<title>(.*?)<\/title>/;
-        var linkRegex = /<link>(.*?)<\/link>/;
-        var dateRegex = /<pubDate>(.*?)<\/pubDate>/;
+        query: "/rss/channel/item"
 
-        var match;
-        while ((match = itemRegex.exec(xmlString)) !== null && newsModel.count < 20) {
-            var itemContent = match[1];
-
-            var titleMatch = titleRegex.exec(itemContent);
-            var linkMatch = linkRegex.exec(itemContent);
-            var dateMatch = dateRegex.exec(itemContent);
-
-            if (titleMatch && linkMatch && dateMatch) {
-                // Remove CDATA if present or unescape basic HTML entities
-                var title = titleMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#039;/g, "'");
-                var dateStr = dateMatch[1];
-
-                // Format date nicely
-                var dateObj = new Date(dateStr);
-                var formattedDate = dateObj.toLocaleDateString();
-                if (formattedDate === "Invalid Date") formattedDate = dateStr;
-
-                var link = linkMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1").trim();
-                if (!/^https:\/\//i.test(link))
-                    continue;
-                newsModel.append({
-                    "title": title,
-                    "link": link,
-                    "date": formattedDate
-                });
+        onStatusChanged: {
+            if (status === XmlListModel.Ready) {
+                newsModel.clear();
+                for (var i = 0; i < Math.min(count, 20); i++) {
+                    var item = get(i);
+                    var link = (item.link || "").trim();
+                    if (!/^https:\/\//i.test(link))
+                        continue;
+                    var dateObj = new Date(item.pubDate);
+                    var formattedDate = dateObj.toLocaleDateString();
+                    if (formattedDate === "Invalid Date")
+                        formattedDate = item.pubDate;
+                    newsModel.append({
+                        "title": item.title || qsTr("Untitled article"),
+                        "link": link,
+                        "date": formattedDate
+                    });
+                }
+                isFetching = false;
+                if (newsModel.count === 0)
+                    errorMessage = qsTr("No news articles found.");
+            } else if (status === XmlListModel.Error) {
+                isFetching = false;
+                errorMessage = qsTr("Failed to parse news feed.");
             }
         }
 
-        if (newsModel.count === 0) {
-            errorMessage = qsTr("No news articles found.");
-        }
+        XmlListModelRole { name: "title"; elementName: "title" }
+        XmlListModelRole { name: "link"; elementName: "link" }
+        XmlListModelRole { name: "pubDate"; elementName: "pubDate" }
     }
 
     ListModel {

@@ -446,29 +446,30 @@ Singleton {
     }
 
     function createConnectionWithPassword(ssid: string, bssidUpper: string, password: string, callback: var): void {
-        checkAndDeleteConnection(ssid, () => {
-            const cmd = ["bash", "-c", '"$@" <<< "$WIFI_PASSWORD"', "--", "nmcli", "--ask", root.nmcliCommandDevice, root.nmcliCommandWifi, "connect", ssid, "bssid", bssidUpper];
-            executeShellCommand(cmd, { "WIFI_PASSWORD": password }, result => {
-                loadSavedConnections(() => {});
-                if (callback) callback(result);
-            });
+        const cmd = ["bash", "-c", '"$@" <<< "$WIFI_PASSWORD"', "--", "nmcli", "--ask", root.nmcliCommandDevice, root.nmcliCommandWifi, "connect", ssid, "bssid", bssidUpper];
+        executeShellCommand(cmd, { "WIFI_PASSWORD": password }, result => {
+            loadSavedConnections(() => {});
+            if (callback) callback(result);
         });
     }
 
-    function checkAndDeleteConnection(ssid: string, callback: var): void {
-        executeCommand([root.nmcliCommandConnection, "show", ssid], result => {
-            if (result.success) {
-                executeCommand([root.nmcliCommandConnection, "delete", ssid], deleteResult => {
-                    Qt.callLater(() => {
-                        if (callback)
-                            callback();
-                    }, 300);
-                });
-            } else {
-                if (callback)
-                    callback();
-            }
+    function findConnectionUuid(ssid: string, callback: var): void {
+        if (!ssid) {
+            if (callback) callback("");
+            return;
+        }
+        executeCommand(["-g", "UUID", root.nmcliCommandConnection, "show", ssid], result => {
+            const uuid = result.success ? (result.output || "").trim().split(/\s+/)[0] : "";
+            if (callback) callback(uuid || "");
         });
+    }
+
+    function deleteConnectionUuid(uuid: string, callback: var): void {
+        if (!uuid) {
+            if (callback) callback({ success: false, error: "No connection UUID specified" });
+            return;
+        }
+        executeCommand([root.nmcliCommandConnection, "delete", "uuid", uuid], callback || (() => {}));
     }
 
     function activateConnection(connectionName: string, callback: var): void {

@@ -49,7 +49,7 @@ PageBase {
         apps.sort(sortByName)
         workspaces.sort(sortByName)
         tiling.sort(sortByName)
-        
+
         shellShortcuts = shell
         appShortcuts = apps
         workspaceShortcuts = workspaces

@@ -40,7 +40,7 @@ ColumnLayout {
         verticalPadding: Tokens.padding.small * root.scaleOffset
         text: HyprSunset.autoMode ? qsTr("Auto") : qsTr("Manual")
         icon: "routine"
-        
+
         onClicked: {
             HyprSunset.toggleAutoMode();
         }

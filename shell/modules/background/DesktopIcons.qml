@@ -23,7 +23,7 @@ Item {
 
     // How many columns fit given the grid width
     function getIconCols() { return Math.max(1, Math.floor(gridItem.width / root.cellWidth)); }
-        
+
     // How many rows are occupied
     function getIconRows() { return Math.max(1, Math.floor(gridItem.height / root.cellHeight)); }
 
@@ -34,7 +34,7 @@ Item {
 
     property bool layoutLoaded: false
 
-    Component.onCompleted: { 
+    Component.onCompleted: {
         loadLayoutProc.running = true;
     }
 
@@ -107,11 +107,11 @@ Item {
         id: gridItem
 
         anchors.fill: parent
-        
+
         readonly property int barZone: Visibilities.bars.get(root.screenData.name)?.visualThickness ?? (Tokens.sizes.bar.innerWidth + Math.max(Tokens.padding.small, Config.border.thickness))
 
         readonly property int baseMargin: Tokens.padding.large * 2
-        
+
         anchors.margins: baseMargin
         anchors.leftMargin: Config.bar.position === "left" ? baseMargin + barZone : baseMargin
         anchors.rightMargin: Config.bar.position === "right" ? baseMargin + barZone : baseMargin
@@ -161,12 +161,12 @@ Item {
 
                 x: col * root.cellWidth + (dragHandler.active ? dragHandler.translation.x : 0)
                 y: row * root.cellHeight + (dragHandler.active ? dragHandler.translation.y : 0)
-                
+
                 z: dragHandler.active ? 10 : 1
 
                 function initPosition() {
                     if (col !== -1 && row !== -1) return; // already init
-                    
+
                     let targetCol = -1;
                     let targetRow = -1;
                     let foundSaved = false;
@@ -178,7 +178,7 @@ Item {
                             break;
                         }
                     }
-                    
+
                     if (foundSaved && root.isCellFree(targetCol, targetRow, delegateItem)) {
                         col = targetCol;
                         row = targetRow;
@@ -217,7 +217,7 @@ Item {
                                 } else if (line.startsWith("[")) {
                                     inDesktopEntry = false;
                                 }
-                                
+
                                 if (inDesktopEntry) {
                                     if (!nameFound && line.startsWith("Name=")) {
                                         desktopName = line.substring(5);
@@ -241,7 +241,7 @@ Item {
                     const archiveExts = ["zip", "tar", "gz", "rar", "7z"];
                     const audioExts = ["mp3", "wav", "flac", "ogg"];
                     const codeExts = ["qml", "js", "html", "css", "py", "sh", "cpp", "c", "h", "json"];
-                    
+
                     if (ext === "pdf") return "application-pdf";
                     if (filename.toLowerCase().endsWith(".desktop")) return desktopIcon || "application-x-executable";
                     if (imageExts.includes(ext)) return "image-x-generic";
@@ -249,7 +249,7 @@ Item {
                     if (archiveExts.includes(ext)) return "package-x-generic";
                     if (audioExts.includes(ext)) return "audio-x-generic";
                     if (codeExts.includes(ext)) return "text-x-script";
-                    
+
                     return "text-x-generic";
                 }
 
@@ -370,18 +370,18 @@ Item {
                     id: dragHandler
 
                     target: null
-                    
+
                     property real lastTranslationX: 0
 
                     property real lastTranslationY: 0
-                    
+
                     onTranslationChanged: {
                         if (active) {
                             lastTranslationX = translation.x;
                             lastTranslationY = translation.y;
                         }
                     }
-                    
+
                     onActiveChanged: {
                         if (!active) {
                             // Snap to nearest grid cell
@@ -389,7 +389,7 @@ Item {
                             let dropY = row * root.cellHeight + lastTranslationY + delegateItem.height / 2;
                             let newCol = Math.floor(dropX / root.cellWidth);
                             let newRow = Math.floor(dropY / root.cellHeight);
-                            
+
                             newCol = Math.max(0, Math.min(newCol, root.getIconCols() - 1));
                             newRow = Math.max(0, Math.min(newRow, root.getIconRows() - 1));
 

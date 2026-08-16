@@ -36,7 +36,7 @@ Window {
         active: true
 
         source: "../background/Wallpaper.qml"
-        
+
         onLoaded: {
             item.screen = root.screen;
         }
@@ -67,7 +67,7 @@ Window {
             anchors.fill: lockBg
             sourceItem: wallpaperLoader
             sourceRect: Qt.rect(lockContent.x, lockContent.y, lockContent.width, lockContent.height)
-            
+
             layer.enabled: true
             layer.effect: MultiEffect {
                 blurEnabled: true

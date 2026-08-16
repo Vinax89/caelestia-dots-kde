@@ -48,7 +48,7 @@ void NightColorBridge::toggleAutoMode() {
     m_autoMode = !m_autoMode;
     // In KWin 6: Constant = 0, DarkLight = 1
     QString modeStr = m_autoMode ? QStringLiteral("DarkLight") : QStringLiteral("Constant");
-    
+
     QStringList args = {
         QStringLiteral("--notify"),
         QStringLiteral("--file"), QStringLiteral("kwinrc"),
@@ -64,7 +64,7 @@ void NightColorBridge::toggleAutoMode() {
 void NightColorBridge::toggleNightLight() {
     m_active = !m_active;
     QString activeStr = m_active ? QStringLiteral("true") : QStringLiteral("false");
-    
+
     QStringList args = {
         QStringLiteral("--notify"),
         QStringLiteral("--file"), QStringLiteral("kwinrc"),

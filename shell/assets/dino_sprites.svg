@@ -20,7 +20,7 @@
     <rect x="20" y="20" width="2" height="4" fill="black"/> <!-- Leg 1 -->
     <rect x="24" y="20" width="2" height="4" fill="black"/> <!-- Leg 2 -->
   </g>
-  
+
   <!-- Dino Run 1 -->
   <g id="dino_run1" transform="scale(2)">
     <rect x="20" y="2" width="12" height="12" fill="black"/>
@@ -46,7 +46,7 @@
     <rect x="20" y="20" width="2" height="4" fill="black"/> <!-- Leg 1 down -->
     <rect x="24" y="20" width="2" height="2" fill="black"/> <!-- Leg 2 up -->
   </g>
-  
+
   <!-- Cactus -->
   <g id="cactus" transform="scale(2)">
     <rect x="10" y="10" width="4" height="14" fill="black"/> <!-- Main stem -->

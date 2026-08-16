@@ -138,10 +138,10 @@ Popup {
 
                 let keyStr = ""
                 // Ignore bare modifiers
-                if (event.key !== Qt.Key_Meta && event.key !== Qt.Key_Control && 
-                    event.key !== Qt.Key_Alt && event.key !== Qt.Key_Shift && 
+                if (event.key !== Qt.Key_Meta && event.key !== Qt.Key_Control &&
+                    event.key !== Qt.Key_Alt && event.key !== Qt.Key_Shift &&
                     event.key !== Qt.Key_Super_L && event.key !== Qt.Key_Super_R) {
-                    
+
                     if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z) {
                         keyStr = String.fromCharCode(event.key)
                     } else if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) {
@@ -168,7 +168,7 @@ Popup {
                         keyStr = "F" + (event.key - Qt.Key_F1 + 1)
                     } else {
                         // Fallback (e.g. F-keys)
-                        // Note: QKeySequence string conversion isn't directly exposed to JS, 
+                        // Note: QKeySequence string conversion isn't directly exposed to JS,
                         // so we handle common ones. Others might be obscure.
                         keyStr = String.fromCharCode(event.key)
                     }

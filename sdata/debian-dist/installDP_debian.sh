@@ -5,11 +5,33 @@ set -uo pipefail
 
 log()  { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 err()  { echo -e "\033[0;31m[ERR]\033[0m  $*"; }
+CLI_TARBALL_SHA256="1d238723b74581e9d8fae4f836837f71050d65759b11bfc9b3de71534accb368"
+ADW_GTK3_URL="https://github.com/lassekongo83/adw-gtk3/releases/download/v5.3/adw-gtk3v5.3.tar.xz"
+ADW_GTK3_SHA256="2e6e87935bef30936e40d07c7af4fd20754e77917be224f61c4346867196bef0"
+FONT_MATERIAL_URL="https://github.com/google/material-design-icons/raw/e083cc60a0828fdd3b404cea0cb8a5b900e9c23e/variablefont/MaterialSymbolsRounded%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf"
+FONT_RUBIK_URL="https://github.com/google/fonts/raw/352f6b7d9d6cc4fa9e242b931291d31b21a6dc84/ofl/rubik/Rubik%5Bwght%5D.ttf"
+FONT_CASCADIA_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/CascadiaCode.zip"
+FONT_JETBRAINS_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/JetBrainsMono.zip"
+FONT_MATERIAL_SHA256="c2c185c2f31193348f34ae454215d990bb49f494c45e79348d9f2b3d653607d7"
+FONT_RUBIK_SHA256="1b3a7437ba2af80e465e773ed60c5036d1ba6ace492d89046dbcf18fb31e4e88"
+FONT_CASCADIA_SHA256="e68cf12cc3c14a18b9ddce0e77f66a78e3ebec4a5224423674fdd9303c5c9272"
+FONT_JETBRAINS_SHA256="1fa397478bfca4917dba796eeeb5a428c0834e760b1d96caffff633d6238fdce"
+
+download_verified() {
+    local url="$1" expected="$2" destination="$3" tmp="${3}.part.$$"
+    rm -f -- "$tmp"
+    curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp" || return 1
+    printf '%s  %s\n' "$expected" "$tmp" | sha256sum -c - >/dev/null 2>&1 || {
+        rm -f -- "$tmp"
+        return 1
+    }
+    mv -f -- "$tmp" "$destination"
+}
 
 clone_verified() {
-    local url="$1" dest="$2"
+    local url="$1" dest="$2" allow_unverified="${3:-0}"
     git clone --depth 1 "$url" "$dest" || return 1
-    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_SOURCE:-0}" != "1" ]]; then
+    if [[ "$allow_unverified" != "1" ]]; then
         git -C "$dest" verify-commit HEAD >/dev/null 2>&1 || {
             rm -rf -- "$dest"
             err "Refusing unsigned source checkout: $url"
@@ -96,7 +118,10 @@ if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "themes" ]]; then
 fi
 
 log "Updating apt package index..."
-sudo apt-get update || true
+if ! sudo apt-get update; then
+    err "Failed to update apt package index; refusing to continue."
+    exit 1
+fi
 
 FAILED_PKGS=()
 
@@ -141,15 +166,26 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
     log "apt failed or package missing for $pkg. Attempting manual fallback..."
     case "$pkg" in
         quickshell)
-            log "Attempting to install quickshell from PPA..."
-            sudo apt-get install -y software-properties-common || true
-            sudo add-apt-repository -y ppa:avengemedia/danklinux || true
-            sudo apt-get update || true
+            if [[ "${CAELESTIA_ALLOW_THIRD_PARTY_PPA:-0}" != "1" ]]; then
+                err "quickshell is unavailable from configured repositories; refusing unreviewed PPA."
+                err "Set CAELESTIA_ALLOW_THIRD_PARTY_PPA=1 only after reviewing ppa:avengemedia/danklinux."
+                FAILED_PKGS+=("$pkg")
+                continue
+            fi
+            log "Installing quickshell from explicitly enabled PPA..."
+            sudo apt-get install -y software-properties-common || { err "Failed to install PPA prerequisites."; FAILED_PKGS+=("$pkg"); continue; }
+            sudo add-apt-repository -y ppa:avengemedia/danklinux || { err "Failed to add quickshell PPA."; FAILED_PKGS+=("$pkg"); continue; }
+            sudo apt-get update || { err "Failed to refresh PPA metadata."; FAILED_PKGS+=("$pkg"); continue; }
             sudo apt-get install -y quickshell || { err "Failed to install quickshell from PPA."; FAILED_PKGS+=("$pkg"); }
             ;;
         libcava|cava)
             tmpdir="$(mktemp -d)"
-            sudo apt-get install -y libasound2-dev libfftw3-dev libpulse-dev libiniparser-dev meson ninja-build cmake gcc g++ || true
+            if ! sudo apt-get install -y libasound2-dev libfftw3-dev libpulse-dev libiniparser-dev meson ninja-build cmake gcc g++; then
+                err "Failed to install libcava build dependencies."
+                FAILED_PKGS+=("$pkg")
+                rm -rf -- "$tmpdir"
+                continue
+            fi
             if clone_verified https://github.com/LukashonakV/cava "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
@@ -169,7 +205,12 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
             ;;
         app2unit)
             tmpdir="$(mktemp -d)"
-            sudo apt-get install -y make || true
+            if ! sudo apt-get install -y make; then
+                err "Failed to install app2unit build dependencies."
+                FAILED_PKGS+=("$pkg")
+                rm -rf -- "$tmpdir"
+                continue
+            fi
             if clone_verified https://github.com/Vladimir-csp/app2unit "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
@@ -183,7 +224,12 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
             ;;
         gpu-screen-recorder)
             tmpdir="$(mktemp -d)"
-            sudo apt-get install -y build-essential git ffmpeg meson libxi-dev libdrm-dev libavcodec-dev libavformat-dev libx11-dev libxcomposite-dev libxdamage-dev libxrender-dev libxrandr-dev libpulse-dev libva-dev libcap-dev libdbus-1-dev libpipewire-0.3-dev libavfilter-dev libvulkan-dev || true
+            if ! sudo apt-get install -y build-essential git ffmpeg meson libxi-dev libdrm-dev libavcodec-dev libavformat-dev libx11-dev libxcomposite-dev libxdamage-dev libxrender-dev libxrandr-dev libpulse-dev libva-dev libcap-dev libdbus-1-dev libpipewire-0.3-dev libavfilter-dev libvulkan-dev; then
+                err "Failed to install gpu-screen-recorder build dependencies."
+                FAILED_PKGS+=("$pkg")
+                rm -rf -- "$tmpdir"
+                continue
+            fi
             if clone_verified https://repo.dec05eba.com/gpu-screen-recorder "$tmpdir"; then
                 (
                     cd "$tmpdir" || exit 1
@@ -200,7 +246,11 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
             FAILED_PKGS+=("$pkg")
             ;;
         wl-clip-persist)
-            sudo apt-get install -y build-essential cargo git libwayland-dev || true
+            if ! sudo apt-get install -y build-essential cargo git libwayland-dev; then
+                err "Failed to install wl-clip-persist build dependencies."
+                FAILED_PKGS+=("$pkg")
+                continue
+            fi
             if command -v cargo >/dev/null 2>&1; then
                 tmpdir="$(mktemp -d)"
                 if clone_verified https://github.com/Linus789/wl-clip-persist "$tmpdir"; then
@@ -246,11 +296,12 @@ for pkg in "${FALLBACK_TARGETS[@]}"; do
         adw-gtk3)
             tmpdir="$(mktemp -d)"
             log "Downloading adw-gtk3 theme..."
-            if curl -sL "https://github.com/lassekongo83/adw-gtk3/releases/download/v5.3/adw-gtk3v5.3.tar.xz" | tar -xJ -C "$tmpdir"; then
+            if download_verified "$ADW_GTK3_URL" "$ADW_GTK3_SHA256" "$tmpdir/adw-gtk3.tar.xz" \
+                && tar -xJf "$tmpdir/adw-gtk3.tar.xz" -C "$tmpdir"; then
                 mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/themes"
                 cp -r "$tmpdir/adw-gtk3" "$tmpdir/adw-gtk3-dark" "${XDG_DATA_HOME:-$HOME/.local/share}/themes/" || { err "Failed to install adw-gtk3"; FAILED_PKGS+=("$pkg"); }
             else
-                err "Failed to download adw-gtk3 theme."
+                err "Failed to download or verify adw-gtk3 theme."
                 FAILED_PKGS+=("$pkg")
             fi
             rm -rf "$tmpdir"
@@ -278,28 +329,14 @@ mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/fonts"
 font_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/caelestia-fonts.XXXXXX")"
 trap 'rm -rf -- "$font_tmp_dir"' EXIT
 
-# Download all fonts in parallel
-curl -sL "https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsRounded%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf" -o "${XDG_DATA_HOME:-$HOME/.local/share}/fonts/MaterialSymbolsRounded.ttf" &
-_pid_ms=$!
+font_dir="${XDG_DATA_HOME:-$HOME/.local/share}/fonts"
+download_verified "$FONT_MATERIAL_URL" "$FONT_MATERIAL_SHA256" "$font_dir/MaterialSymbolsRounded.ttf" || { err "Material Symbols checksum or download failed."; exit 1; }
+download_verified "$FONT_CASCADIA_URL" "$FONT_CASCADIA_SHA256" "$font_tmp_dir/CascadiaCode.zip" || { err "Cascadia Code checksum or download failed."; exit 1; }
+download_verified "$FONT_JETBRAINS_URL" "$FONT_JETBRAINS_SHA256" "$font_tmp_dir/JetBrainsMono.zip" || { err "JetBrains Mono checksum or download failed."; exit 1; }
+download_verified "$FONT_RUBIK_URL" "$FONT_RUBIK_SHA256" "$font_dir/Rubik-VariableFont_wght.ttf" || { err "Rubik checksum or download failed."; exit 1; }
 
-curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/CascadiaCode.zip" -o "$font_tmp_dir/CascadiaCode.zip" &
-_pid_cc=$!
-
-curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.0.2/JetBrainsMono.zip" -o "$font_tmp_dir/JetBrainsMono.zip" &
-_pid_jb=$!
-
-curl -sL "https://github.com/google/fonts/raw/main/ofl/rubik/Rubik-VariableFont_wght.ttf" -o "${XDG_DATA_HOME:-$HOME/.local/share}/fonts/Rubik-VariableFont_wght.ttf" &
-_pid_ru=$!
-
-# Wait for all downloads to finish
-wait $_pid_ms $_pid_cc $_pid_jb $_pid_ru
-
-# Extract zip files
-unzip -qo "$font_tmp_dir/CascadiaCode.zip" -d "${XDG_DATA_HOME:-$HOME/.local/share}/fonts" 2>/dev/null && rm -f "/tmp/CascadiaCode.zip" || { err "Failed to extract CascadiaCode font."; echo "CascadiaCode font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
-unzip -qo "$font_tmp_dir/JetBrainsMono.zip" -d "${XDG_DATA_HOME:-$HOME/.local/share}/fonts" 2>/dev/null && rm -f "/tmp/JetBrainsMono.zip" || { err "Failed to extract JetBrains Mono Nerd Font."; echo "JetBrains Mono Nerd Font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
-# Material Symbols and Rubik are single .ttf files, no extraction needed
-[[ -f "${XDG_DATA_HOME:-$HOME/.local/share}/fonts/MaterialSymbolsRounded.ttf" ]] || { err "Failed to download Material Symbols font."; echo "Material Symbols font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
-[[ -f "${XDG_DATA_HOME:-$HOME/.local/share}/fonts/Rubik-VariableFont_wght.ttf" ]] || { err "Failed to download Rubik font."; echo "Rubik font" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_packages.txt"; }
+unzip -qo "$font_tmp_dir/CascadiaCode.zip" -d "$font_dir" || { err "Failed to extract Cascadia Code font."; exit 1; }
+unzip -qo "$font_tmp_dir/JetBrainsMono.zip" -d "$font_dir" || { err "Failed to extract JetBrains Mono font."; exit 1; }
 
 fc-cache -f
 
@@ -307,7 +344,10 @@ log "Building and Installing Darkly KDE Theme..."
 if [[ "$INSTALL_DARKLY" == "true" ]]; then
     if ! command -v darkly >/dev/null 2>&1; then
         tmpdir="$(mktemp -d)"
-        sudo apt-get install -y cmake extra-cmake-modules gettext libkf6config-dev libkf6configwidgets-dev libkf6coreaddons-dev libkf6guiaddons-dev libkf6i18n-dev libkf6iconthemes-dev libkf6kio-dev libkf6widgetsaddons-dev libkf6windowsystem-dev libkf6colorscheme-dev libkf6kcmutils-dev libkirigami-dev libkdecorations3-dev libkf6style-dev qt6-base-dev qt6-declarative-dev || true
+        if ! sudo apt-get install -y cmake extra-cmake-modules gettext libkf6config-dev libkf6configwidgets-dev libkf6coreaddons-dev libkf6guiaddons-dev libkf6i18n-dev libkf6iconthemes-dev libkf6kio-dev libkf6widgetsaddons-dev libkf6windowsystem-dev libkf6colorscheme-dev libkf6kcmutils-dev libkirigami-dev libkdecorations3-dev libkf6style-dev qt6-base-dev qt6-declarative-dev; then
+            err "Failed to install Darkly build dependencies."
+            exit 1
+        fi
         if clone_verified https://github.com/Bali10050/Darkly "$tmpdir"; then
             (
                 cd "$tmpdir" || exit 1
@@ -326,18 +366,33 @@ if [[ "$PACKAGE_GROUP" == "all" || "$PACKAGE_GROUP" == "shell" ]]; then
 
 log "Installing Caelestia CLI wrapper..."
 if ! command -v caelestia >/dev/null 2>&1; then
-    sudo apt-get install -y python3-pip python3-build python3-installer python3-hatchling python3-hatch-vcs || true
+    if ! sudo apt-get install -y python3-pip python3-build python3-installer python3-hatchling python3-hatch-vcs; then
+        err "Failed to install Caelestia CLI build dependencies."
+        exit 1
+    fi
     tmpdir="$(mktemp -d)"
     (
         cd "$tmpdir" || exit 1
-        curl -sL "https://github.com/caelestia-dots/cli/releases/download/v1.0.8/caelestia-1.0.8.tar.gz" -o caelestia.tar.gz
+        if ! curl -fsSL --proto '=https' --tlsv1.2 \
+            "https://github.com/caelestia-dots/cli/releases/download/v1.0.8/caelestia-1.0.8.tar.gz" \
+            -o caelestia.tar.gz; then
+            err "Failed to download the Caelestia CLI source archive."
+            exit 1
+        fi
+        if ! printf '%s  %s\n' "$CLI_TARBALL_SHA256" caelestia.tar.gz | sha256sum -c -; then
+            err "Caelestia CLI source archive checksum mismatch; refusing to build or install it."
+            exit 1
+        fi
         tar -xzf caelestia.tar.gz
         cd caelestia-1.0.8 || exit 1
         python3 -m build --wheel --no-isolation
         if ! sudo pip3 install dist/*.whl --break-system-packages 2>/dev/null; then
             pip3 install dist/*.whl --user --break-system-packages 2>/dev/null || pip3 install dist/*.whl --user
             if [[ -f "$HOME/.local/bin/caelestia" ]]; then
-                sudo ln -sf "$HOME/.local/bin/caelestia" /usr/local/bin/caelestia || true
+                if ! sudo ln -sf "$HOME/.local/bin/caelestia" /usr/local/bin/caelestia; then
+                    err "Failed to install the Caelestia CLI wrapper in /usr/local/bin."
+                    exit 1
+                fi
             fi
         fi
 
@@ -349,7 +404,10 @@ if ! command -v caelestia >/dev/null 2>&1; then
 fi
 
 if command -v sassc >/dev/null 2>&1 && ! command -v sass >/dev/null 2>&1; then
-    sudo ln -sf /usr/bin/sassc /usr/local/bin/sass || true
+    if ! sudo ln -sf /usr/bin/sassc /usr/local/bin/sass; then
+        err "Failed to install the sass compatibility symlink."
+        exit 1
+    fi
 fi
 
 fi  # end of PACKAGE_GROUP shell/all block

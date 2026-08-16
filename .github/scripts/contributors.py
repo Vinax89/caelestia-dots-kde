@@ -270,8 +270,8 @@ def main():
 
     table = format_markdown(contributors)
     if args.update_readme:
-        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        readme_path = os.path.join(repo_root, "README.md")
+        repo_root = os.path.dirname(os.path.abspath(__file__))
+        readme_path = os.path.join(repo_root, "..", "README.md")
         update_readme(readme_path, table)
     else:
         print(table)

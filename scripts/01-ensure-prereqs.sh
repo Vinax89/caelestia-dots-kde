@@ -5,9 +5,9 @@
 set -euo pipefail
 
 clone_verified() {
-    local url="$1" dest="$2"
+    local url="$1" dest="$2" allow_unverified="${3:-0}"
     git clone --depth 1 "$url" "$dest"
-    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_SOURCE:-0}" != "1" ]]; then
+    if [[ "$allow_unverified" != "1" ]]; then
         git -C "$dest" verify-commit HEAD >/dev/null 2>&1 || {
             rm -rf -- "$dest"
             echo "[ERR] Refusing unsigned source checkout: $url" >&2
@@ -34,7 +34,7 @@ if [[ "$BASE_DISTRO" == "arch" ]]; then
 
         local tmpdir
         tmpdir="$(mktemp -d)"
-        clone_verified https://aur.archlinux.org/yay-bin.git "$tmpdir"
+        clone_verified https://aur.archlinux.org/yay-bin.git "$tmpdir" 1
         (
             cd "$tmpdir" || exit 1
             makepkg -si --noconfirm

@@ -14,13 +14,13 @@ ConnectedRect {
 
     property alias label: label.text
     property string subtext
-    
+
     // Scale properties
     property real scaleValue
     property real scaleFrom: 0
     property real scaleTo: 99
     property real scaleStepSize: 1
-    
+
     // Font properties
     property real fontValue
     property real fontFrom: 0
@@ -73,7 +73,7 @@ ConnectedRect {
             value: root.scaleValue
             onValueModified: v => root.scaleMoved(v)
         }
-        
+
         CustomSpinBox {
             id: fontBox
 

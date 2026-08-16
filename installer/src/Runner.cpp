@@ -6,12 +6,14 @@
 #include "UI.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
-#include <cstdlib>
+#include <limits>
 #include <fcntl.h>
 #include <filesystem>
 #include <iostream>
 #include <pty.h>
+#include <sys/select.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -97,19 +99,6 @@ bool ensure_tmux_worker_pane() {
   return tmux_has_worker_pane();
 }
 
-bool is_valid_env_name(const string &name) {
-  if (name.empty())
-    return false;
-  unsigned char first = static_cast<unsigned char>(name[0]);
-  if (!(std::isalpha(first) || name[0] == '_'))
-    return false;
-  for (char c : name) {
-    unsigned char uc = static_cast<unsigned char>(c);
-    if (!(std::isalnum(uc) || c == '_'))
-      return false;
-  }
-  return true;
-}
 
 string shell_single_quote(string s) {
   // Prevent multiline values from breaking command boundaries in eval.
@@ -347,9 +336,14 @@ void draw_progress_ui(int current_step) {
 }
 
 bool execute() {
+  const char* home = getenv("HOME");
+  if (!home || !*home) {
+    std::cerr << "[installer] HOME is unset; cannot create the installer cache.\n";
+    return false;
+  }
   string cache_dir =
       string(getenv("XDG_CACHE_HOME") ? getenv("XDG_CACHE_HOME")
-                                      : (string(getenv("HOME")) + "/.cache")) +
+                                      : (string(home) + "/.cache")) +
       "/caelestia-kde";
   setenv("CACHE_DIR", cache_dir.c_str(), 1);
   setenv("BUILDDIR", (cache_dir + "/makepkg-build").c_str(), 1);
@@ -415,16 +409,16 @@ bool execute() {
 
     // Forward command to the right pane
     if (use_tmux_worker()) {
-      // Fail-safe: check if the right pane is dead (no reader on FIFO)
-      int test_fd = open(ipc_path("cmd").c_str(), O_WRONLY | O_NONBLOCK);
-      if (test_fd == -1 && errno == ENXIO) {
-        // Recreate worker pane only if it's actually missing.
+      // Open the cmd FIFO itself in nonblocking mode so a dead worker pane
+      // surfaces as ENXIO here, instead of blocking forever in fopen() after
+      // a probe-then-open race (TOCTOU).
+      int cmd_fd = open(ipc_path("cmd").c_str(), O_WRONLY | O_NONBLOCK);
+      if (cmd_fd == -1 && errno == ENXIO) {
+        // Recreate worker pane only if it's actually missing, then retry once.
         ensure_tmux_worker_pane();
-      } else if (test_fd != -1) {
-        close(test_fd);
+        cmd_fd = open(ipc_path("cmd").c_str(), O_WRONLY | O_NONBLOCK);
       }
-
-      FILE *cmd_fifo = fopen(ipc_path("cmd").c_str(), "w");
+      FILE *cmd_fifo = cmd_fd >= 0 ? fdopen(cmd_fd, "w") : nullptr;
       if (cmd_fifo) {
         auto safe_env = [](const char *name) {
           const char *val = getenv(name);
@@ -449,10 +443,12 @@ bool execute() {
         }
 
         // Send as a single compound command so the listener evaluates it all at
-        // once and replies once
+        // once and replies once. The step name is single-quoted so a name
+        // containing shell metacharacters cannot break out of the echo.
         fprintf(cmd_fifo,
                 "%s; echo -e '\\033[1;36m==> Running: %s\\033[0m'; %s\n",
-                exports.c_str(), steps[i].name.c_str(), cmd.c_str());
+                exports.c_str(), shell_single_quote(steps[i].name).c_str(),
+                cmd.c_str());
         fflush(cmd_fifo);
         fclose(cmd_fifo);
       }
@@ -464,21 +460,82 @@ bool execute() {
       // 08-build-shell.sh compiles the Qt plugin, libcava and the shell, and
       // caelestia-update budgets a full hour for the same script. A slow
       // machine tripped the cap while the build was still running.
-      int exit_code = -1;
-      int status_fd = open(ipc_path("status").c_str(), O_RDONLY | O_NONBLOCK);
+      //
+      // If the FIFO never opened (worker pane dead even after a respawn
+      // attempt), fail this step immediately rather than waiting the full
+      // STEP_BUDGET for a status that can never arrive.
+      int exit_code = 1;
+      int status_fd = cmd_fifo ? open(ipc_path("status").c_str(),
+                                      O_RDONLY | O_NONBLOCK)
+                               : -1;
+      if (!cmd_fifo && status_fd >= 0) {
+        close(status_fd);
+        status_fd = -1;
+      }
       int poll_iterations = 0;
       constexpr auto STEP_BUDGET = chrono::seconds(3600);
       const auto step_deadline = chrono::steady_clock::now() + STEP_BUDGET;
       bool timed_out = false;
-      while (true) {
+      while (status_fd >= 0) {
         if (g_resized)
           draw_progress_ui(i);
         if (status_fd >= 0) {
+          // The worker writes the status as a single line and closes the fd,
+          // but a nonblocking read may still deliver a partial payload --
+          // accumulate until a newline, EOF or an error, and validate the
+          // integer before trusting it.
           char buf[32];
-          int n = read(status_fd, buf, sizeof(buf) - 1);
-          if (n > 0) {
-            buf[n] = '\0';
-            exit_code = atoi(buf);
+          string payload;
+          bool complete = false;
+          while (payload.size() < sizeof(buf)) {
+            int n = read(status_fd, buf, sizeof(buf) - 1);
+            if (n > 0) {
+              buf[n] = '\0';
+              payload += buf;
+              if (payload.find('\n') != string::npos) {
+                complete = true;
+                break;
+              }
+            } else if (n == 0) {
+              // All writers closed: complete only if we got something.
+              complete = !payload.empty();
+              break;
+            } else {
+              // EAGAIN: nothing available yet; any other error is fatal for
+              // this fd.
+              if (errno != EAGAIN && errno != EINTR) {
+                close(status_fd);
+                status_fd = -1;
+              }
+              break;
+            }
+          }
+          if (complete) {
+            size_t nl = payload.find('\n');
+            string token =
+                payload.substr(0, nl == string::npos ? payload.size() : nl);
+            // Trim trailing carriage return, if any.
+            while (!token.empty() &&
+                   (token.back() == '\r' || token.back() == ' '))
+              token.pop_back();
+            bool valid = !token.empty();
+            for (char c : token) {
+              if (!std::isdigit(static_cast<unsigned char>(c))) {
+                valid = false;
+                break;
+              }
+            }
+            if (valid) {
+              char* end = nullptr;
+              errno = 0;
+              const long parsed = std::strtol(token.c_str(), &end, 10);
+              valid = errno == 0 && end != token.c_str() && *end == '\0' &&
+                      parsed >= 0 &&
+                      parsed <= std::numeric_limits<int>::max();
+              exit_code = valid ? static_cast<int>(parsed) : 1;
+            } else {
+              exit_code = 1;
+            }
             close(status_fd);
             status_fd = -1;
             break;

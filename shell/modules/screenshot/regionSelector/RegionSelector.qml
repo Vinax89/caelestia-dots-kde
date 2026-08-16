@@ -18,7 +18,7 @@ Scope {
     property var action: RegionSelection.SnipAction.Copy
 
     property var selectionMode: RegionSelection.SelectionMode.RectCorners
-    
+
     Variants {
         model: Quickshell.screens
         delegate: Loader {

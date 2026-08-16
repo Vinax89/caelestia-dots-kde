@@ -56,7 +56,7 @@ PageBase {
             icon: "logout"
             type: TextButton.Filled
             onClicked: restartProcess.running = true
-            
+
             Process {
                 id: restartProcess
 
@@ -89,14 +89,16 @@ PageBase {
                             if command -v kpackagetool6 >/dev/null 2>&1; then
                                 notify-send "Installing Krohnkite..." "Please stay connected to internet.."
                                 tmpdir="$(mktemp -d)"
-                                kwinscript_url="$(curl -sL https://codeberg.org/api/v1/repos/anametologin/Krohnkite/releases/latest | grep -oP '"browser_download_url":\\s*"\\K[^"]+\\.kwinscript' | head -1)"
-                                if [[ -n "$kwinscript_url" ]] && curl -sL "$kwinscript_url" -o "$tmpdir/krohnkite.kwinscript"; then
-                                    kpackagetool6 -t KWin/Script -i "$tmpdir/krohnkite.kwinscript" 2>/dev/null || true
+                                kwinscript_url="https://codeberg.org/anametologin/Krohnkite/releases/download/0.9.9.2/krohnkite.kwinscript"
+                                kwinscript_sha256="42f7f66531d366c74b5fc860381da3517ccb4cdccd1f80c122fcab6e9a8fcf7e"
+                                if curl -fsSL --proto '=https' --tlsv1.2 --max-time 30 "$kwinscript_url" -o "$tmpdir/krohnkite.kwinscript" \
+                                    && printf '%s  %s\n' "$kwinscript_sha256" "$tmpdir/krohnkite.kwinscript" | sha256sum -c - >/dev/null 2>&1 \
+                                    && kpackagetool6 -t KWin/Script -i "$tmpdir/krohnkite.kwinscript"; then
                                     notify-send "Installation Completed.." "Krohnkite has been installed successfully.."
                                 else
-                                    notify-send "Installation Failed.." "Krohnkite could not be downloaded. Please try again.."
+                                    notify-send "Installation Failed.." "Krohnkite download, verification, or installation failed."
                                 fi
-                                rm -rf "$tmpdir"
+                                rm -rf -- "$tmpdir"
                             fi
                         fi
                         kwriteconfig6 --file kwinrc --group "Plugins" --key "krohnkiteEnabled" "true" 2>/dev/null || true
@@ -349,7 +351,7 @@ PageBase {
             checked: KrohnkiteConfig.tileLayoutEnabled
             onToggled: KrohnkiteConfig.tileLayoutEnabled = checked
         }
-        
+
         ToggleRow {
             text: qsTr("Cascade")
             subtext: qsTr("Windows overlap sequentially like a waterfall")

@@ -7,10 +7,10 @@ Region {
 
     required property Item target
     required property Item contentItem
-    property string vAnchor: (target && target["vAnchor"] !== undefined) ? target["vAnchor"] : "bottom" 
+    property string vAnchor: (target && target["vAnchor"] !== undefined) ? target["vAnchor"] : "bottom"
     property string hAnchor: (target && target["hAnchor"] !== undefined) ? target["hAnchor"] : "right"
     property real offsetScale: (target && target["offsetScale"] !== undefined) ? target["offsetScale"] : 0
-    
+
     property real blurOffsetTop: 0
     property real blurOffsetBottom: 0
     property real blurOffsetLeft: 0

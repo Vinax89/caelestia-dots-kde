@@ -6,6 +6,9 @@ set -euo pipefail
 # Initialize submodules
 if [[ -f "$BUNDLE_DIR/.gitmodules" ]]; then
     echo "[INFO]  Initializing submodules..."
-    git submodule sync --recursive >/dev/null 2>&1 || true
-    git submodule update --init --recursive --force >/dev/null 2>&1 || echo "[FAIL]  Failed to initialize all submodules." >&2
+    git submodule sync --recursive
+    if ! git submodule update --init --recursive --force; then
+        echo "[FAIL]  Failed to initialize all submodules." >&2
+        exit 1
+    fi
 fi

@@ -14,8 +14,10 @@ URL is never trusted input. Everything goes through fetch_url(), which:
 """
 
 import argparse
+import http.client
 import ipaddress
 import socket
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -35,12 +37,16 @@ class UnsafeUrlError(ValueError):
     """Raised when a URL is not a publicly routable http(s) target."""
 
 
-def _assert_public_ip(host: str) -> None:
+def _assert_public_ip(host: str) -> str:
     try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as exc:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (socket.gaierror, OSError) as exc:
+        # gaierror covers resolver failures; other OSErrors cover the
+        # oddball socket errors some resolvers raise, so an unexpected
+        # exception never escapes into the redirect handler.
         raise UnsafeUrlError(f"could not resolve host {host!r}") from exc
 
+    public_ips = []
     for info in infos:
         addr = ipaddress.ip_address(info[4][0])
         if (addr.is_loopback or addr.is_private or addr.is_link_local
@@ -48,6 +54,12 @@ def _assert_public_ip(host: str) -> None:
             raise UnsafeUrlError(
                 f"host {host!r} resolves to non-public address {addr}"
             )
+        if str(addr) not in public_ips:
+            public_ips.append(str(addr))
+
+    if not public_ips:
+        raise UnsafeUrlError(f"host {host!r} has no usable address")
+    return public_ips[0]
 
 
 def assert_safe_url(url: str) -> str:
@@ -62,23 +74,96 @@ def assert_safe_url(url: str) -> str:
     return url
 
 
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host, original_host, **kwargs):
+        super().__init__(host, **kwargs)
+        self._original_host = original_host
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self.host, self.port), self.timeout, self.source_address
+        )
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host, original_host, **kwargs):
+        super().__init__(host, **kwargs)
+        self._original_host = original_host
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self.host, self.port), self.timeout, self.source_address
+        )
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(
+            self.sock, server_hostname=self._original_host
+        )
+
+
+def _pin_request(request: urllib.request.Request) -> urllib.request.Request:
+    parsed = urllib.parse.urlparse(request.full_url)
+    ip = _assert_public_ip(parsed.hostname)
+    ip_host = f"[{ip}]" if ":" in ip else ip
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    host_header = parsed.hostname + port
+    request.full_url = urllib.parse.urlunparse(
+        parsed._replace(netloc=ip_host + port)
+    )
+    request.headers.pop("Host", None)
+    request.unredirected_hdrs.pop("Host", None)
+    request.add_unredirected_header("Host", host_header)
+    return request
+
+
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        original_host = req.get_header("Host") or urllib.parse.urlparse(req.full_url).hostname
+        return self.do_open(
+            lambda host, **kwargs: _PinnedHTTPConnection(
+                host, original_host, **kwargs
+            ),
+            req,
+        )
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        original_host = req.get_header("Host") or urllib.parse.urlparse(req.full_url).hostname
+        return self.do_open(
+            lambda host, **kwargs: _PinnedHTTPSConnection(
+                host, original_host, **kwargs
+            ),
+            req,
+            context=self._context,
+        )
+
+
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Validate every redirect target, not just the URL we were given."""
+    """Validate and pin every redirect target, not just the initial URL."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        assert_safe_url(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        redirect = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirect is None:
+            return None
+        return _pin_request(redirect)
 
 
-_opener = urllib.request.build_opener(_SafeRedirectHandler)
+_opener = urllib.request.build_opener(
+    _SafeRedirectHandler, _PinnedHTTPHandler, _PinnedHTTPSHandler
+)
 
 
 def fetch_url(url: str) -> str:
-    assert_safe_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    _pin_request(req)
     with _opener.open(req, timeout=TIMEOUT) as resp:
         raw = resp.read(MAX_BYTES)
     return raw.decode("utf-8", errors="ignore")
+
+
 
 
 class _VisibleTextExtractor(HTMLParser):

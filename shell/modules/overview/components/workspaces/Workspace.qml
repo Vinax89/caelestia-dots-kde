@@ -181,7 +181,7 @@ StyledRect {
                 values: {
                     const wsId = root.ws;
                     let windows = [];
-                    const kwinList = root.kwinWindowList; 
+                    const kwinList = root.kwinWindowList;
                     if (typeof KWinActiveWindowBridge !== "undefined" && kwinList) {
                         const wins = kwinList;
                         for (let i = 0; i < wins.length; ++i) {
@@ -250,7 +250,7 @@ StyledRect {
                             let tl = iconDelegate;
                             while (tl.parent) tl = tl.parent;
                             iconDelegate.topLevel = tl;
-                            
+
                             if (tl) {
                                 const p = iconDelegate.mapToItem(tl, 0, 0);
                                 iconDelegate.dragStartX = p.x;
@@ -280,7 +280,7 @@ StyledRect {
                                 } else {
                                     Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ window = "address:0x${modelData.address}" })` : `focuswindow address:0x${modelData.address}`);
                                 }
-                                
+
                                 // Try to close overview by finding WindowGrid root
                                 let p = parent;
                                 while (p) {

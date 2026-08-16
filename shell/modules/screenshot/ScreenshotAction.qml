@@ -103,6 +103,7 @@ Singleton {
                 const tmpFile = Paths.runtimeTemp("snip-search.png")
                 return ["bash", "-c",
                     `set -euo pipefail; trap "rm -f '${escapeShellStr(tmpFile)}' '${escapeShellStr(screenshotPath)}'" EXIT; ` +
+                    `kdialog --warningyesno "Search uploads this screenshot to uguu.se and opens the result in your browser. Continue?" --title "Confirm screenshot upload" && ` +
                     `${cropToFile(tmpFile)} && ` +
                     `url=$(${uploadAndGetUrl(tmpFile)}) && xdg-open "${root.imageSearchEngineBaseUrl}$url"`
                 , root.fileUploadApiEndpoint]

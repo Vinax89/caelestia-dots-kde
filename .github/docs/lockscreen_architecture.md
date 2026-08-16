@@ -6,14 +6,14 @@ This document outlines the architecture, setup instructions, and developer guide
 
 KDE's native compositor (KWin) enforces strict security policies on the lock screen. It explicitly blocks third-party shell interfaces (like `ext-session-lock-v1`) to prevent keyloggers, unauthorized password harvesting, or lock screen bypasses. Because of this, we cannot natively render Quickshell as a standalone Wayland lock screen client in Plasma 6.
 
-To bypass this restriction, Caelestia relies on the `plasma-wallpaper-application` plugin. 
+To bypass this restriction, Caelestia relies on the `plasma-wallpaper-application` plugin.
 - **The Proxy:** This plugin acts as a nested Wayland server (proxy) that runs *inside* the secure KDE lock screen environment.
 - **The Connection:** Quickshell connects to this proxy socket instead of the native KWin compositor.
 - **The Input:** Because it is running underneath the KDE lock screen overlay, native KDE password input will immediately take over as soon as you move your mouse or press a key. Caelestia acts as a beautiful "screensaver" and dashboard that sits behind this authentication overlay.
 
 ## Setup Instructions
 
-This plugin is **not** SDDM specific (SDDM is your login screen). This is specifically for KDE's built-in Lock Screen (`kscreenlocker`). 
+This plugin is **not** SDDM specific (SDDM is your login screen). This is specifically for KDE's built-in Lock Screen (`kscreenlocker`).
 Additionally, you **do not** need to compile it! It is a pure QML/QtWayland package.
 
 1. **Install Dependencies:** Ensure you have the QtWayland compositor module installed (`qt6-wayland` on Arch).
@@ -23,10 +23,10 @@ Additionally, you **do not** need to compile it! It is a pure QML/QtWayland pack
    kpackagetool6 -t Plasma/Wallpaper -i package
    ```
    *(Note: To upgrade it later, use `-u` instead of `-i`)*
-3. **Apply in KDE Settings:** 
+3. **Apply in KDE Settings:**
    - Open KDE System Settings -> Screen Locking -> Configure Appearance
    - Select the `Application` wallpaper plugin.
-4. **Configure the Command:** 
+4. **Configure the Command:**
    - In the plugin settings, set the application command to:
      ```bash
      quickshell -p ~/.config/quickshell/caelestia/lockscreen.qml
@@ -36,7 +36,7 @@ Additionally, you **do not** need to compile it! It is a pure QML/QtWayland pack
 
 When Quickshell runs natively on your desktop, it communicates directly with KWin and leverages **Hardware (GPU) Compositing**. This is highly efficient and typically uses <5% CPU even with active animations.
 
-However, when running inside the lock screen via `plasma-wallpaper-application`, the nested proxy must capture Wayland buffers and heavily relies on **Software (CPU) Compositing**. 
+However, when running inside the lock screen via `plasma-wallpaper-application`, the nested proxy must capture Wayland buffers and heavily relies on **Software (CPU) Compositing**.
 
 ### The Animation Problem
 If your lock screen widgets contain continuous animations, QtQuick will generate new frames at 60 FPS. The proxy must then software-composite all 60 frames per second on your CPU. This creates an **extreme CPU bottleneck**, often spiking usage to 40% or more while locked.
@@ -58,7 +58,7 @@ When developing widgets for the lock screen, you must be extremely conscious of 
 
 ### Strict Rules for Lock Screen Widgets
 1. **No Continuous Animations:** Never use infinite `RotationAnimator` or scrolling marquees.
-2. **Synchronize Polling:** If you have multiple widgets that poll data (like `Cpu`, `Memory`, `Storage`), ensure they do not stagger their animations. If CPU animates at 0.0s, RAM at 0.3s, and Disk at 0.6s, the screen is animating 90% of the time. 
+2. **Synchronize Polling:** If you have multiple widgets that poll data (like `Cpu`, `Memory`, `Storage`), ensure they do not stagger their animations. If CPU animates at 0.0s, RAM at 0.3s, and Disk at 0.6s, the screen is animating 90% of the time.
 3. **Avoid Behaviors on Timers:** If a value is updated via a 1-second interval (like system stats), do **not** use a 300ms `Behavior` on that value. It is better to let the value snap instantly, generating 1 frame of damage per second, rather than 18 frames of damage per second.
 4. **Pause Shaders:** If using `ShaderEffectSource`, ensure `live` is set to `false` unless a transition is actively occurring.
 

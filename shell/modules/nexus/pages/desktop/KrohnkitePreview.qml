@@ -21,7 +21,7 @@ Item {
     property real gapLeft: 8
     property real gapRight: 8
 
-    // size 
+    // size
     Layout.fillWidth: true
     implicitHeight: Math.round(width * 9 / 16) + headerRow.implicitHeight + 8
 

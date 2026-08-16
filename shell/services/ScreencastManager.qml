@@ -231,11 +231,11 @@ Item {
                     }
                 }
             }
-            
+
             let streams = root._streams;
             let keys = Object.keys(streams);
             let deletedAny = false;
-            
+
             for (let i = 0; i < keys.length; i++) {
                 let uuid = keys[i];
                 if (!activeUuids[uuid]) {
