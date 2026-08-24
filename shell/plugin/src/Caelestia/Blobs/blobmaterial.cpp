@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <QtGlobal>
+
 static_assert(sizeof(decltype(BlobRectData::excludeMask)) == sizeof(float),
     "BlobMaterial packs excludeMask into a float slot via memcpy");
 
@@ -27,11 +29,27 @@ BlobMaterialShader::BlobMaterialShader() {
     setShaderFileName(FragmentStage, QStringLiteral(":/shaders/blob.frag.qsb"));
 }
 
+// Total size of the uniform block written below: 160 bytes of header followed
+// by kMaxRects * 80 bytes of per-rect data. The final write lands at
+// 160 + (kMaxRects - 1) * 80 + 64 .. +16, i.e. exactly kUniformBlockSize.
+static constexpr int kMaxRects = 16;
+static constexpr int kUniformBlockSize = 160 + kMaxRects * 80;
+
 bool BlobMaterialShader::updateUniformData(RenderState& state, QSGMaterial* newMaterial, QSGMaterial* oldMaterial) {
     Q_UNUSED(oldMaterial);
     auto* mat = static_cast<BlobMaterial*>(newMaterial);
     QByteArray* buf = state.uniformData();
-    Q_ASSERT(buf->size() >= 1440);
+
+    // Q_ASSERT compiles out under QT_NO_DEBUG, which is exactly how this plugin
+    // ships (08-build-shell.sh configures CMAKE_BUILD_TYPE=Release), so it was
+    // no protection at all in a real build. Everything below is raw memcpy into
+    // this buffer; if the .qsb shader's uniform block and this packing code ever
+    // disagree about the layout, that must not become a heap overwrite.
+    if (Q_UNLIKELY(buf->size() < kUniformBlockSize)) {
+        qWarning("BlobMaterialShader: uniform buffer is %lld bytes, need %d; skipping update.",
+            static_cast<long long>(buf->size()), kUniformBlockSize);
+        return false;
+    }
 
     if (state.isMatrixDirty()) {
         const QMatrix4x4 m = state.combinedMatrix();
@@ -81,7 +99,7 @@ bool BlobMaterialShader::updateUniformData(RenderState& state, QSGMaterial* newM
     memcpy(buf->data() + 144, mat->m_invertedInner, 16);
 
     // Rect data (offset 160, each rect = 5 vec4s = 80 bytes)
-    const int count = qMin(mat->m_rectCount, 16);
+    const int count = qMin(mat->m_rectCount, kMaxRects);
     for (int i = 0; i < count; ++i) {
         const auto& r = mat->m_rects[i];
         const int base = 160 + i * 80;

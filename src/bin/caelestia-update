@@ -2,6 +2,9 @@
 export PATH="$HOME/.local/bin:$PATH"
 
 set -uo pipefail
+# shell-quality: allow-no-errexit -- the updater reports each stage's outcome
+# itself and must still run its rollback/cleanup path when a stage fails;
+# errexit would skip exactly that path.
 
 die()  { echo "[FATAL] $*" >&2; exit 1; }
 info() { echo "[INFO]  $*"; }

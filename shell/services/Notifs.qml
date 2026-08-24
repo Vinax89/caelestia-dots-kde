@@ -163,7 +163,14 @@ Singleton {
         printErrors: false
         path: `${Paths.state}/notifs.json`
         onLoaded: {
-            const data = JSON.parse(text());
+            // A notifs.json truncated by a crash mid-write would throw here and
+            // leave root.loaded false forever, so notifications never start.
+            const data = Strings.parseJson(text(), null);
+            if (!Array.isArray(data)) {
+                console.warn("Notifs: notifs.json is not a valid notification list; starting empty.");
+                root.loaded = true;
+                return;
+            }
             const cap = GlobalConfig.notifs.maxNotifs;
             for (const notif of data.slice(0, cap))
                 root.list.push(notifComp.createObject(root, notif));

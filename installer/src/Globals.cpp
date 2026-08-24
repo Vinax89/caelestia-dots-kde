@@ -16,7 +16,6 @@ std::string g_base_distro = "unknown";
 std::string g_bundle_dir = ".";
 std::string g_installer_runtime_dir;
 std::string g_sudo_bin_dir;
-std::string g_sudo_askpass;
 
 int run_shell(const std::string& command) {
     const int status = std::system(command.c_str());
@@ -40,15 +39,26 @@ bool is_valid_env_name(const std::string& name) {
     return true;
 }
 
+// Read a PID written by a backgrounded shell command and signal it. Guards
+// against a truncated or absent file writing 0 into `pid`, which would signal
+// the whole process group.
+static void terminate_recorded_pid(const std::string& path) {
+    std::ifstream pidFile(path);
+    pid_t pid = 0;
+    if (pidFile >> pid && pid > 1)
+        kill(pid, SIGTERM);
+}
+
 void cleanup_installer_runtime() {
     if (g_installer_runtime_dir.empty())
         return;
 
     std::error_code error;
-    std::ifstream pidFile(g_installer_runtime_dir + "/inhibit.pid");
-    pid_t pid = 0;
-    if (pidFile >> pid && pid > 1)
-        kill(pid, SIGTERM);
+    // The sudo-timestamp keepalive exits on its own once this process is gone
+    // (it polls `kill -0`), but stopping it here avoids leaving it running for
+    // up to one extra sleep interval.
+    terminate_recorded_pid(g_installer_runtime_dir + "/sudo-keepalive.pid");
+    terminate_recorded_pid(g_installer_runtime_dir + "/inhibit.pid");
     std::ifstream cookieFile(g_installer_runtime_dir + "/inhibit.cookie");
     std::string cookie;
     if (cookieFile >> cookie && !cookie.empty()
@@ -59,7 +69,6 @@ void cleanup_installer_runtime() {
     std::filesystem::remove_all(g_installer_runtime_dir, error);
     g_installer_runtime_dir.clear();
     g_sudo_bin_dir.clear();
-    g_sudo_askpass.clear();
 }
 bool g_confirm_arg = false;
 

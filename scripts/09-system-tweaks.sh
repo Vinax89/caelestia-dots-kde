@@ -182,16 +182,41 @@ new = '''    for pt in pts_path.iterdir():
                 pass
             try:
                 # Use non-blocking write with timeout to prevent hangs'''
-if old in text:
-    p.write_text(text.replace(old, new))
+if new in text:
+    sys.exit(2)          # already patched: nothing to do, and not a failure
+if old not in text:
+    sys.exit(3)          # the anchor is gone -- upstream changed under us
+p.write_text(text.replace(old, new))
 "
-        if ! python3 -c "$python_code" "$theme_file" 2>/dev/null; then
-            if ! run_sudo_non_interactive python3 -c "$python_code" "$theme_file" 2>/dev/null; then
-                warn "Failed to patch $theme_file (requires sudo)"
-                echo "Caelestia CLI Theme Sequence Patch" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_patches.txt"
-            fi
+        # Exit codes: 0 patched, 2 already patched, 3 anchor missing,
+        # anything else a real error (usually EACCES, which the sudo retry fixes).
+        _patch_rc=0
+        python3 -c "$python_code" "$theme_file" 2>/dev/null || _patch_rc=$?
+        if [[ $_patch_rc -ne 0 && $_patch_rc -ne 2 && $_patch_rc -ne 3 ]]; then
+            _patch_rc=0
+            run_sudo_non_interactive python3 -c "$python_code" "$theme_file" 2>/dev/null || _patch_rc=$?
         fi
-        ok "caelestia CLI patched."
+
+        case "$_patch_rc" in
+            0)
+                ok "caelestia CLI patched."
+                ;;
+            2)
+                ok "caelestia CLI already patched."
+                ;;
+            3)
+                # Reporting success here regardless of what happened meant the
+                # terminal-sequence bug this patch exists to fix could silently
+                # come back after an upstream release, with nothing to notice it.
+                warn "caelestia CLI patch no longer applies - upstream changed $theme_file."
+                warn "The terminal sequence fix is NOT active; please report this."
+                echo "Caelestia CLI Theme Sequence Patch (anchor missing)" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_patches.txt"
+                ;;
+            *)
+                warn "Failed to patch $theme_file (exit $_patch_rc; requires sudo)"
+                echo "Caelestia CLI Theme Sequence Patch" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_patches.txt"
+                ;;
+        esac
     else
         warn "caelestia CLI not found, skipping patch."
     fi

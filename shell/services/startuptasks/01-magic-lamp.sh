@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 kwriteconfig6 --file kwinrc --group Plugins --key magiclampEnabled true 2>/dev/null || true
 kwriteconfig6 --file kwinrc --group Plugins --key squashEnabled false 2>/dev/null || true

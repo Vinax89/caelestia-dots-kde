@@ -179,8 +179,8 @@ Singleton {
                 Quickshell.execDetached(["notify-send", "Weather location", "Using approximate IP-based location from ipinfo.io. Disable it in Settings to stop sharing your IP."]);
             }
             Requests.get("https://ipinfo.io/json", text => {
-                const response = JSON.parse(text);
-                if (response.loc) {
+                const response = Strings.parseJson(text, null);
+                if (response && response.loc) {
                     loc = response.loc;
                     city = response.city ?? "";
                     timer.restart();
@@ -195,13 +195,16 @@ Singleton {
             return;
         }
 
-        const [lat, lon] = coords.split(",").map(s => s.trim());
+        // encodeURIComponent for consistency with fetchCoordsFromCity: these
+        // come from user-set weatherLocation config, which is not guaranteed to
+        // be two bare numbers.
+        const [lat, lon] = coords.split(",").map(s => encodeURIComponent(s.trim()));
 
         const fallbackToBigDataCloud = () => {
             const fallbackUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
             Requests.get(fallbackUrl, text => {
-                const geo = JSON.parse(text);
-                const geoCity = geo.city || geo.locality;
+                const geo = Strings.parseJson(text, null);
+                const geoCity = geo ? (geo.city || geo.locality) : "";
                 if (geoCity) {
                     city = geoCity;
                     cachedCities.set(coords, geoCity);
@@ -213,7 +216,8 @@ Singleton {
 
         const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=geocodejson`;
         Requests.get(nominatimUrl, text => {
-            const geo = JSON.parse(text).features?.[0]?.properties.geocoding;
+            const parsed = Strings.parseJson(text, null);
+            const geo = parsed?.features?.[0]?.properties?.geocoding;
             if (geo) {
                 const geoCity = geo.type === "city" ? geo.name : geo.city;
                 if (geoCity) {
@@ -230,8 +234,8 @@ Singleton {
         const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&language=en&format=json`;
 
         Requests.get(url, text => {
-            const json = JSON.parse(text);
-            if (json.results && json.results.length > 0) {
+            const json = Strings.parseJson(text, null);
+            if (json && json.results && json.results.length > 0) {
                 const result = json.results[0];
                 const coords = normalizeCoords(result.latitude, result.longitude);
                 if (!coords) {
@@ -259,8 +263,8 @@ Singleton {
             return;
 
         Requests.get(url, text => {
-            const json = JSON.parse(text);
-            if (!json.current || !json.daily)
+            const json = Strings.parseJson(text, null);
+            if (!json || !json.current || !json.daily)
                 return;
 
             cc = {

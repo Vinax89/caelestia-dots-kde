@@ -24,7 +24,10 @@ PageBase {
         if (!token) {
             Quickshell.execDetached(["secret-tool", "clear", "service", "caelestia-shell", "account", "steamgriddb"]);
         } else {
-            Quickshell.execDetached(["bash", "-c", "secret-tool store --label=\"Caelestia SteamGridDB Key\" service caelestia-shell account steamgriddb <<< \"$1\"", "--", token]);
+            // `<<< "$1"` writes the secret to a temp file on disk (that is how bash
+        // implements here-strings) and appends a trailing newline. Piping from
+        // printf does neither -- the same form AiSettingsPage.qml already uses.
+        Quickshell.execDetached(["sh", "-c", "printf %s \"$1\" | secret-tool store --label=\"Caelestia SteamGridDB Key\" service caelestia-shell account steamgriddb", "--", token]);
         }
     }
 

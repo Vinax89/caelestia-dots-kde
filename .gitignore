@@ -1,14 +1,3 @@
-/hypr/scheme/current.conf
-
-/spicetify/config-xpui.ini
-/spicetify/Themes/caelestia/color.ini
-
-/btop/btop.log
-/btop/themes/
-
-/fish/fish_variables
-/fish/conf.d/
-
 .SRCINFO
 backups/
 src/bin/build/
@@ -19,7 +8,13 @@ __pycache__/
 
 installer/build/
 caelestia-install
-build
+
+# Out-of-tree CMake build directories. Anchored to the ones that actually exist
+# rather than a bare `build`, which matched any file or directory of that name
+# at any depth in the tree.
+shell/build/
+shell/plugin/build/
+kwin-effects/workspace-tracker/build/
 
 kdotool/
 run.sh

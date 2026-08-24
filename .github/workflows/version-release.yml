@@ -9,6 +9,21 @@ on:
 jobs:
   version-release:
     runs-on: ubuntu-latest
+    # `workflow_run` runs in the context of the base repository with whatever
+    # permissions this job declares -- here, contents: write. The `branches:`
+    # filter above is NOT a provenance check: it matches
+    # workflow_run.head_branch, which for a pull_request run is the *head*
+    # branch, so a fork PR opened from a branch literally named "main" passes
+    # it. Everything below would then run against attacker-controlled code
+    # holding a write-scoped token.
+    #
+    # Require the triggering run to be a push on this repository. Fork PRs
+    # produce event == 'pull_request' and a head_repository that is the fork,
+    # so both halves have to hold.
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion == 'success'
     concurrency:
       group: version-release
       cancel-in-progress: true
@@ -17,9 +32,50 @@ jobs:
     env:
       GIT_COMMIT: ${{ github.event.workflow_run.head_sha }}
     steps:
-      - name: Require successful validation
-        if: ${{ github.event.workflow_run.conclusion != 'success' }}
-        run: exit 1
+      # Verify the signature BEFORE any of the commit's files reach the disk.
+      # This fetches the commit object into a bare repository: no working tree
+      # is written, no submodule URL is resolved, and nothing from the commit
+      # is read, sourced or executed until it has been anchored to the pinned
+      # fingerprint.
+      - name: Verify release commit signature
+        env:
+          TARGET_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          trusted_fingerprint=968479A1AFF927E37D1A566BB5690EEEBB952194
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf -- "$workdir"' EXIT
+          verify_home="$workdir/gnupg"
+          mkdir -p "$verify_home"
+          chmod 700 "$verify_home"
+
+          curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg \
+            -o "$workdir/trusted.asc"
+          fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons \
+            --import-options show-only --import "$workdir/trusted.asc" 2>/dev/null \
+            | awk -F: '$1 == "fpr" { print $10 }')"
+          grep -Fxq "$trusted_fingerprint" <<< "$fingerprints"
+          gpg --homedir "$verify_home" --batch --import "$workdir/trusted.asc" >/dev/null 2>&1
+
+          git init --quiet --bare "$workdir/bare.git"
+          git -C "$workdir/bare.git" remote add origin "https://github.com/$TARGET_REPO.git"
+          git -C "$workdir/bare.git" fetch --quiet --depth=1 origin "$GIT_COMMIT"
+
+          status="$(GNUPGHOME="$verify_home" git -C "$workdir/bare.git" \
+            -c gpg.program=gpg verify-commit --raw "$GIT_COMMIT" 2>&1 || true)"
+          valid_fingerprint="$(printf '%s\n' "$status" \
+            | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
+
+          if [[ "$valid_fingerprint" != "$trusted_fingerprint" ]]; then
+            echo "::error::$GIT_COMMIT is not signed by the trusted release signer."
+            echo "  expected: $trusted_fingerprint"
+            echo "  got:      ${valid_fingerprint:-<no valid signature>}"
+            exit 1
+          fi
+
+          echo "Verified signature on $GIT_COMMIT"
 
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -37,7 +93,12 @@ jobs:
       - name: Load Version from Config
         run: |
           set -euo pipefail
-          source .github/version.env
+
+          # Parse, do not `source`. version.env is data; sourcing it executes it,
+          # which turns any write to that file into arbitrary shell in a job
+          # holding a write-scoped token.
+          VERSION="$(sed -n 's/^VERSION[[:space:]]*=[[:space:]]*//p' \
+            .github/version.env | tr -d '"'"'"' \t\r' | head -n1)"
 
           if [[ -z "${VERSION:-}" ]]; then
             echo "VERSION is missing in .github/version.env"
@@ -70,16 +131,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          trusted_fingerprint=968479A1AFF927E37D1A566BB5690EEEBB952194
-          verify_home="$(mktemp -d)"
-          trap 'rm -rf -- "$verify_home"' EXIT
-          curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$verify_home/trusted.asc"
-          fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$verify_home/trusted.asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
-          grep -Fxq "$trusted_fingerprint" <<< "$fingerprints"
-          gpg --homedir "$verify_home" --batch --import "$verify_home/trusted.asc" >/dev/null 2>&1
-          status="$(GNUPGHOME="$verify_home" git -c gpg.program=gpg verify-commit --raw "$GIT_COMMIT" 2>&1 || true)"
-          valid_fingerprint="$(printf '%s\n' "$status" | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
-          [[ "$valid_fingerprint" == "$trusted_fingerprint" ]]
+          # $GIT_COMMIT was anchored to the pinned release-signer fingerprint by
+          # the "Verify release commit signature" step, before this commit's
+          # files were ever written to disk.
 
           PREVIOUS_VERSION_TAG=$(git rev-parse -q --verify "refs/tags/$VERSION" || true)
 

@@ -2,6 +2,9 @@
 # installDP_fedora.sh - Fedora package installation for Caelestia KDE Port
 
 set -uo pipefail
+# shell-quality: allow-no-errexit -- a distro package sweep should install as
+# much as it can. One unavailable package in a repo must not abort the rest;
+# failures are collected and reported at the end instead.
 
 log()  { echo -e "\033[0;36m[INFO]\033[0m $*"; }
 err()  { echo -e "\033[0;31m[ERR]\033[0m  $*"; }

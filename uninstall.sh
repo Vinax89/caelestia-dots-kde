@@ -7,6 +7,11 @@
 # ==============================================================
 
 set -uo pipefail
+# shell-quality: allow-no-errexit -- an uninstaller must finish cleaning up.
+# Aborting on the first failing step (a file already removed, a service that
+# was never enabled, a mount that is busy) would leave the system in a worse,
+# half-uninstalled state than continuing past it. Every step reports its own
+# outcome through ok/warn, and the ones that must not be skipped use `die`.
 
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -665,13 +670,41 @@ for link in /usr/local/bin/sass /usr/local/bin/qdbus6 /usr/local/bin/caelestia /
     fi
 done
 
-# System-level KWin effect
-for effect_lib in /usr/lib/qt6/plugins/kwin/effects/plugins/kwin_workspace_tracker.so /usr/lib64/qt6/plugins/kwin/effects/plugins/kwin_workspace_tracker.so; do
-    if [[ -f "$effect_lib" ]]; then
-        sudo rm -f "$effect_lib"
-        ok "Removed system KWin effect: $effect_lib"
-    fi
-done
+# System-level KWin effect.
+#
+# 08-build-shell.sh records exactly which files `cmake --install` wrote, because
+# the install prefix is derived from Qt rather than hardcoded -- guessing at a
+# fixed list of paths misses lib64 distros and non-/usr Qt prefixes entirely.
+# The hardcoded candidates remain as a fallback for installs that predate the
+# manifest.
+KWIN_EFFECT_MANIFEST="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/kwin-effect-files.txt"
+_effect_removed=0
+if [[ -s "$KWIN_EFFECT_MANIFEST" ]]; then
+    while IFS= read -r effect_file; do
+        [[ -n "$effect_file" ]] || continue
+        # Only ever delete the plugin this project installs.
+        case "$effect_file" in
+            */kwin_workspace_tracker.so) ;;
+            *) warn "Skipping unexpected entry in KWin effect manifest: $effect_file"; continue ;;
+        esac
+        if [[ -f "$effect_file" ]]; then
+            sudo rm -f -- "$effect_file"
+            ok "Removed system KWin effect: $effect_file"
+            _effect_removed=1
+        fi
+    done < "$KWIN_EFFECT_MANIFEST"
+    rm -f -- "$KWIN_EFFECT_MANIFEST"
+fi
+if [[ $_effect_removed -eq 0 ]]; then
+    for effect_lib in /usr/lib/qt6/plugins/kwin/effects/plugins/kwin_workspace_tracker.so \
+                      /usr/lib64/qt6/plugins/kwin/effects/plugins/kwin_workspace_tracker.so \
+                      /usr/local/lib/qt6/plugins/kwin/effects/plugins/kwin_workspace_tracker.so; do
+        if [[ -f "$effect_lib" ]]; then
+            sudo rm -f -- "$effect_lib"
+            ok "Removed system KWin effect: $effect_lib"
+        fi
+    done
+fi
 
 if [[ -f "$HOME/.cargo/bin/satty" ]]; then
     rm -f "$HOME/.cargo/bin/satty"
@@ -683,64 +716,37 @@ PACKAGE_MANIFEST="${CAELESTIA_PACKAGE_MANIFEST:-$HOME/.cache/caelestia-kde/insta
 if [[ "$REMOVE_PACKAGES" == "true" && -s "$PACKAGE_MANIFEST" ]]; then
     section "Step 9 - Remove Packages (Optional)"
 
-    ARCH_PACKAGES=(
-        caelestia-cli quickshell
-        cmake ninja
-        wl-clipboard cliphist inotify-tools app2unit wireplumber trash-cli
-        jq aubio lm_sensors libcava libqalculate
-        foot fish eza fastfetch starship btop
-        adw-gtk-theme papirus-icon-theme
-        ttf-jetbrains-mono-nerd ttf-material-symbols-variable
-        ttf-rubik-vf ttf-cascadia-code-nerd darkly
-        swappy brightnessctl ddcutil imagemagick
-        tesseract tesseract-data-eng satty spectacle sassc
-        kvantum kvantum-qt5 kde-material-you-colors
-        keyd
-    )
-
-    FEDORA_PACKAGES=(
-        quickshell-git caelestia-cli
-        cmake ninja-build
-        wl-clipboard cliphist inotify-tools app2unit wireplumber trash-cli
-        jq aubio lm_sensors lm_sensors-devel libcava libcava-devel libqalculate libqalculate-devel
-        foot fish eza fastfetch starship btop
-        adw-gtk3-theme google-rubik-fonts papirus-icon-theme
-        swappy brightnessctl ddcutil imagemagick
-        tesseract tesseract-langpack-eng spectacle
-        fuzzel satty slurp grim sassc
-        ffmpeg gpu-screen-recorder
-        qt6-qtdeclarative qt6-qtdeclarative-devel
-        qt6-qtsvg qt6-qtsvg-devel qt6-qtshadertools-devel
-        pipewire-devel aubio-devel
-        dbus-devel dbus-glib-devel python3-devel
-        kvantum kde-material-you-colors
-        keyd
-    )
-
-    DEBIAN_PACKAGES=(
-        cmake ninja-build ccache g++ build-essential
-        wl-clipboard cliphist inotify-tools wireplumber trash-cli jq yq
-        libaubio-dev aubio-tools lm-sensors libsensors-dev
-        libpipewire-0.3-dev pipewire
-        qt6-base-dev qt6-base-private-dev qt6-declarative-dev qml6-module-qtquick qt6-wayland qt6-wayland-dev qt6-svg-dev qt6-shadertools-dev
-        libkf6globalaccel-dev libkf6windowsystem-dev libkf6kpipewire-dev libsecret-1-dev libkirigami-dev libkdecorations3-dev libkf6style-dev libkf6kcmutils-dev libkf6colorscheme-dev
-        ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libqalculate-dev qalc
-        foot fish eza fastfetch btop bash
-        adw-gtk3-theme fonts-rubik papirus-icon-theme
-        fuzzel swappy brightnessctl ddcutil network-manager imagemagick
-        tesseract-ocr tesseract-ocr-eng kde-spectacle slurp grim xdg-utils sassc
-        libdbus-1-dev libdbus-glib-1-dev python3-dev
-        qt6-style-kvantum kvantum quickshell
-        libxi-dev libdrm-dev libx11-dev libxcomposite-dev libxdamage-dev libxrender-dev libxrandr-dev libpulse-dev libva-dev libcap-dev libavfilter-dev libvulkan-dev
-    )
-
     # Only remove packages recorded as installed by Caelestia.
+    #
+    # This list is the sole source of truth. Three hand-maintained per-distro
+    # arrays used to sit here and were overwritten by the manifest three lines
+    # later without ever being read -- they looked authoritative and were dead.
+    #
+    # scripts/lib/package-snapshot.sh explains how the manifest is built; the
+    # short version is that it holds only packages that appeared *after* the
+    # system upgrade, so unrelated dependencies pulled in by that upgrade are
+    # not attributed to Caelestia.
     mapfile -t OWNED_PACKAGES < "$PACKAGE_MANIFEST"
-    ARCH_PACKAGES=("${OWNED_PACKAGES[@]}")
-    FEDORA_PACKAGES=("${OWNED_PACKAGES[@]}")
-    DEBIAN_PACKAGES=("${OWNED_PACKAGES[@]}")
 
-    if [[ "$BASE_DISTRO" == "arch" ]]; then
+    # A trailing newline in the manifest yields an empty final element, which
+    # would otherwise reach the package manager as an empty package name.
+    _filtered=()
+    for _pkg in ${OWNED_PACKAGES[@]+"${OWNED_PACKAGES[@]}"}; do
+        [[ -n "$_pkg" ]] && _filtered+=("$_pkg")
+    done
+    OWNED_PACKAGES=(${_filtered[@]+"${_filtered[@]}"})
+    unset _filtered _pkg
+
+    if [[ ${#OWNED_PACKAGES[@]} -eq 0 ]]; then
+        warn "The package manifest lists no packages; skipping package removal."
+        REMOVE_PACKAGES="false"
+    fi
+
+    ARCH_PACKAGES=(${OWNED_PACKAGES[@]+"${OWNED_PACKAGES[@]}"})
+    FEDORA_PACKAGES=(${OWNED_PACKAGES[@]+"${OWNED_PACKAGES[@]}"})
+    DEBIAN_PACKAGES=(${OWNED_PACKAGES[@]+"${OWNED_PACKAGES[@]}"})
+
+    if [[ "$REMOVE_PACKAGES" == "true" && "$BASE_DISTRO" == "arch" ]]; then
         warn "The following packages will be removed:"
         printf '  %s\n' "${ARCH_PACKAGES[@]}"
         echo
@@ -765,7 +771,7 @@ if [[ "$REMOVE_PACKAGES" == "true" && -s "$PACKAGE_MANIFEST" ]]; then
         else
             skip "Package removal skipped"
         fi
-    elif [[ "$BASE_DISTRO" == "fedora" ]]; then
+    elif [[ "$REMOVE_PACKAGES" == "true" && "$BASE_DISTRO" == "fedora" ]]; then
         warn "The following packages will be removed:"
         printf '  %s\n' "${FEDORA_PACKAGES[@]}"
         echo
@@ -777,7 +783,7 @@ if [[ "$REMOVE_PACKAGES" == "true" && -s "$PACKAGE_MANIFEST" ]]; then
         else
             skip "Package removal skipped"
         fi
-    elif [[ "$BASE_DISTRO" == "debian" ]]; then
+    elif [[ "$REMOVE_PACKAGES" == "true" && "$BASE_DISTRO" == "debian" ]]; then
         warn "The following packages will be removed:"
         printf '  %s\n' "${DEBIAN_PACKAGES[@]}"
         echo

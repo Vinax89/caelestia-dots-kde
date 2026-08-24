@@ -14,7 +14,12 @@ export CAELESTIA_SETUP_RUNNING=1
 tput civis 2>/dev/null || true
 
 # -- Paths ---------------------------------------------------------------------
-BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# setup.sh lives in scripts/, so the bundle root is one level up. Without the
+# "/.." every derived path lands a directory too deep -- $BUNDLE_DIR/installer,
+# $BUNDLE_DIR/src, $BUNDLE_DIR/shell and the step scripts the TUI runs all
+# resolve under scripts/ and do not exist. a0e30d5e fixed this when setup.sh was
+# moved out of the repo root; 09201835 reverted it.
+BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$BUNDLE_DIR/scripts"
 export BUNDLE_DIR
 INSTALL_START_EPOCH="$(date +%s)"
@@ -280,13 +285,10 @@ PACKAGE_STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde"
 PACKAGE_BEFORE="$PACKAGE_STATE_DIR/packages.before"
 PACKAGE_MANIFEST="$PACKAGE_STATE_DIR/installed-packages.txt"
 mkdir -p "$PACKAGE_STATE_DIR"
-case "$BASE_DISTRO" in
-    arch) pacman -Qq 2>/dev/null | sort -u > "$PACKAGE_BEFORE" || true ;;
-    fedora) dnf repoquery --installed --qf '%{name}' 2>/dev/null | sort -u > "$PACKAGE_BEFORE" || true ;;
-    debian) dpkg-query -W -f='${binary:Package}\n' 2>/dev/null | sort -u > "$PACKAGE_BEFORE" || true ;;
-    *) : > "$PACKAGE_BEFORE" ;;
-esac
 export PACKAGE_STATE_DIR PACKAGE_BEFORE PACKAGE_MANIFEST
+
+# shellcheck source=lib/package-snapshot.sh
+. "$SCRIPTS_DIR/lib/package-snapshot.sh"
 
 # Only run in the outer (pre-tmux) invocation.
 if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
@@ -296,6 +298,15 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         silent_refresh_native_sources
     fi
 fi
+
+# Snapshot the installed-package set AFTER the mirror refresh above.
+#
+# That refresh runs a full `pacman -Syu` (and installs reflector/dos2unix), so
+# taking the snapshot before it recorded every package that upgrade pulled in as
+# "installed by Caelestia" -- and the uninstaller feeds this list straight to
+# `pacman -Rns`. 00a-system-update.sh re-takes the snapshot after the installer's
+# own system-update step for the same reason.
+caelestia_snapshot_packages "$PACKAGE_BEFORE"
 
 normalize_line_endings_first() {
     BASE_DISTRO="$(detect_base_distro)"
@@ -367,24 +378,136 @@ fi
 
 BIN="$BUNDLE_DIR/caelestia-install"
 
+PREBUILT_BASE_URL="https://github.com/Vinax89/caelestia-dots-kde/releases/download/caelestia-bin-repo"
+MAINTAINER_KEY_FILE="$BUNDLE_DIR/.github/release-signing-key.asc"
+
+# Resolve the pinned release-signer fingerprint, if the project has one.
+#
+# Reading it out of the checkout is only as strong as the checkout itself --
+# but the checkout arrives over git and the update path verifies commit
+# signatures, whereas a release asset has no such anchor. That asymmetry is the
+# whole point: without a pinned key there is nothing that makes a downloaded
+# binary more trustworthy than whoever can write to the release.
+prebuilt_release_signer() {
+    local signer=""
+    if [[ -n "${CAELESTIA_RELEASE_SIGNER:-}" ]]; then
+        signer="$CAELESTIA_RELEASE_SIGNER"
+    elif [[ -f "$BUNDLE_DIR/.github/version.env" ]]; then
+        signer="$(sed -n 's/^RELEASE_SIGNER[[:space:]]*=[[:space:]]*//p' \
+            "$BUNDLE_DIR/.github/version.env" | tr -d '"'"'"' \t\r' | head -n1)"
+    fi
+    signer="$(printf '%s' "$signer" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
+    [[ "$signer" =~ ^[0-9A-F]{40}$ ]] || return 1
+    printf '%s' "$signer"
+}
+
+# Verify SHA256SUMS carries a good signature from the pinned release signer.
+# Key material is fetched from the checkout and then rejected unless it
+# contains the pinned fingerprint, so only the fingerprint has to be trusted.
+verify_prebuilt_signature() {
+    local sums_file="$1" sig_file="$2" signer="$3"
+    local verify_home fingerprints
+    command -v gpg >/dev/null 2>&1 || return 1
+    [[ -s "$sig_file" && -f "$MAINTAINER_KEY_FILE" ]] || return 1
+
+    verify_home="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-prebuilt-verify.XXXXXX")" || return 1
+    chmod 700 "$verify_home"
+
+    fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons \
+        --import-options show-only --import "$MAINTAINER_KEY_FILE" 2>/dev/null \
+        | awk -F: '$1 == "fpr" { print $10 }')"
+    if ! grep -Fxq "$signer" <<< "$fingerprints"; then
+        rm -rf -- "$verify_home"
+        return 1
+    fi
+    gpg --homedir "$verify_home" --batch --import "$MAINTAINER_KEY_FILE" >/dev/null 2>&1
+
+    local status
+    status="$(gpg --homedir "$verify_home" --batch --status-fd 1 \
+        --verify "$sig_file" "$sums_file" 2>/dev/null || true)"
+    rm -rf -- "$verify_home"
+
+    grep -q "^\[GNUPG:\] VALIDSIG $signer" <<< "$status"
+}
+
 # Prefer the release-built installer when available, but retain the local
 # compilation path as an offline and verification-friendly fallback.
+#
+# The binary is executed with the user's privileges and goes on to run every
+# install step, so it is verified before it is ever made executable:
+#
+#   1. Its SHA-256 must match the entry in the release's SHA256SUMS.
+#   2. SHA256SUMS must carry a good signature from the pinned release signer.
+#
+# Step 2 is what makes step 1 mean anything -- anyone able to replace the
+# binary in a release can replace the checksum file beside it. When no signer
+# is pinned there is no anchor to verify against, so the prebuilt path is
+# declined and the installer compiles from the (git-verified) source tree
+# instead. CAELESTIA_ALLOW_UNSIGNED_PREBUILT=1 overrides that for users who
+# accept the risk.
+# Sets PREBUILT_BIN on success and PREBUILT_DECLINED_REASON on refusal.
+# Deliberately not run in a command substitution: both are globals, and a
+# subshell would discard them.
 try_download_prebuilt_installer() {
-    local arch tmp_bin url
+    local arch tmp_dir tmp_bin signer actual expected
+    PREBUILT_BIN=""
+    PREBUILT_DECLINED_REASON=""
     arch="$(uname -m)"
     case "$arch" in
         x86_64|aarch64) ;;
         *) return 1 ;;
     esac
-    tmp_bin="$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/caelestia-install-bin-XXXXXX")" || return 1
-    url="https://github.com/Vinax89/caelestia-dots-kde/releases/download/caelestia-bin-repo/caelestia-install-${arch}"
-    if curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 "$url" -o "$tmp_bin" 2>/dev/null; then
-        chmod 700 "$tmp_bin"
-        printf '%s\n' "$tmp_bin"
-        return 0
+
+    signer="$(prebuilt_release_signer || true)"
+    if [[ -z "$signer" && "${CAELESTIA_ALLOW_UNSIGNED_PREBUILT:-0}" != "1" ]]; then
+        PREBUILT_DECLINED_REASON="no release-signing key is pinned"
+        return 1
     fi
-    rm -f -- "$tmp_bin"
-    return 1
+
+    tmp_dir="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-prebuilt-XXXXXX")" || return 1
+    tmp_bin="$tmp_dir/caelestia-install"
+
+    local -a curl_args=(-fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120)
+
+    if ! curl "${curl_args[@]}" "$PREBUILT_BASE_URL/caelestia-install-${arch}" -o "$tmp_bin" 2>/dev/null; then
+        PREBUILT_DECLINED_REASON="download failed"
+        rm -rf -- "$tmp_dir"
+        return 1
+    fi
+    if ! curl "${curl_args[@]}" "$PREBUILT_BASE_URL/SHA256SUMS" -o "$tmp_dir/SHA256SUMS" 2>/dev/null; then
+        PREBUILT_DECLINED_REASON="release publishes no SHA256SUMS"
+        rm -rf -- "$tmp_dir"
+        return 1
+    fi
+    curl "${curl_args[@]}" "$PREBUILT_BASE_URL/SHA256SUMS.asc" -o "$tmp_dir/SHA256SUMS.asc" 2>/dev/null || true
+
+    if [[ -n "$signer" ]]; then
+        if ! verify_prebuilt_signature "$tmp_dir/SHA256SUMS" "$tmp_dir/SHA256SUMS.asc" "$signer"; then
+            PREBUILT_DECLINED_REASON="SHA256SUMS is not signed by $signer"
+            rm -rf -- "$tmp_dir"
+            return 1
+        fi
+    fi
+
+    expected="$(awk -v f="caelestia-install-${arch}" '$2 == f || $2 == "*" f { print $1 }' \
+        "$tmp_dir/SHA256SUMS" | head -n1)"
+    if [[ ! "$expected" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        PREBUILT_DECLINED_REASON="no SHA256SUMS entry for caelestia-install-${arch}"
+        rm -rf -- "$tmp_dir"
+        return 1
+    fi
+
+    actual="$(sha256sum "$tmp_bin" | awk '{print $1}')"
+    if [[ "${actual,,}" != "${expected,,}" ]]; then
+        PREBUILT_DECLINED_REASON="checksum mismatch (expected $expected, got $actual)"
+        rm -rf -- "$tmp_dir"
+        return 1
+    fi
+
+    # Only now is it safe to make the file executable.
+    chmod 700 "$tmp_bin"
+    PREBUILT_BIN="$tmp_bin"
+    return 0
 }
 
 stop_spinner() {
@@ -393,12 +516,27 @@ stop_spinner() {
         wait "$SPINNER_PID" 2>/dev/null || true
         SPINNER_PID=""
     fi
+}
+
+# Discard the private build-log directory.
+#
+# This used to live inside stop_spinner(), which the build-failure handler calls
+# as its very first action -- so the log was deleted before the handler printed
+# it, and every failed build reported an empty log plus a path that no longer
+# existed. Cleanup is now separate and only runs on the success path and at
+# exit, after any diagnostics have been shown.
+discard_build_log() {
     if [[ -n "${BUILD_LOG_DIR:-}" ]]; then
         rm -rf -- "$BUILD_LOG_DIR"
         BUILD_LOG_DIR=""
     fi
 }
-trap stop_spinner EXIT
+
+stop_spinner_and_discard_log() {
+    stop_spinner
+    discard_build_log
+}
+trap stop_spinner_and_discard_log EXIT
 
 if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
     echo -n "Preparing Caelestia installer"
@@ -416,8 +554,9 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
     SPINNER_PID=$!
 
     PREBUILT_BIN=""
+    PREBUILT_DECLINED_REASON=""
     if [[ -z "${CAELESTIA_FORCE_BUILD_INSTALLER:-}" ]] && command -v curl >/dev/null 2>&1; then
-        PREBUILT_BIN="$(try_download_prebuilt_installer || true)"
+        try_download_prebuilt_installer || true
     fi
 
     # Check and install requirements. Build tools are unnecessary when the
@@ -483,8 +622,24 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         echo ""
         rm -f -- "$BIN"
         mv -- "$PREBUILT_BIN" "$BIN"
-        echo "[OK]    Using prebuilt installer binary (skipped compilation)."
+        rmdir "$(dirname "$PREBUILT_BIN")" 2>/dev/null || true
+        echo "[OK]    Using verified prebuilt installer binary (skipped compilation)."
     else
+        if [[ -n "${PREBUILT_DECLINED_REASON:-}" ]]; then
+            stop_spinner
+            echo ""
+            echo "[INFO]  Building the installer from source: ${PREBUILT_DECLINED_REASON}."
+            echo -n "Preparing Caelestia installer"
+            {
+                while true; do
+                    printf "."; sleep 0.5
+                    printf "."; sleep 0.5
+                    printf "."; sleep 0.5
+                    printf "\b\b\b   \b\b\b"
+                done
+            } &
+            SPINNER_PID=$!
+        fi
     BUILD_DIR="$BUNDLE_DIR/installer/build"
     BUILD_LOG_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-build-XXXXXX")" || {
         echo "[FATAL] Failed to create a private build-log directory." >&2
@@ -501,14 +656,28 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         stop_spinner
         echo ""
         echo "[FATAL] Failed to build the Caelestia installer." >&2
+
+        # Copy the log somewhere that survives the EXIT trap before printing it,
+        # so the path reported below is one the user can actually open.
+        _saved_log="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/installer-build.log"
+        mkdir -p "$(dirname "$_saved_log")"
+        if cp -- "$BUILD_LOG" "$_saved_log" 2>/dev/null; then
+            :
+        else
+            _saved_log="$BUILD_LOG"
+        fi
+
         echo "--- build log (last 60 lines) ---"
-        tail -n 60 "$BUILD_LOG" 2>/dev/null || cat "$BUILD_LOG" 2>/dev/null
+        if ! tail -n 60 -- "$BUILD_LOG"; then
+            echo "(the build log could not be read: $BUILD_LOG)"
+        fi
         echo "--- end build log ---"
-        echo "Full log saved to: $BUILD_LOG"
+        echo "Full log saved to: $_saved_log"
         exit 1
     }
 
     stop_spinner
+    discard_build_log
     echo ""
 
     rm -f "$BIN"
@@ -520,9 +689,10 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
 fi
 
 cleanup_install_state() {
-    # This trap replaces the spinner-only trap installed above, so it has to
-    # take over that responsibility too.
+    # This trap replaces the spinner/build-log trap installed above, so it has
+    # to take over those responsibilities too.
     stop_spinner
+    discard_build_log
     tput cnorm 2>/dev/null || true
 
     if [[ -n "${TMUX:-}" && "${CAELESTIA_TMUX_MASTER:-0}" == "1" ]]; then
@@ -650,12 +820,7 @@ fi
 _installer_elapsed=$(($(date +%s) - _installer_start))
 
 if [[ $_exit_code -eq 0 && -s "$PACKAGE_BEFORE" ]]; then
-    case "$BASE_DISTRO" in
-        arch) pacman -Qq 2>/dev/null | sort -u > "$PACKAGE_STATE_DIR/packages.after" || true ;;
-        fedora) dnf repoquery --installed --qf '%{name}' 2>/dev/null | sort -u > "$PACKAGE_STATE_DIR/packages.after" || true ;;
-        debian) dpkg-query -W -f='${binary:Package}\n' 2>/dev/null | sort -u > "$PACKAGE_STATE_DIR/packages.after" || true ;;
-        *) : > "$PACKAGE_STATE_DIR/packages.after" ;;
-    esac
+    caelestia_snapshot_packages "$PACKAGE_STATE_DIR/packages.after"
     comm -13 "$PACKAGE_BEFORE" "$PACKAGE_STATE_DIR/packages.after" > "$PACKAGE_MANIFEST" || true
 fi
 

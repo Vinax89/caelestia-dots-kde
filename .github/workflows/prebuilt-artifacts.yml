@@ -46,12 +46,77 @@ jobs:
       - name: Upload prebuilt installer
         env:
           GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          cp installer/build/caelestia-install "caelestia-install-${{ matrix.arch }}"
+          set -euo pipefail
+          cp installer/build/caelestia-install "caelestia-install-$ARCH"
           gh release create "$REPO_TAG" --latest=false --prerelease \
             --title "Prebuilt artifacts" \
             --notes "Prebuilt installer binaries and the binary package repo consumed by setup.sh and installDP.sh." >/dev/null 2>&1 || true
-          gh release upload "$REPO_TAG" "caelestia-install-${{ matrix.arch }}" --clobber
+          gh release upload "$REPO_TAG" "caelestia-install-$ARCH" --clobber
+
+  # ═══════════════════════════════════════════════════════════
+  # Publish SHA256SUMS for the installer binaries, signed when a release key is
+  # configured. setup.sh refuses a prebuilt binary that does not match a signed
+  # entry here and compiles from source instead -- an unsigned checksum file
+  # sitting in the same release as the binary it describes proves nothing,
+  # because anything able to replace one can replace the other.
+  # ═══════════════════════════════════════════════════════════
+  installer-checksums:
+    needs: installer-bin
+    runs-on: ubuntu-latest
+    env:
+      # `secrets` is not an available context in a step-level `if:`, but it is
+      # in job-level `env:`, so the presence check is resolved once here.
+      HAS_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY != '' }}
+    steps:
+      - name: Download published binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist && cd dist
+          for arch in x86_64 aarch64; do
+            gh release download "$REPO_TAG" --pattern "caelestia-install-$arch" --clobber
+          done
+          ls -l
+
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum caelestia-install-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Sign SHA256SUMS
+        if: ${{ env.HAS_SIGNING_KEY == 'true' }}
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_PASSPHRASE: ${{ secrets.RELEASE_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          printf '%s' "$RELEASE_SIGNING_KEY" | gpg --batch --import
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "${RELEASE_SIGNING_PASSPHRASE:-}" \
+            --detach-sign --armor --output dist/SHA256SUMS.asc dist/SHA256SUMS
+          rm -rf -- "$GNUPGHOME"
+
+      - name: Upload checksums to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd dist
+          assets=(SHA256SUMS)
+          [[ -f SHA256SUMS.asc ]] && assets+=(SHA256SUMS.asc)
+          gh release upload "$REPO_TAG" "${assets[@]}" --clobber
+          if [[ ! -f SHA256SUMS.asc ]]; then
+            echo "::warning::SHA256SUMS is unsigned (no RELEASE_SIGNING_KEY secret)." \
+                 "setup.sh will decline the prebuilt binary and compile from source."
+          fi
 
   # ═══════════════════════════════════════════════════════════
   # Binary pacman repo with the last source-built AUR packages (libcava,
