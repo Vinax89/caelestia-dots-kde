@@ -121,6 +121,25 @@ bool setup_sudo_environment() {
         return false;
     }
 
+    // Refresh the sudo timestamp for as long as this process lives.
+    //
+    // The wrapper above is `sudo -n`, which never prompts -- so once sudo's
+    // timestamp_timeout (15 minutes by default) elapses, every remaining step
+    // fails instantly and "Retry" cannot recover, because it re-runs against
+    // the same expired ticket. The install routinely runs far longer than
+    // that: a full system upgrade, AUR builds, and 08-build-shell.sh, which
+    // Runner::execute() budgets a whole hour for.
+    //
+    // The loop is bound to this process's lifetime with `kill -0`, so it stops
+    // on its own even if the installer dies without running its cleanup.
+    // cleanup_installer_runtime() also kills it directly, for promptness.
+    const string sudoKeepalivePid = g_installer_runtime_dir + "/sudo-keepalive.pid";
+    const string keepaliveCommand =
+        "( while kill -0 " + to_string(getpid()) + " 2>/dev/null; do "
+        "sleep 30; /usr/bin/sudo -nv >/dev/null 2>&1 || true; done ) "
+        ">/dev/null 2>&1 & echo $! > " + shell_quote(sudoKeepalivePid);
+    run_shell(keepaliveCommand);
+
     // Start background keep-awake for display (sleep inhibitor) in the private runtime dir.
     const string inhibitPid = g_installer_runtime_dir + "/inhibit.pid";
     const string inhibitCookie = g_installer_runtime_dir + "/inhibit.cookie";
@@ -233,7 +252,12 @@ while (!g_quit) {
     bool sudo_prompt() {
         int box_width = 54;
         int box_height = 7;
-        string pw = "";
+        string pw;
+        // Reserve before the first append. secure_wipe() can only zero the
+        // buffer it is handed, so every reallocation that `pw += ...` would
+        // otherwise trigger leaves an unwiped copy of a password prefix in
+        // freed heap. One allocation up front means there are none.
+        pw.reserve(512);
         string error_msg = "";
         int attempts = 0;
 
@@ -293,36 +317,47 @@ while (!g_quit) {
                 if (try_password(pw, attempts, error_msg))
                     return true;
             } else if (key == "backspace" || (key.length() == 1 && (key[0] == '\x7f' || key[0] == '\x08'))) { // Backspace
-                if (!pw.empty()) pw.pop_back();
+                if (!pw.empty()) {
+                    pw.back() = '\0';
+                    pw.pop_back();
+                }
                 error_msg.clear();
             } else if (key == "escape") {
                 return false;
             } else if (key.find("KEY_") == 0) {
                 // ignore internal named keys like KEY_up
-            } else {
-                // Handle normal printable chars (including pasted text with multiple chars and UTF-8)
-                bool all_printable = true;
+            } else if (!key.empty()) {
+                // A paste arrives as one chunk and may carry several characters
+                // plus a trailing newline. Sanitize the chunk rather than
+                // classifying it: the previous form accepted only an
+                // all-printable chunk or one containing a newline, so a paste
+                // carrying a tab or an escape byte and no newline matched
+                // neither branch and was silently discarded.
+                //
+                // Bytes >= 0x80 are kept so multi-byte UTF-8 survives intact.
+                bool submit = false;
+                string cleaned;
+                cleaned.reserve(key.size());
                 for (char c : key) {
-                    if ((unsigned char)c < 32 || c == 127) all_printable = false;
+                    const unsigned char u = static_cast<unsigned char>(c);
+                    if (c == '\n' || c == '\r') {
+                        submit = true;
+                    } else if (u >= 32 && u != 127) {
+                        cleaned += c;
+                    }
                 }
-                if (all_printable && !key.empty()) {
-                    pw += key;
-                    error_msg.clear();
-                } else if (key.find('\n') != string::npos || key.find('\r') != string::npos) {
-                    // Pasted text contained an enter/newline character
-                    string cleaned = "";
-                    for (char c : key) {
-                        if ((unsigned char)c >= 32 && c != 127) cleaned += c;
-                    }
+
+                if (!cleaned.empty()) {
                     pw += cleaned;
-                    // Trigger enter behavior
-                    if (!pw.empty()) {
-                        cout << Draw::sync_start();
-                        Draw::text(left + 2, top + 5, "Verifying...                             ", Draw::color("yellow"));
-                        cout << Draw::sync_end() << flush;
-                        if (try_password(pw, attempts, error_msg))
-                            return true;
-                    }
+                    error_msg.clear();
+                }
+
+                if (submit && !pw.empty()) {
+                    cout << Draw::sync_start();
+                    Draw::text(left + 2, top + 5, "Verifying...                             ", Draw::color("yellow"));
+                    cout << Draw::sync_end() << flush;
+                    if (try_password(pw, attempts, error_msg))
+                        return true;
                 }
             }
         }

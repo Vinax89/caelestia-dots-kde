@@ -201,6 +201,30 @@ string show_error_dialog(const string &step_name, const string &script_path,
   }
 }
 
+// Theme lookups have to tolerate a malformed theme.json. load_theme() catches
+// parse errors, but nlohmann throws json::type_error from get<T>() when a key
+// holds the wrong type -- and that throw would escape to std::terminate from
+// here, aborting with the terminal still in raw mode. Read through these
+// instead: wrong type means "use the default".
+static string theme_string(const json& obj, const char* key, const string& fallback) {
+  if (!obj.is_object() || !obj.contains(key))
+    return fallback;
+  const auto& value = obj[key];
+  return value.is_string() ? value.get<string>() : fallback;
+}
+
+static int theme_int(const json& obj, const char* key, int fallback, int lo, int hi) {
+  if (!obj.is_object() || !obj.contains(key))
+    return fallback;
+  const auto& value = obj[key];
+  if (!value.is_number_integer())
+    return fallback;
+  const long long raw = value.get<long long>();
+  if (raw < lo || raw > hi)
+    return fallback;
+  return static_cast<int>(raw);
+}
+
 void draw_progress_ui(int current_step) {
   if (g_resized) {
     apply_tmux_pane_cap();
@@ -222,33 +246,24 @@ void draw_progress_ui(int current_step) {
   int list_offset_y = 3;
   int list_offset_x = 2;
 
-  if (!g_theme.is_null() && g_theme.contains("layout")) {
+  if (!g_theme.is_null() && g_theme.contains("layout") && g_theme["layout"].is_object()) {
     auto &l = g_theme["layout"];
     if (l.contains("progress_box")) {
-      if (l["progress_box"].contains("title"))
-        box_title = l["progress_box"]["title"].get<string>();
-      if (l["progress_box"].contains("color"))
-        box_color = l["progress_box"]["color"].get<string>();
-      if (l["progress_box"].contains("title_color"))
-        box_title_color = l["progress_box"]["title_color"].get<string>();
-      if (l["progress_box"].contains("text_color"))
-        text_color = l["progress_box"]["text_color"].get<string>();
-      if (l["progress_box"].contains("padding_x"))
-        pad_x = l["progress_box"]["padding_x"].get<int>();
-      if (l["progress_box"].contains("padding_y"))
-        pad_y = l["progress_box"]["padding_y"].get<int>();
+      const auto &b = l["progress_box"];
+      box_title = theme_string(b, "title", box_title);
+      box_color = theme_string(b, "color", box_color);
+      box_title_color = theme_string(b, "title_color", box_title_color);
+      text_color = theme_string(b, "text_color", text_color);
+      pad_x = theme_int(b, "padding_x", pad_x, 0, 40);
+      pad_y = theme_int(b, "padding_y", pad_y, 0, 20);
     }
     if (l.contains("step_list")) {
-      if (l["step_list"].contains("title"))
-        list_title = l["step_list"]["title"].get<string>();
-      if (l["step_list"].contains("color"))
-        list_color = l["step_list"]["color"].get<string>();
-      if (l["step_list"].contains("title_color"))
-        list_title_color = l["step_list"]["title_color"].get<string>();
-      if (l["step_list"].contains("offset_y"))
-        list_offset_y = l["step_list"]["offset_y"].get<int>();
-      if (l["step_list"].contains("offset_x"))
-        list_offset_x = l["step_list"]["offset_x"].get<int>();
+      const auto &sl = l["step_list"];
+      list_title = theme_string(sl, "title", list_title);
+      list_color = theme_string(sl, "color", list_color);
+      list_title_color = theme_string(sl, "title_color", list_title_color);
+      list_offset_y = theme_int(sl, "offset_y", list_offset_y, 0, 40);
+      list_offset_x = theme_int(sl, "offset_x", list_offset_x, 0, 40);
     }
   }
 
@@ -258,14 +273,10 @@ void draw_progress_ui(int current_step) {
   string status_error = "[ERR]";
   if (!g_theme.is_null() && g_theme.contains("strings")) {
     auto &s = g_theme["strings"];
-    if (s.contains("status_ok"))
-      status_ok = s["status_ok"].get<string>();
-    if (s.contains("status_running"))
-      status_running = s["status_running"].get<string>();
-    if (s.contains("status_pending"))
-      status_pending = s["status_pending"].get<string>();
-    if (s.contains("status_error"))
-      status_error = s["status_error"].get<string>();
+    status_ok = theme_string(s, "status_ok", status_ok);
+    status_running = theme_string(s, "status_running", status_running);
+    status_pending = theme_string(s, "status_pending", status_pending);
+    status_error = theme_string(s, "status_error", status_error);
   }
 
   cout << Draw::sync_start() << Draw::clear();
@@ -486,17 +497,19 @@ bool execute() {
       constexpr auto STEP_BUDGET = chrono::seconds(3600);
       const auto step_deadline = chrono::steady_clock::now() + STEP_BUDGET;
       bool timed_out = false;
+      // The worker writes the status as a single line and closes the fd, but a
+      // nonblocking read may still deliver a partial payload. `payload` has to
+      // live across polling iterations: when a read returns EAGAIN mid-line,
+      // the bytes already collected are still needed. Declaring it inside the
+      // loop discarded them, so a status of "0" split across two polls parsed
+      // as an empty token and reported a step that had succeeded as FAILED.
+      string payload;
+      bool complete = false;
       while (status_fd >= 0) {
         if (g_resized)
           draw_progress_ui(i);
         if (status_fd >= 0) {
-          // The worker writes the status as a single line and closes the fd,
-          // but a nonblocking read may still deliver a partial payload --
-          // accumulate until a newline, EOF or an error, and validate the
-          // integer before trusting it.
           char buf[32];
-          string payload;
-          bool complete = false;
           while (payload.size() < sizeof(buf)) {
             int n = read(status_fd, buf, sizeof(buf) - 1);
             if (n > 0) {
@@ -519,6 +532,17 @@ bool execute() {
               }
               break;
             }
+          }
+          // A full buffer with no newline is not a status line the worker could
+          // have written. Since `payload` now persists between polls it would
+          // never shrink, so stop here instead of spinning to the deadline.
+          if (!complete && payload.size() >= sizeof(buf)) {
+            exit_code = 1;
+            if (status_fd >= 0) {
+              close(status_fd);
+              status_fd = -1;
+            }
+            break;
           }
           if (complete) {
             size_t nl = payload.find('\n');

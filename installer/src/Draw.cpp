@@ -49,6 +49,10 @@ namespace Draw {
     const string corner = "+";
 
     string to(int line, int col) {
+        // CUP is 1-based; a zero or negative coordinate is not a valid position
+        // and terminals interpret it inconsistently. Clamp rather than emit it.
+        if (line < 1) line = 1;
+        if (col < 1) col = 1;
         return esc + to_string(line) + ";" + to_string(col) + "H";
     }
 
@@ -75,7 +79,12 @@ namespace Draw {
         }
 
         if (!title.empty()) {
-            int pad = (w - title.length()) / 2;
+            // title.length() is size_t: without the cast this subtraction is
+            // evaluated as unsigned and wraps whenever the title is wider than
+            // the box, so `pad` came from a narrowed 64-bit value rather than
+            // the intended centring offset.
+            const int title_len = static_cast<int>(title.length());
+            const int pad = (w - title_len) / 2;
             if (pad > 0) {
                 out += to(y, x + pad) + bold + reset + c + "[" + reset + bold + tc + title + reset + c + "]" + reset;
             }
