@@ -27,7 +27,11 @@ jobs:
       - name: Load Version from Config
         run: |
           set -euo pipefail
-          source .github/version.env
+
+          # Parse, do not `source` -- version.env is data, and sourcing it would
+          # execute it inside a job holding a write-scoped app token.
+          VERSION="$(sed -n 's/^VERSION[[:space:]]*=[[:space:]]*//p' \
+            .github/version.env | tr -d '"'"'"' \t\r' | head -n1)"
 
           if [[ -z "${VERSION:-}" ]]; then
             echo "VERSION is missing in .github/version.env"
