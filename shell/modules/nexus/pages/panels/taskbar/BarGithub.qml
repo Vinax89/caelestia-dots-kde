@@ -21,7 +21,10 @@ PageBase {
         if (!token) {
             saveProc.command = ["secret-tool", "clear", "service", "caelestia-shell", "account", "github"];
         } else {
-            saveProc.command = ["bash", "-c", "secret-tool store --label=\"Caelestia GitHub Token\" service caelestia-shell account github <<< \"$1\"", "--", token];
+            // `<<< "$1"` writes the secret to a temp file on disk (that is how bash
+        // implements here-strings) and appends a trailing newline. Piping from
+        // printf does neither -- the same form AiSettingsPage.qml already uses.
+        saveProc.command = ["sh", "-c", "printf %s \"$1\" | secret-tool store --label=\"Caelestia GitHub Token\" service caelestia-shell account github", "--", token];
         }
         saveProc.running = true;
     }

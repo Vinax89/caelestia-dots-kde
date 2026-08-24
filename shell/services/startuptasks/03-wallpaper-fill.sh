@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 CONFIG_FILE="$HOME/.config/caelestia/shell.json"
 

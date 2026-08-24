@@ -289,17 +289,22 @@ PanelWindow {
         id: imageDetectionProcess
 
         command: ["bash", "-c", `${"~/.config/caelestia/scripts"}/images/find-regions-venv.sh `
-            + `--image '${StringUtils.shellSingleQuoteEscape(root.screenshotPath)}' `
+            + `--image '${Strings.shellSingleQuoteEscape(root.screenshotPath)}' `
             + `--max-width ${Math.round(root.screen.width * root.falsePositivePreventionRatio)} `
             + `--max-height ${Math.round(root.screen.height * root.falsePositivePreventionRatio)} `]
         stdout: StdioCollector {
             id: imageDimensionCollector
 
             onStreamFinished: {
-                imageRegions = RegionFunctions.filterImageRegions(
-                    JSON.parse(imageDimensionCollector.text),
-                    root.windowRegions
-                );
+                // find-regions-venv.sh emits nothing when the venv is missing or
+                // OpenCV fails, and a bare JSON.parse of that throws out of the
+                // signal handler.
+                const regions = Strings.parseJson(imageDimensionCollector.text, null);
+                if (!regions) {
+                    root.imageRegions = [];
+                    return;
+                }
+                root.imageRegions = RegionFunctions.filterImageRegions(regions, root.windowRegions);
             }
         }
     }

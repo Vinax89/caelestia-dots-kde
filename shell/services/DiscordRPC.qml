@@ -322,7 +322,9 @@ Item {
     function fetchSteamData(appId) {
         root.fetchingSteam = true;
         Requests.get("https://store.steampowered.com/api/appdetails?appids=" + appId, function(steamRes) {
-            let steamData = JSON.parse(steamRes);
+            // The three parses below this one are already wrapped; this one was
+            // not, so a Steam error page threw before any of them ran.
+            let steamData = Strings.parseJson(steamRes, null);
             let gameName = "Unknown Steam Game (" + appId + ")";
             if (steamData && steamData[appId] && steamData[appId].success) {
                 gameName = steamData[appId].data.name;

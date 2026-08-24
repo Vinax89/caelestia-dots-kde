@@ -34,6 +34,11 @@ Singleton {
         checkProc.running = true;
     }
 
+    function refresh(): void {
+        if (!checkProc.running)
+            checkProc.running = true;
+    }
+
     function launchSpectacle(): void {
         Quickshell.execDetached(["spectacle", "-R", "r"]);
     }
@@ -82,15 +87,36 @@ Singleton {
         }
     }
 
+    // caelestia-record writes the in-progress recording's path here, so a
+    // recording started or stopped outside the shell shows up as a change to
+    // this file. Reacting to it is what lets the poll below be slow.
+    FileView {
+        path: `${Paths.state}/record/current_recording_path`
+        watchChanges: true
+        printErrors: false
+
+        onFileChanged: root.refresh()
+        onLoadFailed: root.refresh()
+    }
+
+    // Backstop poll.
+    //
+    // This used to be a flat 500 ms, repeat, running: true -- an `sh -c` plus a
+    // `pidof` (plus a subshell and a `cat` on the hot path) twice a second for
+    // the entire life of the shell, roughly 170k process spawns a day, to answer
+    // a question whose answer is almost always "no".
+    //
+    // start()/stop()/togglePause() already poke checkProc directly, and the
+    // watcher above covers external changes, so this only has to catch what
+    // neither notices: a recorder that died without updating its state file
+    // (checked every 2 s while a recording is believed active) and a recording
+    // started before the watcher had a file to watch (every 10 s when idle).
     Timer {
-        interval: 500
+        interval: props.running ? 2000 : 10000
         repeat: true
         running: true
-        onTriggered: {
-            if (!checkProc.running) {
-                checkProc.running = true;
-            }
-        }
+        triggeredOnStart: true
+        onTriggered: root.refresh()
     }
 
     Connections {

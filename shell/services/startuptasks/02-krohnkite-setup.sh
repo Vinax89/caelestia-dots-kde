@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-IGNORE_CLASS=$(kreadconfig6 --file kwinrc --group Script-krohnkite --key ignoreClass 2>/dev/null)
+# kreadconfig6 exits non-zero when the key is absent, which is the normal
+# first-run case; the empty result is handled below.
+IGNORE_CLASS="$(kreadconfig6 --file kwinrc --group Script-krohnkite --key ignoreClass 2>/dev/null || true)"
 if [[ -z "$IGNORE_CLASS" ]]; then
     # Default list if missing, plus quickshell
     NEW_IGNORE="krunner,yakuake,spectacle,kded5,xwaylandvideobridge,plasmashell,ksplashqml,org.kde.plasmashell,org.kde.polkit-kde-authentication-agent-1,quickshell"

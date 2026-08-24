@@ -204,7 +204,10 @@ MouseArea {
         command: ["hyprctl", "cursorpos", "-j"]
         stdout: StdioCollector {
             onStreamFinished: {
-                const pos = JSON.parse(text);
+                // hyprctl prints nothing when it cannot reach a compositor.
+                const pos = Strings.parseJson(text, null);
+                if (!pos)
+                    return;
                 root.checkClientRects(pos.x - root.screen.x, pos.y - root.screen.y);
             }
         }
