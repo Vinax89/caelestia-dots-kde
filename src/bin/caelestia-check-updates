@@ -3,6 +3,12 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # This script is meant to be run periodically by a systemd timer.
 # It checks for updates and sends a notification using notify-send.
+#
+# shell-quality: allow-no-errexit -- this runs unattended from a timer and every
+# probe here is allowed to fail (no network, a missing optional tool, a repo that
+# has never been cloned). Exiting on the first failure would silence the update
+# notification entirely rather than degrade to checking fewer sources.
+set -uo pipefail
 
 # Pre-flight dependency check for silent failure
 if ! command -v git &> /dev/null; then
