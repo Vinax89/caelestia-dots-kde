@@ -322,6 +322,14 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
     current_branch="$(git -C "$BUNDLE_DIR" rev-parse --abbrev-ref HEAD)" || die "Failed to determine the installed branch"
     printf '%s\n' "$current_commit" > ~/.config/quickshell/caelestia/.current_commit || die "Failed to record the installed commit"
     printf '%s\n' "$current_branch" > ~/.config/quickshell/caelestia/.update_branch || die "Failed to record the installed branch"
+
+    # Persist the installed release metadata as well. This lets the update
+    # checker report a version even when the commit exists only locally.
+    if [ -f "$BUNDLE_DIR/.github/version.env" ]; then
+        cp "$BUNDLE_DIR/.github/version.env" ~/.config/quickshell/caelestia/.current_version || die "Failed to record the installed version"
+    else
+        git -C "$BUNDLE_DIR" show HEAD:.github/version.env > ~/.config/quickshell/caelestia/.current_version || die "Failed to record the installed version"
+    fi
 fi
 
 ok "Caelestia Shell and KDE Bridges built and installed successfully to user directory."

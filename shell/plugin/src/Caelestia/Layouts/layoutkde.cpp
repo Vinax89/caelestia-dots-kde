@@ -1,4 +1,6 @@
 #include "layoutkde.hpp"
+
+#include "layoututils.hpp"
 #include <deque>
 #include <algorithm>
 #include <cmath>
@@ -260,6 +262,8 @@ QVariantMap LayoutKde::calculateLayout(const QVariantList& windows, double areaW
         props["height"] = layouts[i].height();
         result[addresses[i]] = props;
     }
+
+    centreLayout(result, areaWidth, areaHeight);
 
     return result;
 }

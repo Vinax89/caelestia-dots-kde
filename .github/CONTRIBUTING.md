@@ -8,7 +8,7 @@ contributing.
 ```bash
 git clone https://github.com/Vinax89/caelestia-dots-kde ~/caelestia-dots-kde
 cd ~/caelestia-dots-kde
-bash setup.sh          # Full install - do this at least once
+bash scripts/setup.sh  # Full install - do this at least once
 ```
 
 Make your changes in the cloned repo, test them (see below), then open a PR.

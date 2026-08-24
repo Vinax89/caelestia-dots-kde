@@ -10,14 +10,20 @@ Scope {
     id: root
 
     property bool screenshotActive: false
+    property bool showWindowOutlines: false
+
+    property var action: RegionSelection.SnipAction.Copy
+    property var selectionMode: RegionSelection.SelectionMode.RectCorners
 
     function dismiss() {
         root.screenshotActive = false
     }
 
-    property var action: RegionSelection.SnipAction.Copy
+    Settings {
+        property alias showWindowOutlines: root.showWindowOutlines
 
-    property var selectionMode: RegionSelection.SelectionMode.RectCorners
+        category: "Screenshot"
+    }
 
     Variants {
         model: Quickshell.screens

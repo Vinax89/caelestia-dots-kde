@@ -112,8 +112,11 @@ Singleton {
             case ScreenshotAction.Action.CharRecognition:
                 return ["bash", "-c",
                     `set -euo pipefail; TMPF=$(mktemp "${Paths.runtimeTemp}/qs-snip-XXXXXX.png"); ` +
-                    `${cropBase} "$TMPF" && ` +
-                    `tesseract "$TMPF" stdout -l $(tesseract --list-langs | awk 'NR>1{print $1}' | tr '\\n' '+' | sed 's/\\+$/\\n/') | wl-copy; ` +
+                    `${cropBase} -colorspace gray -type grayscale -contrast-stretch 0 -resize 300% "$TMPF" && ` +
+                    `LANGS=$(tesseract --list-langs 2>/dev/null | awk 'NR>1 && $1!="osd" {print $1}' | tr '\\n' '+' | sed 's/\\+$//'); ` +
+                    `if [ -n "$LANGS" ]; then TEXT=$(tesseract "$TMPF" stdout -l "$LANGS" 2>/dev/null); else TEXT=$(tesseract "$TMPF" stdout 2>/dev/null); fi; ` +
+                    `printf "%s" "$TEXT" | wl-copy; ` +
+                    `notify-send "Text Recognized" "$TEXT" -a "Screenshot" || true; ` +
                     `rm -f "$TMPF"; ${cleanup}`
                 ]
 

@@ -1,0 +1,88 @@
+name: Test Dependencies
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Runs every Sunday at midnight
+  workflow_dispatch:
+
+env:
+  NONINTERACTIVE: "1"
+  CI: "1"
+  INSTALL_FISH: "false"
+  INSTALL_PAPIRUS: "false"
+  INSTALL_DARKLY: "false"
+
+jobs:
+  test-arch:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    strategy:
+      matrix:
+        branch: [main, dev]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+      - name: Prepare Arch
+        run: |
+          pacman -Syu --noconfirm base-devel git sudo
+          useradd -m builduser
+          echo "builduser ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builduser
+          # yay and makepkg refuse to run as root, so we install it as our builduser
+          su - builduser -c "git clone https://aur.archlinux.org/yay-bin.git /tmp/yay-bin && cd /tmp/yay-bin && makepkg -si --noconfirm"
+      - name: Verify Arch Dependencies
+        run: |
+          # Give builduser ownership of the workspace so it can run the script
+          chown -R builduser:builduser .
+          su - builduser -c "cd $GITHUB_WORKSPACE && ./sdata/arch-dist/installDP.sh || true"
+          
+          if [ -s /home/builduser/.cache/caelestia-kde/failed_packages.txt ]; then
+            FAILED=$(cat /home/builduser/.cache/caelestia-kde/failed_packages.txt | tr '\n' ' ')
+            echo "::error::[ARCH] Failed to install packages: $FAILED"
+            exit 1
+          fi
+
+  test-fedora:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    strategy:
+      matrix:
+        branch: [main, dev]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+      - name: Prepare Fedora
+        run: dnf install -y git sudo
+      - name: Verify Fedora Dependencies
+        run: |
+          ./sdata/fedora-dist/installDP_fedora.sh || true
+          if [ -s ~/.cache/caelestia-kde/failed_packages.txt ]; then
+            FAILED=$(cat ~/.cache/caelestia-kde/failed_packages.txt | tr '\n' ' ')
+            echo "::error::[FEDORA] Failed to install packages: $FAILED"
+            exit 1
+          fi
+
+  test-debian:
+    runs-on: ubuntu-latest
+    container: debian:latest
+    strategy:
+      matrix:
+        branch: [main, dev]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+      - name: Prepare Debian
+        run: apt-get update && apt-get install -y git sudo curl
+      - name: Verify Debian Dependencies
+        run: |
+          ./sdata/debian-dist/installDP_debian.sh || true
+          if [ -s ~/.cache/caelestia-kde/failed_packages.txt ]; then
+            FAILED=$(cat ~/.cache/caelestia-kde/failed_packages.txt | tr '\n' ' ')
+            echo "::error::[DEBIAN] Failed to install packages: $FAILED"
+            exit 1
+          fi

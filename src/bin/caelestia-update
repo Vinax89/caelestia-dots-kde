@@ -259,7 +259,9 @@ if [[ ! -d "$UPD_DIR/repo/.git" ]]; then
     git remote add origin "$CAELESTIA_REPO_URL"
 else
     cd "$UPD_DIR/repo" || die "Could not enter $UPD_DIR/repo"
-    git reset --hard -q HEAD || die "Failed to reset repository state"
+    if git rev-parse HEAD >/dev/null 2>&1; then
+        git reset --hard -q HEAD || die "Failed to reset repository state"
+    fi
     git clean -fdx -q
     git remote set-url origin "$CAELESTIA_REPO_URL"
 fi

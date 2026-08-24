@@ -79,6 +79,12 @@ bool tmux_has_worker_pane() {
   return WIFEXITED(rc) && WEXITSTATUS(rc) == 0;
 }
 
+void apply_tmux_pane_cap() {
+  if (!use_tmux_worker())
+    return;
+  run_shell("tmux resize-pane -t caelestia_install:0.0 -x 46 2>/dev/null || true");
+}
+
 bool ensure_tmux_worker_pane() {
   if (tmux_has_worker_pane()) {
     return true;
@@ -92,6 +98,8 @@ bool ensure_tmux_worker_pane() {
         "bash -c \\\"\\$cmd\\\"; echo \\$? > "
       + shell_single_quote(ipc_path("status")) + "; done'\"";
   run_shell(workerCommand);
+  // Keep the progress pane compact and let the log pane absorb extra width.
+  apply_tmux_pane_cap();
   run_shell("tmux select-pane -t caelestia_install:0.0");
   this_thread::sleep_for(
       chrono::milliseconds(50)); // tiny wait for terminal resize propagation
@@ -195,6 +203,8 @@ string show_error_dialog(const string &step_name, const string &script_path,
 
 void draw_progress_ui(int current_step) {
   if (g_resized) {
+    apply_tmux_pane_cap();
+    this_thread::sleep_for(chrono::milliseconds(50));
     Term::get_size();
     g_resized = false;
   }

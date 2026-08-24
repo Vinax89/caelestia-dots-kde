@@ -367,6 +367,26 @@ fi
 
 BIN="$BUNDLE_DIR/caelestia-install"
 
+# Prefer the release-built installer when available, but retain the local
+# compilation path as an offline and verification-friendly fallback.
+try_download_prebuilt_installer() {
+    local arch tmp_bin url
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64|aarch64) ;;
+        *) return 1 ;;
+    esac
+    tmp_bin="$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/caelestia-install-bin-XXXXXX")" || return 1
+    url="https://github.com/Vinax89/caelestia-dots-kde/releases/download/caelestia-bin-repo/caelestia-install-${arch}"
+    if curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 "$url" -o "$tmp_bin" 2>/dev/null; then
+        chmod 700 "$tmp_bin"
+        printf '%s\n' "$tmp_bin"
+        return 0
+    fi
+    rm -f -- "$tmp_bin"
+    return 1
+}
+
 stop_spinner() {
     if [[ -n "${SPINNER_PID:-}" ]]; then
         kill "$SPINNER_PID" 2>/dev/null || true
@@ -381,7 +401,7 @@ stop_spinner() {
 trap stop_spinner EXIT
 
 if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
-    echo -n "Compiling Caelestia installer"
+    echo -n "Preparing Caelestia installer"
     {
         while true; do
             printf "."
@@ -395,15 +415,21 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
     } &
     SPINNER_PID=$!
 
-    # Check and install requirements
+    PREBUILT_BIN=""
+    if [[ -z "${CAELESTIA_FORCE_BUILD_INSTALLER:-}" ]] && command -v curl >/dev/null 2>&1; then
+        PREBUILT_BIN="$(try_download_prebuilt_installer || true)"
+    fi
+
+    # Check and install requirements. Build tools are unnecessary when the
+    # release binary was fetched successfully; tmux is still used by the UI.
     MISSING_PKGS=()
-    if ! command -v g++ >/dev/null 2>&1; then
+    if [[ -z "$PREBUILT_BIN" ]] && ! command -v g++ >/dev/null 2>&1; then
         MISSING_PKGS+=("g++")
     fi
-    if ! command -v cmake >/dev/null 2>&1; then
+    if [[ -z "$PREBUILT_BIN" ]] && ! command -v cmake >/dev/null 2>&1; then
         MISSING_PKGS+=("cmake")
     fi
-    if ! command -v make >/dev/null 2>&1; then
+    if [[ -z "$PREBUILT_BIN" ]] && ! command -v make >/dev/null 2>&1; then
         MISSING_PKGS+=("make")
     fi
     # tmux is used for the split-pane installer view unless explicitly disabled
@@ -437,7 +463,7 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
             echo "Could not auto-install build tools. Please install manually: ${MISSING_PKGS[*]}"
             exit 1
         fi
-        echo -n "Compiling Caelestia installer"
+        echo -n "Preparing Caelestia installer"
         {
             while true; do
                 printf "."
@@ -452,6 +478,13 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         SPINNER_PID=$!
     fi
 
+    if [[ -n "$PREBUILT_BIN" ]]; then
+        stop_spinner
+        echo ""
+        rm -f -- "$BIN"
+        mv -- "$PREBUILT_BIN" "$BIN"
+        echo "[OK]    Using prebuilt installer binary (skipped compilation)."
+    else
     BUILD_DIR="$BUNDLE_DIR/installer/build"
     BUILD_LOG_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/caelestia-build-XXXXXX")" || {
         echo "[FATAL] Failed to create a private build-log directory." >&2
@@ -483,6 +516,7 @@ if [[ "${CAELESTIA_TMUX_MASTER:-0}" == "0" ]]; then
         echo "[FATAL] Failed to copy the compiled Caelestia installer to $BIN." >&2
         exit 1
     }
+    fi
 fi
 
 cleanup_install_state() {
