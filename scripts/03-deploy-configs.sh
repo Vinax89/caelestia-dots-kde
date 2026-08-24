@@ -123,21 +123,34 @@ deploy_config_dir() {
     return 1
 }
 
+# Fingerprint a deployed config so a locally modified one is never overwritten.
+#
+# Symlinks are hashed by their target, not skipped. `find . -type f` alone
+# ignored them, so a config the user had replaced with a symlink hashed the same
+# as one that was not there at all -- and the "preserving locally modified
+# config" guard would wave the overwrite through.
+#
+# The per-file loop also forked one sha256sum per file; xargs batches them.
 config_checksum() {
     local path="$1"
 
-    if [[ ! -e "$path" ]]; then
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
         printf 'missing\n'
         return
     fi
 
-    if [[ -d "$path" ]]; then
+    if [[ -d "$path" && ! -L "$path" ]]; then
         (
-            cd "$path"
-            find . -type f -print0 | sort -z | while IFS= read -r -d '' file; do
-                sha256sum "$file"
+            cd "$path" || exit 1
+            # Two passes, each independently sorted and always in this order, so
+            # the concatenation is deterministic.
+            find . -type f -print0 | sort -z | xargs -0 -r sha256sum
+            find . -type l -print0 | sort -z | while IFS= read -r -d '' link; do
+                printf 'symlink %s -> %s\n' "$link" "$(readlink -- "$link")"
             done
         ) | sha256sum | awk '{print $1}'
+    elif [[ -L "$path" ]]; then
+        printf 'symlink -> %s' "$(readlink -- "$path")" | sha256sum | awk '{print $1}'
     else
         sha256sum "$path" | awk '{print $1}'
     fi

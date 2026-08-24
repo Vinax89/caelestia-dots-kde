@@ -1,31 +1,51 @@
 #!/usr/bin/env bash
-export PATH="$HOME/.local/bin:$PATH"
 # ==============================================================
 #   Caelestia KDE Port - Unified Updater
 # ==============================================================
 
 set -uo pipefail
+# shell-quality: allow-no-errexit -- every fallible step here is explicitly
+# routed through `|| die` (must stop) or `|| warn` (may continue), so errexit
+# would silently reclassify the `warn` cases as fatal and abandon a partially
+# applied update.
+
+# Read the whole script before running any of it.
+#
+# This script replaces its own file: `git checkout` below rewrites update.sh in
+# place, and bash reads a script incrementally from a file offset, so a
+# length-changing update can make the remainder execute from the *new* bytes.
+# Wrapping the body in a compound command forces bash to parse the entire file
+# up front, which is the same guard install.sh uses. The closing brace is at the
+# end of the file.
+{
+
+# NOTE: ~/.local/bin is deliberately NOT prepended to PATH here. Update
+# verification resolves git, gpg and curl through PATH, and a user-writable
+# directory ahead of the system ones would let a dropped shim answer for them.
+# The export happens after verification, below.
 
 die()  { echo "[FATAL] $*" >&2; exit 1; }
 info() { echo "[INFO]  $*"; }
 ok()   { echo "[OK]    $*"; }
 warn() { echo "[WARN]  $*"; }
 
-verify_update_commit() {
-    local trusted_fingerprint="968479A1AFF927E37D1A566BB5690EEEBB952194"
-    local verify_home fingerprints status valid_fingerprint
-    verify_home="$(mktemp -d "${TMPDIR:-/tmp}/caelestia-verify.XXXXXX")" || die "Could not create verification directory"
-    chmod 700 "$verify_home"
-    trap 'rm -rf -- "${verify_home:-}"' EXIT
-    curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg -o "$verify_home/trusted.asc" || die "Could not download trusted public key"
-    fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons --import-options show-only --import "$verify_home/trusted.asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10 }')"
-    grep -Fxq "$trusted_fingerprint" <<< "$fingerprints" || die "Trusted signer fingerprint mismatch"
-    gpg --homedir "$verify_home" --batch --import "$verify_home/trusted.asc" >/dev/null 2>&1 || die "Could not import trusted public key"
-    status="$(GNUPGHOME="$verify_home" git -C "$BUNDLE_DIR" -c gpg.program=gpg verify-commit --raw HEAD 2>&1 || true)"
-    valid_fingerprint="$(printf '%s\n' "$status" | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
-    rm -rf -- "$verify_home"
-    trap - EXIT
-    [[ "$valid_fingerprint" == "$trusted_fingerprint" ]] || die "Update commit is not trusted"
+# Verify a ref against the repository's pinned release signer.
+#
+# This delegates to scripts/verify-update-source.sh rather than reimplementing
+# the check. That script supports a pinned maintainer release-signing key and
+# falls back to GitHub's web-flow key; the copy that used to live here only ever
+# accepted web-flow, which attests that a commit was made through github.com but
+# identifies no signer at all -- so the weaker of two implementations was the one
+# actually gating updates.
+#
+# The anchor is read from the *current* (already-trusted) checkout, before the
+# new commit is checked out over it.
+verify_update_ref() {
+    local ref="$1"
+    local verifier="$BUNDLE_DIR/scripts/verify-update-source.sh"
+
+    [[ -r "$verifier" ]] || die "Missing update verifier: $verifier"
+    bash "$verifier" "$BUNDLE_DIR" "$ref" || die "Update ref $ref is not trusted"
 }
 
 section() {
@@ -94,8 +114,18 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
     # checked out, and asking the user to pick a branch first was dead UI.
     if [[ -n "$EXPECTED_COMMIT" ]]; then
         [[ "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || die "CAELESTIA_UPDATE_COMMIT must be a full 40-character commit hash"
-        info "Checking out reviewed commit $EXPECTED_COMMIT..."
+        info "Fetching reviewed commit $EXPECTED_COMMIT..."
         git -C "$BUNDLE_DIR" fetch --depth=1 origin "$EXPECTED_COMMIT" || die "Failed to fetch requested update commit"
+
+        # Verify the fetched object before it becomes the working tree. Checking
+        # out first put unverified files on disk and left the verification as an
+        # after-the-fact audit rather than a gate.
+        if [[ "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
+            info "Verifying signature on $EXPECTED_COMMIT..."
+            verify_update_ref "$EXPECTED_COMMIT"
+        fi
+
+        info "Checking out reviewed commit $EXPECTED_COMMIT..."
         git -C "$BUNDLE_DIR" checkout --detach "$EXPECTED_COMMIT" || die "Failed to checkout requested update commit"
     else
         if [ -n "${1:-}" ]; then
@@ -138,8 +168,11 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
         git -C "$BUNDLE_DIR" pull --ff-only origin "$BRANCH" || die "Refusing non-fast-forward update for origin/$BRANCH"
     fi
 
-    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
-        verify_update_commit
+    # The pinned-commit path above already verified before checking out. The
+    # mutable-branch path can only verify after the fact, which is one of the
+    # reasons it requires CAELESTIA_ALLOW_UNVERIFIED_UPDATE to be reachable.
+    if [[ -z "$EXPECTED_COMMIT" && "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
+        verify_update_ref HEAD
     fi
 
     if [[ -f "$BUNDLE_DIR/.gitmodules" ]]; then
@@ -157,6 +190,9 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
 else
     warn "Not a git repository. Skipping source code update."
 fi
+
+# Safe now that the tree has been verified: the shell's own helpers live here.
+export PATH="$HOME/.local/bin:$PATH"
 
 section "Step 2 - Core Updates"
 
@@ -203,24 +239,6 @@ if [ "$EUID" -ne 0 ]; then
     SUDO_KEEPER_PID=$!
     trap 'kill "$SUDO_KEEPER_PID" 2>/dev/null || true' EXIT
 fi
-
-# Determine the best escalation helper for GUI environments.
-# Tries cached credentials first (-n) before falling back to prompting.
-run_elevated() {
-    if [ "$EUID" -eq 0 ]; then
-        "$@"
-    elif sudo -n true 2>/dev/null; then
-        sudo -n "$@"
-    elif [ -t 1 ]; then
-        sudo "$@"
-    elif [ -n "${SUDO_ASKPASS:-}" ]; then
-        sudo -A "$@"
-    elif command -v pkexec &> /dev/null; then
-        pkexec "$@"
-    else
-        die "Cannot elevate privileges. Please install ksshaskpass, pkexec, or run from a terminal."
-    fi
-}
 
 # Apply config updates and rebuild the shell UI.  The native C++ plugin
 # backend talks directly to KWin/Wayland — no Python daemon or mock
@@ -304,3 +322,5 @@ fi
 echo "Shell restarted successfully!"
 echo
 echo "If the shell doesn't start, please restart it manually by running: $CAELESTIA_BIN shell -d"
+
+}

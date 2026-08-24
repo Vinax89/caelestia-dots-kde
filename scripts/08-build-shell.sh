@@ -155,16 +155,66 @@ cmake --install build || {
 }
 
 info "Building and installing workspace-tracker KWin Effect..."
-rm -rf kwin-effects/workspace-tracker/build
-cmake -B kwin-effects/workspace-tracker/build -S kwin-effects/workspace-tracker -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr > /dev/null || {
-    warn "Workspace tracker configuration failed."
-}
-cmake --build kwin-effects/workspace-tracker/build -j"$(nproc)" > /dev/null || {
-    warn "Workspace tracker build failed."
-}
-sudo cmake --install kwin-effects/workspace-tracker/build > /dev/null || {
-    warn "Workspace tracker system installation failed."
-}
+
+# KWin loads binary effects through Qt's plugin loader, which searches
+# QT_PLUGIN_PATH and Qt's own install prefix -- there is no user-level
+# directory it will look in. So this does have to land in a system path, but
+# the prefix is asked of Qt rather than hardcoded to /usr: on lib64 distros and
+# on installs where Qt lives under /usr/local, a hardcoded /usr silently puts
+# the plugin somewhere KWin never looks.
+KWIN_EFFECT_BUILD="kwin-effects/workspace-tracker/build"
+KWIN_EFFECT_PREFIX="/usr"
+if command -v qtpaths6 >/dev/null 2>&1; then
+    _qt_plugins="$(qtpaths6 --query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+elif command -v qmake6 >/dev/null 2>&1; then
+    _qt_plugins="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+else
+    _qt_plugins=""
+fi
+# .../lib/qt6/plugins -> .../  (strip the three trailing components)
+if [[ "$_qt_plugins" == /*/lib*/qt6/plugins ]]; then
+    KWIN_EFFECT_PREFIX="${_qt_plugins%/lib*/qt6/plugins}"
+fi
+info "Workspace tracker install prefix: $KWIN_EFFECT_PREFIX"
+
+# Record what gets installed so the uninstaller removes exactly these files
+# rather than guessing at a hardcoded list of candidate paths.
+KWIN_EFFECT_MANIFEST="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/kwin-effect-files.txt"
+mkdir -p "$(dirname "$KWIN_EFFECT_MANIFEST")"
+
+rm -rf "$KWIN_EFFECT_BUILD"
+_effect_log="$(mktemp "${TMPDIR:-/tmp}/caelestia-kwin-effect-XXXXXX.log")"
+_effect_ok=1
+
+# Build output is captured rather than sent to /dev/null: a warning with no
+# detail behind it gives the user nothing to act on.
+if ! cmake -B "$KWIN_EFFECT_BUILD" -S kwin-effects/workspace-tracker \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$KWIN_EFFECT_PREFIX" \
+        >"$_effect_log" 2>&1; then
+    warn "Workspace tracker configuration failed:"
+    tail -n 20 "$_effect_log" >&2
+    _effect_ok=0
+fi
+if (( _effect_ok )) && ! cmake --build "$KWIN_EFFECT_BUILD" -j"$(nproc)" >>"$_effect_log" 2>&1; then
+    warn "Workspace tracker build failed:"
+    tail -n 20 "$_effect_log" >&2
+    _effect_ok=0
+fi
+if (( _effect_ok )); then
+    # The redirect must run as the invoking user (the log is a user-owned
+    # mktemp file), so the output is piped into tee rather than redirected
+    # from inside sudo. `set -o pipefail` keeps cmake's status authoritative.
+    if sudo cmake --install "$KWIN_EFFECT_BUILD" 2>&1 | tee -a "$_effect_log" >/dev/null; then
+        # `cmake --install` prints "-- Installing: <path>" for each file.
+        sed -n 's/^-- \(Installing\|Up-to-date\): //p' "$_effect_log" \
+            | sort -u > "$KWIN_EFFECT_MANIFEST" || true
+    else
+        warn "Workspace tracker system installation failed:"
+        tail -n 20 "$_effect_log" >&2
+        _effect_ok=0
+    fi
+fi
+rm -f -- "$_effect_log"
 
 if command -v kwriteconfig6 >/dev/null 2>&1; then
     kwriteconfig6 --file kwinrc --group Plugins --key kwin_workspace_trackerEnabled true
