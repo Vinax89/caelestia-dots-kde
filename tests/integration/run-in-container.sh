@@ -139,7 +139,10 @@ case "$TEST_DISTRO" in
 esac
 if [[ $was_present -eq 0 ]]; then
     "${remove[@]}" "$rollback_pkg"
-    ! "${query[@]}" "$rollback_pkg" >/dev/null 2>&1
+    if "${query[@]}" "$rollback_pkg" >/dev/null 2>&1; then
+        echo "Rollback left $rollback_pkg installed" >&2
+        exit 1
+    fi
 fi
 
 echo "[ok] $TEST_DISTRO installer integration scenarios passed"
