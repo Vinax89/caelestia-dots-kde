@@ -15,11 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      HAS_APP_CREDENTIALS: ${{ vars.APP_CLIENT_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
 
     outputs:
       release-created: ${{ steps.release-needed.outputs.needed }}
     steps:
+      # An App token is optional for a personal fork; the built-in token can
+      # publish releases and run the dependent artifact jobs in this workflow.
       - name: Create GitHub App Token
+        if: env.HAS_APP_CREDENTIALS == 'true'
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
@@ -31,7 +38,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
           persist-credentials: true
           fetch-depth: 0
           fetch-tags: true
@@ -76,7 +83,7 @@ jobs:
       - name: Check whether a release is needed
         id: release-needed
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
           if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -100,7 +107,7 @@ jobs:
       - name: Create or Update Release
         if: steps.release-needed.outputs.needed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
 
@@ -168,7 +175,7 @@ jobs:
       - name: Open Sync PR to dev
         if: steps.release-needed.outputs.needed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
 
