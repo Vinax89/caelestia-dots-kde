@@ -7,7 +7,6 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import Caelestia.Blobs
 import Caelestia.Config
-import Caelestia.Services
 import qs.components
 import qs.components.containers
 import qs.services
@@ -19,16 +18,21 @@ Variants {
         id: win
 
         required property ShellScreen modelData
-        readonly property var drawerVisibilities: Visibilities.screens.get(Hypr.monitorFor(modelData)) ?? Visibilities.screens.get(modelData.name)
+        readonly property var drawerVisibilities: Visibilities.screens.get(Kwin.monitorFor(modelData)) ?? Visibilities.screens.get(modelData.name)
         readonly property bool isOverviewOpen: drawerVisibilities ? drawerVisibilities.overview : false
+        readonly property bool wallpaperUp: wallpaper.item?.shown ?? false
+        property bool wallpaperHasBeenUp: false
+
+        onWallpaperUpChanged: {
+            if (wallpaperUp)
+                wallpaperHasBeenUp = true;
+        }
 
         screen: modelData
         name: "background"
         isDesktopWidget: true
-        color: Config.background.wallpaperEnabled ? "black" : "transparent"
+        color: (Config.background.wallpaperEnabled && wallpaperHasBeenUp) ? "black" : "transparent"
         surfaceFormat.opaque: false
-        // If Quickshell wallpaper is disabled, use empty mask so KDE desktop gets clicks
-        // If enabled, use null mask so Quickshell captures clicks
         mask: Config.background.wallpaperEnabled ? null : emptyRegion
         anchors.top: true
         anchors.bottom: true
@@ -44,11 +48,13 @@ Variants {
         TapHandler {
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onTapped: (eventPoint, button) => {
-                if (button === Qt.RightButton && Config.background.wallpaperEnabled) {
+                if (desktopIcons.renameActive)
+                    desktopIcons.renamingDelegate?.cancelRename();
+                if (button === Qt.RightButton && Config.background.wallpaperEnabled && !desktopIcons.iconAt(eventPoint.position.x, eventPoint.position.y)) {
                     ContextMenuStore.openDesktopContextMenu(eventPoint.position.x, eventPoint.position.y, win.modelData.name);
                 } else if (button === Qt.LeftButton) {
-                    if (typeof KWinActiveWindowBridge !== "undefined") {
-                        KWinActiveWindowBridge.setActiveOutputName(win.screen.name);
+                    if (true) {
+                        Kwin.setActiveOutputName(win.screen.name);
                     }
                 }
             }
@@ -77,6 +83,8 @@ Variants {
             }
         }
         DesktopIcons {
+            id: desktopIcons
+
             screenData: win.modelData
             z: 3
         }
@@ -147,6 +155,15 @@ Variants {
                         target: clockLoader
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
+                    }
+                },
+                State {
+                    name: "center"
+
+                    AnchorChanges {
+                        target: clockLoader
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
                     }
                 },
                 State {
@@ -267,6 +284,15 @@ Variants {
                     }
                 },
                 State {
+                    name: "center"
+
+                    AnchorChanges {
+                        target: lyricsLoader
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                },
+                State {
                     name: "middle-center"
 
                     AnchorChanges {
@@ -313,7 +339,134 @@ Variants {
                 }
             ]
         }
+        Loader {
+            id: shapesLoader
+
+            readonly property int shapesBarZone: Visibilities.bars.get(win.modelData.name)?.visualThickness ?? (Tokens.sizes.bar.innerWidth + Math.max(Tokens.padding.small, Config.border.thickness))
+            readonly property int shapesBaseMargin: Tokens.padding.large * 2
+
+            asynchronous: true
+            active: Config.background.desktopShapes.enabled && !(GameMode.enabled && GlobalConfig.utilities.gameMode.disableDesktopLyrics)
+            anchors.margins: shapesBaseMargin
+            anchors.leftMargin: Config.bar.position === "left" ? shapesBaseMargin + shapesBarZone : shapesBaseMargin
+            anchors.rightMargin: Config.bar.position === "right" ? shapesBaseMargin + shapesBarZone : shapesBaseMargin
+            anchors.topMargin: Config.bar.position === "top" ? shapesBaseMargin + shapesBarZone : shapesBaseMargin
+            anchors.bottomMargin: Config.bar.position === "bottom" ? shapesBaseMargin + shapesBarZone : shapesBaseMargin
+            anchors.horizontalCenterOffset: {
+                if (Config.bar.position === "left") return shapesBarZone / 2;
+                if (Config.bar.position === "right") return -shapesBarZone / 2;
+                return 0;
+            }
+            anchors.verticalCenterOffset: {
+                if (Config.bar.position === "top") return shapesBarZone / 2;
+                if (Config.bar.position === "bottom") return -shapesBarZone / 2;
+                return 0;
+            }
+            sourceComponent: DesktopShapes {
+                screen: modelData
+                wallpaper: behindClock
+                absX: shapesLoader.x
+                absY: shapesLoader.y
+            }
+            transitions: Transition {
+                AnchorAnim {}
+            }
+            state: Config.background.desktopShapes.position
+            states: [
+                State {
+                    name: "top-left"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                    }
+                },
+                State {
+                    name: "top-center"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.top: parent.top
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                },
+                State {
+                    name: "top-right"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                    }
+                },
+                State {
+                    name: "middle-left"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                    }
+                },
+                State {
+                    name: "center"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                },
+                State {
+                    name: "middle-center"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                },
+                State {
+                    name: "middle-right"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.right: parent.right
+                    }
+                },
+                State {
+                    name: "bottom-left"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                    }
+                },
+                State {
+                    name: "bottom-center"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.bottom: parent.bottom
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                },
+                State {
+                    name: "bottom-right"
+
+                    AnchorChanges {
+                        target: shapesLoader
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                    }
+                }
+            ]
+        }
         WlrLayershell.exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Bottom
+        WlrLayershell.keyboardFocus: desktopIcons.renameActive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     }
 }

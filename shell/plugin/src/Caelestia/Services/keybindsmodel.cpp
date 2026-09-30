@@ -1,7 +1,4 @@
 #include "keybindsmodel.hpp"
-#include "../Config/config.hpp"
-#include "../Config/generalconfig.hpp"
-#include "../Config/keybindsdefaults.hpp"
 
 #include <KGlobalAccel>
 #include <KGlobalShortcutInfo>
@@ -14,6 +11,10 @@
 #include <QJsonObject>
 #include <QLoggingCategory>
 
+#include "../Config/generalconfig.hpp"
+#include "../Config/keybindsdefaults.hpp"
+#include "../Config/rootnodes.hpp"
+
 Q_LOGGING_CATEGORY(lcKeybinds, "caelestia.services.keybindsmodel", QtInfoMsg)
 
 namespace caelestia::services {
@@ -21,20 +22,17 @@ namespace caelestia::services {
 KeybindsModel::KeybindsModel(QObject* parent)
     : QAbstractListModel(parent) {
 
-    // Load keybinds JSON or populate defaults
     QString path = keybindsPath();
     QFile file(path);
     bool shouldSave = false;
 
-    // Start with defaults
     QJsonObject defaults = caelestia::config::defaultKeybinds();
-    bool krohnkiteEnabled = caelestia::config::GlobalConfig::instance()->general()->krohnkiteEnabled();
+    bool krohnkiteEnabled = caelestia::config::ConfigSingleton::instance()->general()->krohnkiteEnabled();
 
     for (auto it = defaults.begin(); it != defaults.end(); ++it) {
-        if (it.key().startsWith("krohnkite") && !krohnkiteEnabled) {
+        if (it.key().startsWith(QStringLiteral("krohnkite")) && !krohnkiteEnabled) {
             continue;
         }
-        // Don't inject empty defaults into m_keybinds to allow QML to set the initial key
         if (!it.value().toString().isEmpty()) {
             m_keybinds.insert(it.key(), it.value().toString());
         }
@@ -44,9 +42,8 @@ KeybindsModel::KeybindsModel(QObject* parent)
         QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
         if (doc.isObject()) {
             QJsonObject obj = doc.object();
-            // Merge user JSON over defaults
             for (auto it = obj.begin(); it != obj.end(); ++it) {
-                if (it.key().startsWith("krohnkite") && !krohnkiteEnabled) {
+                if (it.key().startsWith(QStringLiteral("krohnkite")) && !krohnkiteEnabled) {
                     continue;
                 }
                 if (it.value().isString()) {
@@ -55,14 +52,13 @@ KeybindsModel::KeybindsModel(QObject* parent)
             }
         }
     } else {
-        shouldSave = true; // file didn't exist, save the generated defaults
+        shouldSave = true;
     }
 
     connect(GlobalShortcutDispatcher::instance(), &GlobalShortcutDispatcher::shortcutRegistered, this,
         &KeybindsModel::onShortcutRegistered);
     connect(GlobalShortcutDispatcher::instance(), &GlobalShortcutDispatcher::shortcutUnregistered, this,
         &KeybindsModel::onShortcutUnregistered);
-    // Re-evaluate blinker state whenever the collision index is rebuilt
     connect(GlobalShortcutDispatcher::instance(), &GlobalShortcutDispatcher::collisionIndexChanged, this,
         &KeybindsModel::keybindsChanged);
 
@@ -89,15 +85,15 @@ KeybindsModel::KeybindsModel(QObject* parent)
 }
 
 QVariantList KeybindsModel::keybinds() const {
-    return QVariantList(); // Dummy list to satisfy QML length check
+    return query(QString());
 }
 
 bool KeybindsModel::initialized() const {
-    return true; // We are initialized synchronously
+    return true;
 }
 
 void KeybindsModel::load() {
-    emit loaded(); // Signal that we are loaded so QML can proceed
+    emit loaded();
 }
 
 int KeybindsModel::rowCount(const QModelIndex& parent) const {
@@ -153,8 +149,19 @@ void KeybindsModel::resetKey(const QString& name) {
     if (defaults.contains(name)) {
         setKey(name, defaults.value(name).toString());
     } else {
-        setKey(name, "");
+        setKey(name, QStringLiteral(""));
     }
+}
+
+QString KeybindsModel::getKey(const QString& name) const {
+    if (auto* sc = GlobalShortcut::findByName(name)) {
+        return sc->key();
+    }
+    if (m_keybinds.contains(name)) {
+        return m_keybinds.value(name);
+    }
+    QJsonObject defaults = caelestia::config::defaultKeybinds();
+    return defaults.value(name).toString();
 }
 
 QVariantList KeybindsModel::query(const QString& searchText) const {
@@ -166,9 +173,9 @@ QVariantList KeybindsModel::query(const QString& searchText) const {
             sc->description().toLower().contains(lower) || sc->name().toLower().contains(lower)) {
 
             QJsonObject defaults = caelestia::config::defaultKeybinds();
-            result.append(QVariantMap{ { "bind", sc->key() }, { "action", sc->name() }, { "name", sc->name() },
-                { "description", sc->description() },
-                { "isOverridden", defaults.value(sc->name()).toString() != sc->key() } });
+            result.append(QVariantMap{ { QStringLiteral("bind"), sc->key() }, { QStringLiteral("action"), sc->name() },
+                { QStringLiteral("name"), sc->name() }, { QStringLiteral("description"), sc->description() },
+                { QStringLiteral("isOverridden"), defaults.value(sc->name()).toString() != sc->key() } });
         }
     }
     return result;
@@ -178,7 +185,6 @@ void KeybindsModel::onShortcutRegistered(GlobalShortcut* sc) {
     if (m_rows.contains(sc))
         return;
 
-    // Directly assign the key from our single source of truth
     if (m_keybinds.contains(sc->name())) {
         sc->setKey(m_keybinds.value(sc->name()));
     }
@@ -225,8 +231,6 @@ QString KeybindsModel::getKeyCollisionForPart(const QString& actionName, const Q
     if (actionName.isEmpty() || keyPart.isEmpty())
         return QString();
 
-    // Query the central collision index which is backed by stolen-shortcuts.json.
-    // Using a portable key string as the lookup key matches what the dispatcher stores.
     QKeySequence seq(keyPart.trimmed());
     if (seq.isEmpty())
         return QString();
@@ -247,7 +251,7 @@ void KeybindsModel::onShortcutUnregistered(GlobalShortcut* sc) {
 }
 
 QString KeybindsModel::keybindsPath() const {
-    return QDir::homePath() + "/.config/caelestia/keybinds.json";
+    return QDir::homePath() + QStringLiteral("/.config/caelestia/keybinds.json");
 }
 
 void KeybindsModel::saveKeybinds() {

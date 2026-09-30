@@ -1,12 +1,12 @@
 #pragma once
 
-#include "configobject.hpp"
+#include "../Settings/objectnode.hpp"
+#include "common.hpp"
 
 namespace caelestia::config {
 
-class DashboardPerformance : public ConfigObject {
-    Q_OBJECT
-    QML_ANONYMOUS
+class DashboardPerformance : public settings::ObjectNode {
+    CONFIG_NODE(DashboardPerformance, settings::ObjectNode)
 
     CONFIG_PROPERTY(bool, showBattery, true)
     CONFIG_PROPERTY(bool, showGpu, true)
@@ -14,15 +14,10 @@ class DashboardPerformance : public ConfigObject {
     CONFIG_PROPERTY(bool, showMemory, true)
     CONFIG_PROPERTY(bool, showStorage, true)
     CONFIG_PROPERTY(bool, showNetwork, true)
-
-public:
-    explicit DashboardPerformance(QObject* parent = nullptr)
-        : ConfigObject(parent) {}
 };
 
-class DashboardConfig : public ConfigObject {
-    Q_OBJECT
-    QML_ANONYMOUS
+class DashboardConfig : public settings::ObjectNode {
+    CONFIG_NODE(DashboardConfig, settings::ObjectNode)
 
     CONFIG_PROPERTY(bool, enabled, true)
     CONFIG_PROPERTY(bool, showOnHover, true)
@@ -34,8 +29,7 @@ class DashboardConfig : public ConfigObject {
     CONFIG_PROPERTY(bool, showHyprlandSplash, false)
     CONFIG_PROPERTY(bool, colorizeMediaGif, true)
     CONFIG_PROPERTY(bool, useMediaShapes, false)
-    CONFIG_PROPERTY(bool, randomizeMediaShapeColors, true)
-    CONFIG_PROPERTY(bool, syncMediaShapesToBeat, false)
+    CONFIG_PROPERTY(bool, showClockSeconds, false)
     CONFIG_GLOBAL_PROPERTY(int, profilePicShape, 9)
     CONFIG_GLOBAL_PROPERTY(int, mediaUpdateInterval, 500)
     CONFIG_GLOBAL_PROPERTY(int, resourceUpdateInterval, 1000)
@@ -43,11 +37,6 @@ class DashboardConfig : public ConfigObject {
     CONFIG_PROPERTY(int, hoverThickness, 10)
     CONFIG_PROPERTY(int, hoverWidth, 50)
     CONFIG_SUBOBJECT(DashboardPerformance, performance)
-
-public:
-    explicit DashboardConfig(QObject* parent = nullptr)
-        : ConfigObject(parent)
-        , m_performance(new DashboardPerformance(this)) {}
 };
 
 } // namespace caelestia::config

@@ -11,8 +11,21 @@ import qs.modules.nexus
 Singleton {
     id: root
 
+    property var openWindow: null
+
     function create(parent: Item, props: var): var {
-        return nexusComp.createObject(parent ?? dummy, props);
+        props = props || {};
+        if (root.openWindow) {
+            const win = root.openWindow;
+            if (props.initialPageIdx !== undefined)
+                win.nexus.nState.goToSubPage(props.initialPageIdx, props.initialSubPageIdx ?? -1);
+            win.visible = true;
+            win.raise();
+            return win;
+        }
+        const win = nexusComp.createObject(parent ?? dummy, props);
+        root.openWindow = win;
+        return win;
     }
 
     QtObject {
@@ -30,6 +43,18 @@ Singleton {
             property int initialPageIdx: 0
             property int initialSubPageIdx: -1
 
+            function raise(): void {
+                const pageTitles = PageRegistry.pages.map(p => p.label);
+                const target = Kwin.windowList.find(w => w.title === win.title || (pageTitles.includes(w.title) && w.class && w.class.includes("quickshell")));
+                if (target?.address)
+                    Kwin.focusWindow(target.address);
+            }
+
+            Component.onDestruction: {
+                if (root.openWindow === win)
+                    root.openWindow = null;
+            }
+
             color: Colours.tPalette.m3surface
             // Commented because nexus bg depends on the above
             // color: GlobalConfig.appearance.transparency.enabled ? Qt.alpha(Colours.tPalette.m3surface, 0) : Colours.tPalette.m3surface
@@ -37,14 +62,11 @@ Singleton {
             surfaceFormat.opaque: false
 
             BackgroundEffect.blurRegion: Region {
-                Region { x: -10; y: -10; width: 1; height: 1 } // Prevent full-window blur fallback when disabled
+                Region { x: -10; y: -10; width: 1; height: 1 }
                 Region { item: (GlobalConfig.appearance.transparency.enabled && GlobalConfig.appearance.blur) ? nexus : null }
             }
 
             onVisibleChanged: {
-                // Some Quickshell versions do not expose a cancellable close
-                // signal on FloatingWindow. If the window is being hidden while
-                // an update runs, reopen and route through Nexus' close guard.
                 if (!visible && UpdateChecker.updateRunning) {
                     visible = true;
                     nexus.requestClose();
@@ -64,7 +86,7 @@ Singleton {
             contentItem.Config.screen: screen.name
             contentItem.Tokens.screen: screen.name
 
-            title: qsTr("Nexus — %1").arg(PageRegistry.pages[nexus.nState.currentPageIdx].label)
+            title: PageRegistry.pages[nexus.nState.currentPageIdx].label
 
             Nexus {
                 id: nexus

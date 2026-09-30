@@ -35,7 +35,7 @@ QString FileSystemEntry::parentDir() const {
 };
 
 QString FileSystemEntry::suffix() const {
-    return m_fileInfo.completeSuffix();
+    return m_fileInfo.suffix();
 };
 
 qint64 FileSystemEntry::size() const {
@@ -234,7 +234,6 @@ void FileSystemModel::watchDirIfRecursive(const QString& path) {
         });
         future.then(this, [currentDir, showHidden, this](const QStringList& paths) {
             if (currentDir == m_dir && showHidden == m_showHidden && !paths.isEmpty()) {
-                // Ignore if dir or showHidden has changed
                 m_watcher.addPaths(paths);
             }
         });
@@ -302,7 +301,7 @@ void FileSystemModel::updateEntriesForDir(const QString& dir) {
             QStringList extraNameFilters = nameFilters;
             const auto formats = QImageReader::supportedImageFormats();
             for (const auto& format : formats) {
-                extraNameFilters << "*." + format;
+                extraNameFilters << QStringLiteral("*.") + QString::fromUtf8(format);
             }
 
             QDir::Filters filters = QDir::Files;
@@ -312,10 +311,11 @@ void FileSystemModel::updateEntriesForDir(const QString& dir) {
 
             iter.emplace(dir, extraNameFilters, filters, flags);
         } else if (filter == Videos) {
-            const QStringList videoExtensions = { "mp4", "webm", "mkv", "avi", "mov", "wmv", "flv" };
+            const QStringList videoExtensions = { QStringLiteral("mp4"), QStringLiteral("webm"), QStringLiteral("mkv"),
+                QStringLiteral("avi"), QStringLiteral("mov"), QStringLiteral("wmv"), QStringLiteral("flv") };
             QStringList extraNameFilters;
             for (const auto& ext : videoExtensions) {
-                extraNameFilters << "*." + ext;
+                extraNameFilters += QStringLiteral("*.") + ext;
             }
             extraNameFilters << nameFilters;
 
@@ -402,7 +402,6 @@ void FileSystemModel::applyChanges(const QSet<QString>& removedPaths, const QSet
     }
     std::sort(removedIndices.begin(), removedIndices.end(), std::greater<int>());
 
-    // Batch remove old entries
     int start = -1;
     int end = -1;
     for (int idx : std::as_const(removedIndices)) {
@@ -430,7 +429,6 @@ void FileSystemModel::applyChanges(const QSet<QString>& removedPaths, const QSet
         endRemoveRows();
     }
 
-    // Create new entries
     QList<FileSystemEntry*> newEntries;
     for (const auto& path : addedPaths) {
         newEntries << new FileSystemEntry(path, m_dir.relativeFilePath(path), this);
@@ -439,7 +437,6 @@ void FileSystemModel::applyChanges(const QSet<QString>& removedPaths, const QSet
         return compareEntries(a, b);
     });
 
-    // Pre-calculate insertion rows for all new entries before any mutations
     QList<int> insertRows;
     insertRows.reserve(newEntries.size());
     for (const auto& entry : std::as_const(newEntries)) {
@@ -450,7 +447,6 @@ void FileSystemModel::applyChanges(const QSet<QString>& removedPaths, const QSet
         insertRows << static_cast<int>(it - m_entries.begin());
     }
 
-    // Batch insert new entries
     int offset = 0;
     int currentOriginalRow = -1;
     QList<FileSystemEntry*> batchItems;

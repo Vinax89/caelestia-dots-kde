@@ -8,11 +8,12 @@ import qs.utils
 Singleton {
     id: root
 
-    readonly property string recordBin: Paths.absolutePath("~/.local/bin/caelestia-record")
+    readonly property string recordBin: Paths.bin("caelestia-record")
 
     readonly property alias running: props.running
     readonly property alias paused: props.paused
     readonly property alias elapsed: props.elapsed
+    readonly property bool probing: running || needsStart || needsStop || needsPause
     property bool needsStart
     property list<string> startArgs
     property bool needsStop
@@ -21,6 +22,12 @@ Singleton {
     function start(extraArgs = []): void {
         needsStart = true;
         startArgs = extraArgs;
+        checkProc.running = true;
+    }
+
+    function startGif(): void {
+        needsStart = true;
+        startArgs = ["--gif"];
         checkProc.running = true;
     }
 
@@ -40,7 +47,12 @@ Singleton {
     }
 
     function launchSpectacle(): void {
-        Quickshell.execDetached(["spectacle", "-R", "r"]);
+        Launch.exec(["spectacle", "-R", "r"]);
+    }
+
+    // Forces a fresh probe of gpu-screen-recorder; `running` updates on exit.
+    function probeRecording(): void {
+        if (!checkProc.running) checkProc.running = true;
     }
 
     PersistentProperties {
@@ -48,7 +60,7 @@ Singleton {
 
         property bool running: false
         property bool paused: false
-        property real elapsed: 0 // Might get too large for int
+        property real elapsed: 0
 
         reloadableId: "recorder"
     }
@@ -72,13 +84,13 @@ Singleton {
 
             if (isRunning) {
                 if (root.needsStop) {
-                    Quickshell.execDetached([root.recordBin, "--stop"]);
+                    Launch.exec([root.recordBin, "--stop"]);
                 } else if (root.needsPause) {
-                    Quickshell.execDetached([root.recordBin, "--pause"]);
+                    Launch.exec([root.recordBin, "--pause"]);
                     props.paused = !props.paused;
                 }
             } else if (root.needsStart) {
-                Quickshell.execDetached([root.recordBin, ...root.startArgs]);
+                Launch.exec([root.recordBin, ...root.startArgs]);
             }
 
             root.needsStart = false;
@@ -112,20 +124,20 @@ Singleton {
     // (checked every 2 s while a recording is believed active) and a recording
     // started before the watcher had a file to watch (every 10 s when idle).
     Timer {
-        interval: props.running ? 2000 : 10000
+        interval: root.probing ? 500 : 2500
         repeat: true
         running: true
         triggeredOnStart: true
         onTriggered: root.refresh()
     }
 
-    Connections {
-        enabled: props.running && !props.paused
+    Timer {
+        interval: 1000
+        repeat: true
+        running: props.running && !props.paused
 
-        function onSecondsChanged(): void {
+        onTriggered: {
             props.elapsed++;
         }
-
-        target: Time // qmllint disable incompatible-type
     }
 }

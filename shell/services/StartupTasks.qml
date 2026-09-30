@@ -6,16 +6,16 @@ import qs.utils
 Item {
     id: root
 
+    readonly property string tasksDir: Quickshell.shellPath("services/startuptasks")
+
     Component.onCompleted: {
-        console.log("StartupTasks Loaded!");
         Quickshell.execDetached(["bash", "-c", `
             STATE_FILE="$HOME/.local/share/caelestia/state/startup_tasks.txt"
             mkdir -p "$(dirname "$STATE_FILE")"
             touch "$STATE_FILE"
 
-            TASKS_DIR="$HOME/.config/quickshell/caelestia/services/startuptasks"
+            TASKS_DIR="$1"
             MODIFIED=false
-            RAN_TASKS=""
 
             TASKS=(
                 "01-magic-lamp"
@@ -32,7 +32,6 @@ Item {
                             MODIFIED=true
                         fi
                         echo "$script_name" >> "$STATE_FILE"
-                        RAN_TASKS="$RAN_TASKS\\n- $script_name"
                     fi
                 fi
             done
@@ -40,10 +39,6 @@ Item {
             if [[ "$MODIFIED" == "true" ]]; then
                 qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
             fi
-
-            if [[ -n "$RAN_TASKS" ]]; then
-                notify-send "Caelestia Startup Tasks" "Executed the following initialization tasks:$RAN_TASKS" -i dialog-information
-            fi
-        `]);
+        `, "caelestia-startuptasks", root.tasksDir]);
     }
 }

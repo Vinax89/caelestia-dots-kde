@@ -1,17 +1,20 @@
 #include "layoutkde.hpp"
 
-#include "layoututils.hpp"
-#include <deque>
 #include <algorithm>
 #include <cmath>
+#include <deque>
+
+#include "layoututils.hpp"
 
 namespace caelestia::layouts {
 
-LayoutKde::LayoutKde(QObject* parent) : QObject(parent) {}
+LayoutKde::LayoutKde(QObject* parent)
+    : QObject(parent) {}
 
-LayoutKde::LayeredPacking::Layer::Layer(qreal mw, const QList<QRectF>& windowSizes, const QList<size_t>& windowIds, size_t startPos, size_t endPos)
-    : maxWidth(mw), ids(windowIds.begin() + startPos, windowIds.begin() + endPos)
-{
+LayoutKde::LayeredPacking::Layer::Layer(
+    qreal mw, const QList<QRectF>& windowSizes, const QList<size_t>& windowIds, size_t startPos, size_t endPos)
+    : maxWidth(mw)
+    , ids(windowIds.begin() + startPos, windowIds.begin() + endPos) {
     maxHeight = windowSizes[windowIds[endPos - 1]].height();
     remainingWidth = maxWidth;
     for (auto id : ids) {
@@ -19,9 +22,11 @@ LayoutKde::LayeredPacking::Layer::Layer(qreal mw, const QList<QRectF>& windowSiz
     }
 }
 
-LayoutKde::LayeredPacking::LayeredPacking(qreal mw, const QList<QRectF>& windowSizes, const QList<size_t>& ids, const QList<size_t>& layerStartPos)
-    : maxWidth(mw), width(0), height(0)
-{
+LayoutKde::LayeredPacking::LayeredPacking(
+    qreal mw, const QList<QRectF>& windowSizes, const QList<size_t>& ids, const QList<size_t>& layerStartPos)
+    : maxWidth(mw)
+    , width(0)
+    , height(0) {
     for (int i = 1; i < layerStartPos.size(); ++i) {
         layers.emplace_back(maxWidth, windowSizes, ids, layerStartPos[i - 1], layerStartPos[i]);
         width = std::max(width, layers.back().width());
@@ -29,9 +34,10 @@ LayoutKde::LayeredPacking::LayeredPacking(qreal mw, const QList<QRectF>& windowS
     }
 }
 
-bool LayoutKde::isDominated(size_t candidate, size_t alternativeSmall, size_t alternativeBig, size_t length, const std::function<qreal(size_t, size_t)>& leastWeightCandidate)
-{
-    if (alternativeBig == length) return true;
+bool LayoutKde::isDominated(size_t candidate, size_t alternativeSmall, size_t alternativeBig, size_t length,
+    const std::function<qreal(size_t, size_t)>& leastWeightCandidate) {
+    if (alternativeBig == length)
+        return true;
     if (leastWeightCandidate(alternativeSmall, length) <= leastWeightCandidate(candidate, length)) {
         return true;
     }
@@ -48,15 +54,16 @@ bool LayoutKde::isDominated(size_t candidate, size_t alternativeSmall, size_t al
     return (leastWeightCandidate(alternativeBig, high) <= leastWeightCandidate(candidate, high));
 }
 
-QList<size_t> LayoutKde::getLayerStartPos(qreal maxWidth, qreal idealWidth, size_t length, const QList<qreal>& cumWidths)
-{
+QList<size_t> LayoutKde::getLayerStartPos(
+    qreal maxWidth, qreal idealWidth, size_t length, const QList<qreal>& cumWidths) {
     auto weight = [maxWidth, idealWidth, &cumWidths](size_t start, size_t end) {
         qreal width = cumWidths[end] - cumWidths[start];
         if (width < idealWidth) {
             return (width - idealWidth) * (width - idealWidth) / idealWidth / idealWidth;
         } else {
             qreal penaltyFactor = cumWidths.size();
-            return penaltyFactor * (width - idealWidth) * (width - idealWidth) / (maxWidth - idealWidth) / (maxWidth - idealWidth);
+            return penaltyFactor * (width - idealWidth) * (width - idealWidth) / (maxWidth - idealWidth) /
+                   (maxWidth - idealWidth);
         }
     };
 
@@ -75,11 +82,15 @@ QList<size_t> LayoutKde::getLayerStartPos(qreal maxWidth, qreal idealWidth, size
         leastWeight[currentIndex] = leastWeightCandidate(layerStartCandidates.front(), currentIndex);
         layerStart[currentIndex] = layerStartCandidates.front();
         layerStartCandidates.push_back(currentIndex);
-        while (layerStartCandidates.size() >= 2 && leastWeightCandidate(layerStartCandidates[1], currentIndex + 1) <= leastWeightCandidate(layerStartCandidates[0], currentIndex + 1)) {
+        while (
+            layerStartCandidates.size() >= 2 && leastWeightCandidate(layerStartCandidates[1], currentIndex + 1) <=
+                                                    leastWeightCandidate(layerStartCandidates[0], currentIndex + 1)) {
             layerStartCandidates.pop_front();
         }
         layerStartCandidates.pop_back();
-        while (layerStartCandidates.size() >= 2 && isDominated(layerStartCandidates.back(), layerStartCandidates[layerStartCandidates.size() - 2], currentIndex, length, leastWeightCandidate)) {
+        while (layerStartCandidates.size() >= 2 &&
+               isDominated(layerStartCandidates.back(), layerStartCandidates[layerStartCandidates.size() - 2],
+                   currentIndex, length, leastWeightCandidate)) {
             layerStartCandidates.pop_back();
         }
         if (layerStartCandidates.empty()) {
@@ -109,8 +120,8 @@ QList<size_t> LayoutKde::getLayerStartPos(qreal maxWidth, qreal idealWidth, size
     return result;
 }
 
-LayoutKde::LayeredPacking LayoutKde::findGoodPacking(const QRectF& area, const QList<QRectF>& windowSizes, const QList<QPointF>& centers, qreal idealWidthRatio, qreal tol)
-{
+LayoutKde::LayeredPacking LayoutKde::findGoodPacking(const QRectF& area, const QList<QRectF>& windowSizes,
+    const QList<QPointF>& centers, qreal idealWidthRatio, qreal tol) {
     QList<std::tuple<size_t, QRectF, QPointF>> windowSizesWithIds;
     for (int i = 0; i < windowSizes.size(); ++i) {
         windowSizesWithIds.emplace_back(i, windowSizes[i], centers[i]);
@@ -148,11 +159,13 @@ LayoutKde::LayeredPacking LayoutKde::findGoodPacking(const QRectF& area, const Q
 
     LayeredPacking placementWidthMin = findPacking(stripWidthMin);
     qreal ratioHigh = placementWidthMin.height / placementWidthMin.width;
-    if (ratioHigh <= targetRatio) return placementWidthMin;
+    if (ratioHigh <= targetRatio)
+        return placementWidthMin;
 
     LayeredPacking placementWidthMax = findPacking(stripWidthMax);
     qreal ratioLow = placementWidthMax.height / placementWidthMax.width;
-    if (ratioLow >= targetRatio) return placementWidthMax;
+    if (ratioLow >= targetRatio)
+        return placementWidthMax;
 
     while (stripWidthMax / stripWidthMin > 1 + tol) {
         qreal stripWidthMid = std::sqrt(stripWidthMin * stripWidthMax);
@@ -179,12 +192,14 @@ LayoutKde::LayeredPacking LayoutKde::findGoodPacking(const QRectF& area, const Q
     return placementWidthMax;
 }
 
-QList<QRectF> LayoutKde::refineAndApplyPacking(const QRectF& area, const QMarginsF& margins, const LayeredPacking& packing, const QList<QRectF>& windowSizes, const QList<QPointF>& centers, qreal maxScale, qreal maxGapRatio)
-{
+QList<QRectF> LayoutKde::refineAndApplyPacking(const QRectF& area, const QMarginsF& margins,
+    const LayeredPacking& packing, const QList<QRectF>& windowSizes, const QList<QPointF>& centers, qreal maxScale,
+    qreal maxGapRatio) {
     qreal scale = std::min(area.width() / packing.width, area.height() / packing.height);
     scale = std::min(scale, maxScale);
 
-    QMarginsF scaledMargins(margins.left() * scale, margins.top() * scale, margins.right() * scale, margins.bottom() * scale);
+    QMarginsF scaledMargins(
+        margins.left() * scale, margins.top() * scale, margins.right() * scale, margins.bottom() * scale);
 
     qreal maxGapY = maxGapRatio * (scaledMargins.top() + scaledMargins.bottom());
     qreal maxGapX = maxGapRatio * (scaledMargins.left() + scaledMargins.right());
@@ -215,10 +230,11 @@ QList<QRectF> LayoutKde::refineAndApplyPacking(const QRectF& area, const QMargin
     return finalWindowLayouts;
 }
 
-QVariantMap LayoutKde::calculateLayout(const QVariantList& windows, double areaWidth, double areaHeight, double columnSpacing, double rowSpacing)
-{
+QVariantMap LayoutKde::calculateLayout(
+    const QVariantList& windows, double areaWidth, double areaHeight, double columnSpacing, double rowSpacing) {
     QVariantMap result;
-    if (windows.isEmpty() || areaWidth <= 0 || areaHeight <= 0) return result;
+    if (windows.isEmpty() || areaWidth <= 0 || areaHeight <= 0)
+        return result;
 
     QList<QString> addresses;
     QList<QRectF> windowSizes;
@@ -228,15 +244,14 @@ QVariantMap LayoutKde::calculateLayout(const QVariantList& windows, double areaW
 
     for (const QVariant& wVar : windows) {
         QVariantMap w = wVar.toMap();
-        QString addr = w.value("address").toString();
-        qreal wx = w.value("x").toDouble();
-        qreal wy = w.value("y").toDouble();
-        qreal ww = w.value("width", 800).toDouble();
-        qreal wh = w.value("height", 600).toDouble();
+        QString addr = w.value(QStringLiteral("address")).toString();
+        qreal wx = w.value(QStringLiteral("x")).toDouble();
+        qreal wy = w.value(QStringLiteral("y")).toDouble();
+        qreal ww = w.value(QStringLiteral("width"), 800).toDouble();
+        qreal wh = w.value(QStringLiteral("height"), 600).toDouble();
 
         addresses.append(addr);
 
-        // Apply margins directly to the logical size of the window as KDE does
         QRectF rect(0, 0, ww, wh);
         rect = rect.marginsAdded(margins);
         windowSizes.append(rect);
@@ -245,21 +260,21 @@ QVariantMap LayoutKde::calculateLayout(const QVariantList& windows, double areaW
 
     QRectF area(0, 0, areaWidth, areaHeight);
 
-    // Hardcoded KDE Expo defaults
     qreal idealWidthRatio = 0.5;
     qreal tol = 0.05;
     qreal maxScale = 1.0;
     qreal maxGapRatio = 2.0;
 
     LayeredPacking bestPacking = findGoodPacking(area, windowSizes, centers, idealWidthRatio, tol);
-    QList<QRectF> layouts = refineAndApplyPacking(area, margins, bestPacking, windowSizes, centers, maxScale, maxGapRatio);
+    QList<QRectF> layouts =
+        refineAndApplyPacking(area, margins, bestPacking, windowSizes, centers, maxScale, maxGapRatio);
 
     for (int i = 0; i < layouts.size(); ++i) {
         QVariantMap props;
-        props["x"] = layouts[i].x();
-        props["y"] = layouts[i].y();
-        props["width"] = layouts[i].width();
-        props["height"] = layouts[i].height();
+        props[QStringLiteral("x")] = layouts[i].x();
+        props[QStringLiteral("y")] = layouts[i].y();
+        props[QStringLiteral("width")] = layouts[i].width();
+        props[QStringLiteral("height")] = layouts[i].height();
         result[addresses[i]] = props;
     }
 

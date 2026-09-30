@@ -12,7 +12,7 @@ EXPECTED_MODULES = (
     "Caelestia",
     "Caelestia/Components",
     "Caelestia/Config",
-    "Caelestia/Internal",
+    "Caelestia/Settings",
     "Caelestia/Models",
     "Caelestia/Services",
     "Caelestia/Blobs",
@@ -23,11 +23,6 @@ EXPECTED_MODULES = (
 PLUGIN_PATTERN = re.compile(r"^(?:optional\s+)?plugin\s+(\S+)", re.MULTILINE)
 PLUGIN_SUFFIXES = (".so", ".dylib", ".dll")
 
-# Types commonly used as non-visual children (Quickshell.Io/QtQml) that only
-# a root with its own list-based default property (Item.data, Singleton's
-# inherited Scope.children) can hold implicitly. Plain QtObject has no
-# default property, so assigning one of these to a QtObject-rooted singleton
-# fails at load time with "Cannot assign to non-existent default property".
 CONTAINER_CHILD_TYPES = (
     "FileView",
     "Timer",
@@ -51,7 +46,11 @@ def plugin_exists(module_dir: Path, plugin_name: str) -> bool:
 def check_singleton_roots(source_root: Path) -> list[str]:
     failures: list[str] = []
     for qml_file in source_root.rglob("*.qml"):
-        text = qml_file.read_text(encoding="utf-8")
+        try:
+            text = qml_file.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            failures.append(f"{qml_file.relative_to(source_root)}: not valid UTF-8 ({exc})")
+            continue
         if "pragma Singleton" not in text:
             continue
 
@@ -63,9 +62,6 @@ def check_singleton_roots(source_root: Path) -> list[str]:
 
         root_type = root_match.group(1)
 
-        # None of the working singletons declare their own default property:
-        # Item, Singleton (via Scope) and Searcher already provide one, and
-        # redeclaring it on QtObject has repeatedly caused runtime failures.
         if re.search(r"^\s*default property\b", text, re.MULTILINE):
             failures.append(f"{rel}: singleton root must not redeclare a default property")
             continue
@@ -78,10 +74,6 @@ def check_singleton_roots(source_root: Path) -> list[str]:
                     "(QtObject has no default property) -- use Singleton or Item as the root instead"
                 )
 
-        # The Singleton type itself is defined by the Quickshell module, not QtQuick --
-        # a file rooted at Singleton{} without this import fails at load time with
-        # "Singleton is not a type", which then cascades into "Type X unavailable"
-        # for every module that transitively imports it.
         if root_type == "Singleton" and not re.search(r"^import\s+Quickshell\s*$", text, re.MULTILINE):
             failures.append(f"{rel}: root is 'Singleton' but file has no 'import Quickshell'")
     return failures

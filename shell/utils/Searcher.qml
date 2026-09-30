@@ -9,7 +9,6 @@ Singleton {
     property bool useFuzzy: false
     property var extraOpts: ({})
 
-    // Extra stuff for fuzzy
     property list<string> keys: [key]
     property list<real> weights: [1]
 
@@ -30,11 +29,10 @@ Singleton {
     }
 
     function selector(item: var): string {
-        // Only for fzf
         return item[key];
     }
 
-    function query(search: string): list<var> {
+    function query(search: string): var {
         search = transformSearch(search.trim().replace(/\s+/g, " "));
         if (!search)
             return [...list];

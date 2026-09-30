@@ -28,7 +28,7 @@ QString sha256sum(const QString& path) {
     hash.addData(&file);
     file.close();
 
-    return hash.result().toHex();
+    return QString::fromLatin1(hash.result().toHex());
 }
 
 QString fillSuffix(ImageCacher::FillMode fillMode) {

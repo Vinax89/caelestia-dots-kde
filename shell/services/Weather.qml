@@ -2,38 +2,65 @@ pragma Singleton
 
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Caelestia
 import Caelestia.Config
+import Caelestia.Services as CServices
+import qs.services
 import qs.utils
 
 Singleton {
     id: root
 
-    property string city
-    property string loc
-    property var cc
-    property list<var> forecast
-    property list<var> hourlyForecast
+    readonly property string city: CServices.Weather.city
+    readonly property string loc: CServices.Weather.loc
+    readonly property string icon: CServices.Weather.icon
+    readonly property string description: CServices.Weather.description
+    readonly property string temp: CServices.Weather.temp
+    readonly property real tempC: CServices.Weather.tempC
+    readonly property string feelsLike: CServices.Weather.feelsLike
+    readonly property real feelsLikeC: CServices.Weather.feelsLikeC
+    readonly property int humidity: CServices.Weather.humidity
+    readonly property real windSpeed: CServices.Weather.windSpeed
+    readonly property string sunrise: CServices.Weather.sunrise
+    readonly property string sunset: CServices.Weather.sunset
+    readonly property string maxTemp: CServices.Weather.maxTemp
+    readonly property string minTemp: CServices.Weather.minTemp
+    readonly property var forecast: CServices.Weather.forecast
+    readonly property var hourlyForecast: CServices.Weather.hourlyForecast
+    readonly property bool hasWeather: CServices.Weather.hasWeather
+    readonly property bool loading: CServices.Weather.loading
+
+    readonly property var cc: CServices.Weather.hasWeather ? ({
+        weatherCode: CServices.Weather.weatherCode,
+        weatherDesc: CServices.Weather.description,
+        tempC: CServices.Weather.tempC,
+        feelsLikeC: CServices.Weather.feelsLikeC,
+        humidity: CServices.Weather.humidity,
+        windSpeed: CServices.Weather.windSpeed,
+        isDay: true,
+        sunrise: CServices.Weather.sunrise,
+        sunset: CServices.Weather.sunset
+    }) : null
+
     property string locationSearchQuery: ""
     property bool locationSearchLoading: false
     property string locationSearchError: ""
-    property bool geoFallbackDisclosed: false
     property list<var> locationSearchResults: []
     property int locationSearchToken: 0
 
-    readonly property string icon: cc ? Icons.getWeatherIcon(cc.weatherCode) : "cloud_alert"
-    readonly property string description: cc?.weatherDesc ?? qsTr("No weather")
-    readonly property string temp: formatTemp(cc?.tempC)
-    readonly property string feelsLike: formatTemp(cc?.feelsLikeC)
-    readonly property int humidity: cc?.humidity ?? 0
-    readonly property real windSpeed: cc?.windSpeed ?? 0
-    readonly property string sunrise: cc ? Qt.formatDateTime(new Date(cc.sunrise), GlobalConfig.services.useTwelveHourClock ? "h:mm A" : "h:mm") : "--:--"
-    readonly property string sunset: cc ? Qt.formatDateTime(new Date(cc.sunset), GlobalConfig.services.useTwelveHourClock ? "h:mm A" : "h:mm") : "--:--"
+    function formatTemp(temp, compact = false) {
+        const unit = GlobalConfig.services.weatherUnit;
+        const value = temp === undefined || temp === null || isNaN(temp) ? "--" : Math.round(Units.toTemperature(temp, unit));
+        return Units.formatTemp(value, unit, compact);
+    }
 
-    readonly property var cachedCities: new Map()
+    function reload() {
+        CServices.Weather.reload();
+    }
 
-    function formatTemp(temp) {
-        return GlobalConfig.services.useFahrenheit ? `${temp !== undefined ? Math.round(toFahrenheit(temp)) : "--"}°F` : `${temp !== undefined ? Math.round(temp) : "--"}°C`;
+    function refresh() {
+        CServices.Weather.refresh();
     }
 
     function normalizeCoords(lat, lon) {
@@ -61,7 +88,7 @@ Singleton {
         locationSearchError = "";
 
         if (locationSearchQuery.length < 2) {
-            locationSearchToken++; // invalidate any in-flight searches
+            locationSearchToken++;
             locationSearchLoading = false;
             locationSearchResults = [];
             locationSearchDebounce.stop();
@@ -142,234 +169,19 @@ Singleton {
 
         const label = result.label || buildLocationLabel(result) || result.name || "";
 
-        const prevLoc = loc;
-
+        CServices.Weather.setLocation(coords, label);
         GlobalConfig.services.weatherLocation = coords;
-        loc = coords;
-        if (label)
-            city = label;
-        if (label)
-            cachedCities.set(coords, label);
-
-        if (coords === prevLoc)
-            fetchWeatherData();
         return true;
     }
 
     function resetToAutoLocation() {
         GlobalConfig.services.weatherLocation = "";
-        loc = "";
-        city = "";
-        reload();
+        CServices.Weather.setLocation("", "");
+        CServices.Weather.reload();
     }
 
-    function reload() {
-        const configLocation = GlobalConfig.services.weatherLocation;
-
-        if (configLocation) {
-            if (configLocation.indexOf(",") !== -1 && !isNaN(parseFloat(configLocation.split(",")[0]))) {
-                loc = configLocation;
-                fetchCityFromCoords(configLocation);
-            } else {
-                fetchCoordsFromCity(configLocation, true);
-            }
-        } else if (GlobalConfig.services.weatherIpGeolocation && (!loc || timer.elapsed() > 900)) {
-            if (!root.geoFallbackDisclosed) {
-                root.geoFallbackDisclosed = true;
-                Quickshell.execDetached(["notify-send", "Weather location", "Using approximate IP-based location from ipinfo.io. Disable it in Settings to stop sharing your IP."]);
-            }
-            Requests.get("https://ipinfo.io/json", text => {
-                const response = Strings.parseJson(text, null);
-                if (response && response.loc) {
-                    loc = response.loc;
-                    city = response.city ?? "";
-                    timer.restart();
-                }
-            });
-        }
-    }
-
-    function fetchCityFromCoords(coords) {
-        if (cachedCities.has(coords)) {
-            city = cachedCities.get(coords);
-            return;
-        }
-
-        // encodeURIComponent for consistency with fetchCoordsFromCity: these
-        // come from user-set weatherLocation config, which is not guaranteed to
-        // be two bare numbers.
-        const [lat, lon] = coords.split(",").map(s => encodeURIComponent(s.trim()));
-
-        const fallbackToBigDataCloud = () => {
-            const fallbackUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
-            Requests.get(fallbackUrl, text => {
-                const geo = Strings.parseJson(text, null);
-                const geoCity = geo ? (geo.city || geo.locality) : "";
-                if (geoCity) {
-                    city = geoCity;
-                    cachedCities.set(coords, geoCity);
-                } else {
-                    city = "Unknown City";
-                }
-            });
-        };
-
-        const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=geocodejson`;
-        Requests.get(nominatimUrl, text => {
-            const parsed = Strings.parseJson(text, null);
-            const geo = parsed?.features?.[0]?.properties?.geocoding;
-            if (geo) {
-                const geoCity = geo.type === "city" ? geo.name : geo.city;
-                if (geoCity) {
-                    city = geoCity;
-                    cachedCities.set(coords, geoCity);
-                    return;
-                }
-            }
-            fallbackToBigDataCloud();
-        }, fallbackToBigDataCloud);
-    }
-
-    function fetchCoordsFromCity(cityName, persistCoords) {
-        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&language=en&format=json`;
-
-        Requests.get(url, text => {
-            const json = Strings.parseJson(text, null);
-            if (json && json.results && json.results.length > 0) {
-                const result = json.results[0];
-                const coords = normalizeCoords(result.latitude, result.longitude);
-                if (!coords) {
-                    loc = "";
-                    reload();
-                    return;
-                }
-
-                loc = coords;
-                city = buildLocationLabel(result) || result.name;
-                cachedCities.set(coords, city);
-
-                if (persistCoords)
-                    GlobalConfig.services.weatherLocation = coords;
-            } else {
-                loc = "";
-                reload();
-            }
-        });
-    }
-
-    function fetchWeatherData() {
-        const url = getWeatherUrl();
-        if (url === "")
-            return;
-
-        Requests.get(url, text => {
-            const json = Strings.parseJson(text, null);
-            if (!json || !json.current || !json.daily)
-                return;
-
-            cc = {
-                weatherCode: json.current.weather_code,
-                weatherDesc: getWeatherCondition(json.current.weather_code),
-                tempC: json.current.temperature_2m,
-                feelsLikeC: json.current.apparent_temperature,
-                humidity: json.current.relative_humidity_2m,
-                windSpeed: json.current.wind_speed_10m,
-                isDay: json.current.is_day,
-                sunrise: json.daily.sunrise[0].replace("T", " "),
-                sunset: json.daily.sunset[0].replace("T", " ")
-            };
-
-            const forecastList = [];
-            for (let i = 0; i < json.daily.time.length; i++)
-                forecastList.push({
-                    date: json.daily.time[i].replace(/-/g, "/"),
-                    maxTempC: json.daily.temperature_2m_max[i],
-                    minTempC: json.daily.temperature_2m_min[i],
-                    maxTempF: Math.round(json.daily.temperature_2m_max[i] * 9 / 5 + 32),
-                    minTempF: Math.round(json.daily.temperature_2m_min[i] * 9 / 5 + 32),
-                    weatherCode: json.daily.weather_code[i],
-                    icon: Icons.getWeatherIcon(json.daily.weather_code[i])
-                });
-            forecast = forecastList;
-
-            const hourlyList = [];
-            const now = new Date();
-            for (let i = 0; i < json.hourly.time.length; i++) {
-                const time = new Date(json.hourly.time[i].replace("T", " "));
-
-                if (time < now)
-                    continue;
-
-                hourlyList.push({
-                    timestamp: json.hourly.time[i],
-                    hour: time.getHours(),
-                    tempC: Math.round(json.hourly.temperature_2m[i]),
-                    precipChance: json.hourly.precipitation_probability[i],
-                    weatherCode: json.hourly.weather_code[i],
-                    icon: Icons.getWeatherIcon(json.hourly.weather_code[i])
-                });
-            }
-            hourlyForecast = hourlyList;
-        });
-    }
-
-    function toFahrenheit(celcius) {
-        return celcius * 9 / 5 + 32;
-    }
-
-    function getWeatherUrl() {
-        if (!loc || loc.indexOf(",") === -1)
-            return "";
-
-        const [lat, lon] = loc.split(",").map(s => s.trim());
-        const baseUrl = "https://api.open-meteo.com/v1/forecast";
-        const params = ["latitude=" + lat, "longitude=" + lon, "hourly=weather_code,temperature_2m,precipitation_probability", "daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset", "current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m", "timezone=auto", "forecast_days=7"];
-
-        return baseUrl + "?" + params.join("&");
-    }
-
-    function getWeatherCondition(code) {
-        const conditions = {
-            "0": "Clear",
-            "1": "Clear",
-            "2": "Partly cloudy",
-            "3": "Overcast",
-            "45": "Fog",
-            "48": "Fog",
-            "51": "Drizzle",
-            "53": "Drizzle",
-            "55": "Drizzle",
-            "56": "Freezing drizzle",
-            "57": "Freezing drizzle",
-            "61": "Light rain",
-            "63": "Rain",
-            "65": "Heavy rain",
-            "66": "Light rain",
-            "67": "Heavy rain",
-            "71": "Light snow",
-            "73": "Snow",
-            "75": "Heavy snow",
-            "77": "Snow",
-            "80": "Light rain",
-            "81": "Rain",
-            "82": "Heavy rain",
-            "85": "Light snow showers",
-            "86": "Heavy snow showers",
-            "95": "Thunderstorm",
-            "96": "Thunderstorm with hail",
-            "99": "Thunderstorm with hail"
-        };
-        return conditions[code] || "Unknown";
-    }
-
-    onLocChanged: fetchWeatherData()
-
-    Connections {
-        function onWeatherLocationChanged(): void {
-            root.reload();
-        }
-
-        target: GlobalConfig.services
+    CServices.ServiceRef {
+        service: CServices.Weather
     }
 
     Timer {
@@ -378,16 +190,5 @@ Singleton {
         interval: 300
         repeat: false
         onTriggered: searchLocations(root.locationSearchQuery)
-    }
-
-    Timer {
-        interval: 3600000 // 1 hour
-        running: true
-        repeat: true
-        onTriggered: fetchWeatherData()
-    }
-
-    ElapsedTimer {
-        id: timer
     }
 }

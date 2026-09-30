@@ -22,7 +22,7 @@ Item {
     property bool isDownloading: false
     property real downloadProgressValue: 0
     property string downloadingWallpaperId: ""
-    property string downloadState: "idle" // idle | progress | success | error
+    property string downloadState: "idle"
     property string downloadMessage: ""
     property var selectedWallpaper: null
     property bool detailPanelOpen: false
@@ -147,64 +147,50 @@ Item {
                     }
                 }
 
-                // Search bar
-                StyledRect {
+                RowLayout {
                     Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
 
-                    color: Colours.layer(Colours.palette.m3surfaceContainer, 2)
-                    radius: Tokens.rounding.full
+                    SearchBar {
+                        id: searchField
 
-                    implicitHeight: searchField.implicitHeight + Tokens.padding.medium * 2
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("Search wallpapers...")
+                        bg.color: Colours.tPalette.m3surfaceContainerLowest
+                        bg.border.color: Colours.palette.m3outlineVariant
+                        searchIcon.fontStyle: Tokens.font.icon.medium
+                        clearIcon.visible: false
+                        onTextChanged: root.searchQuery = text
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: Tokens.padding.medium
-                        anchors.rightMargin: Tokens.padding.medium
-                        spacing: Tokens.spacing.small
-
-                        MaterialIcon {
-                            text: "search"
-                            color: Colours.palette.m3onSurfaceVariant
-                        }
-
-                        StyledTextField {
-                            id: searchField
-
-                            Layout.fillWidth: true
-                            placeholderText: qsTr("Search wallpapers...")
-                            onTextChanged: root.searchQuery = text
-
-                            Keys.onReturnPressed: {
-                                if (root.searchQuery.trim()) {
-                                    root.isLoading = true;
-                                    WallhavenSearcher.search(root.searchQuery);
-                                }
+                        Keys.onReturnPressed: {
+                            if (root.searchQuery.trim()) {
+                                root.isLoading = true;
+                                WallhavenSearcher.search(root.searchQuery);
                             }
                         }
+                    }
 
-                        IconButton {
-                            icon: "north"
-                            onClicked: {
-                                if (root.searchQuery.trim()) {
-                                    root.isLoading = true;
-                                    WallhavenSearcher.searchRandom(root.searchQuery);
-                                }
+                    IconButton {
+                        icon: "north"
+                        onClicked: {
+                            if (root.searchQuery.trim()) {
+                                root.isLoading = true;
+                                WallhavenSearcher.searchRandom(root.searchQuery);
                             }
                         }
+                    }
 
-                        IconButton {
-                            icon: "refresh"
-                            onClicked: {
-                                if (root.searchQuery.trim()) {
-                                    root.isLoading = true;
-                                    WallhavenSearcher.search(root.searchQuery);
-                                }
+                    IconButton {
+                        icon: "refresh"
+                        onClicked: {
+                            if (root.searchQuery.trim()) {
+                                root.isLoading = true;
+                                WallhavenSearcher.search(root.searchQuery);
                             }
                         }
                     }
                 }
 
-                // Results header with pagination
                 RowLayout {
                     StyledText {
                         text: root.currentResults.length > 0 ? qsTr("Found %1 wallpapers (page %2 of %3)").arg(root.currentResults.length).arg(WallhavenSearcher.currentPage).arg(WallhavenSearcher.lastPage) : qsTr("No results")
@@ -226,7 +212,6 @@ Item {
                     }
                 }
 
-                // Results grid
                 GridView {
                     id: resultsGrid
 
@@ -318,7 +303,6 @@ Item {
         }
     }
 
-    // Wallpaper detail panel with animation
     StyledRect {
         id: detailPanel
 
@@ -457,7 +441,6 @@ Item {
         }
     }
 
-    // Timer to clear selectedWallpaper after close animation
     Timer {
         id: clearWallpaperTimer
 

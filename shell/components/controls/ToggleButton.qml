@@ -19,13 +19,14 @@ StyledRect {
     property real verticalPadding: Tokens.padding.medium
     property string tooltip: ""
     property bool hovered: false
+    property real explicitWidth: 0
 
     signal clicked
 
     Component.onCompleted: hovered = toggleStateLayer.containsMouse
 
     Layout.preferredWidth: implicitWidth + (toggleStateLayer.pressed ? Tokens.padding.medium * 2 : toggled ? Tokens.padding.small : 0)
-    implicitWidth: toggleBtnInner.implicitWidth + horizontalPadding * 2
+    implicitWidth: Math.max(explicitWidth, toggleBtnInner.implicitWidth + horizontalPadding * 2)
     implicitHeight: toggleBtnIcon.implicitHeight + verticalPadding * 2
     radius: toggled || toggleStateLayer.pressed ? Tokens.rounding.medium : Math.min(width, height) / 2 * Math.min(1, Tokens.rounding.scale)
     color: toggled ? Colours.palette[`m3${accent.toLowerCase()}`] : Colours.palette[`m3${accent.toLowerCase()}Container`]
@@ -84,7 +85,7 @@ StyledRect {
 
     Behavior on radius {
         Anim {
-            type: Anim.FastSpatial
+            type: Anim.DefaultEffects
         }
     }
 
@@ -94,7 +95,6 @@ StyledRect {
         }
     }
 
-    // Tooltip - positioned absolutely, doesn't affect layout
     Loader {
         id: tooltipLoader
 
@@ -109,7 +109,6 @@ StyledRect {
                 text: root.tooltip
             }
         }
-        // Completely remove from layout
         Layout.fillWidth: false
         Layout.fillHeight: false
         Layout.preferredWidth: 0

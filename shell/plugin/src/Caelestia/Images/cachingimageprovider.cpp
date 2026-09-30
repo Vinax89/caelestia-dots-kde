@@ -1,13 +1,13 @@
 #include "cachingimageprovider.hpp"
 
-#include "imagecacher.hpp"
-
 #include <qfileinfo.h>
 #include <qimage.h>
 #include <qimagereader.h>
 #include <qloggingcategory.h>
 #include <qrunnable.h>
 #include <qthreadpool.h>
+
+#include "imagecacher.hpp"
 
 Q_LOGGING_CATEGORY(lcCProv, "caelestia.images.cacheprovider", QtInfoMsg)
 
@@ -51,7 +51,6 @@ private:
         const bool needsW = size.width() <= 0;
         const bool needsH = size.height() <= 0;
 
-        // If both dimensions are missing, return the original directly
         if (needsW && needsH) {
             qCDebug(lcCProv).noquote() << "Given source size is invalid, returning original:" << path;
             m_image = QImage(path);
@@ -62,7 +61,6 @@ private:
             return;
         }
 
-        // If one dimension is missing, derive it from the source aspect ratio
         if (needsW || needsH) {
             const QImageReader sourceReader(path);
             const QSize sourceSize = sourceReader.size();
@@ -78,7 +76,6 @@ private:
                 size.setHeight(qRound(size.width() * sourceSize.height() / static_cast<qreal>(sourceSize.width())));
         }
 
-        // Try to use cached image
         const auto cachePath = ImageCacher::cachePathFor(path, size, m_fillMode);
         if (!cachePath.isEmpty()) {
             QImageReader cacheReader(cachePath);
@@ -87,12 +84,33 @@ private:
                 if (!m_image.isNull())
                     return;
             }
+
+            ImageCacher::runJob(path, cachePath, size, m_fillMode);
+
+            QImageReader built(cachePath);
+            if (built.canRead()) {
+                m_image = built.read();
+                if (!m_image.isNull())
+                    return;
+            }
         }
 
-        // Schedule cache job (this call will return the original image, but later ones will use cache)
-        ImageCacher::instance()->schedule(path, cachePath, size, m_fillMode);
+        QImageReader coldReader(path);
+        coldReader.setAutoTransform(true);
+        if (m_fillMode == ImageCacher::FillMode::Stretch) {
+            coldReader.setScaledSize(size);
+        } else {
+            const QSize source = coldReader.size();
+            if (source.isValid() && !source.isEmpty()) {
+                const Qt::AspectRatioMode mode =
+                    m_fillMode == ImageCacher::FillMode::Crop ? Qt::KeepAspectRatioByExpanding : Qt::KeepAspectRatio;
+                coldReader.setScaledSize(source.scaled(size, mode));
+            }
+        }
 
-        m_image = QImage(path);
+        m_image = coldReader.read();
+        if (m_image.isNull())
+            m_image = QImage(path);
         if (m_image.isNull()) {
             m_error = QStringLiteral("Failed to decode source: ") + path;
             qCWarning(lcCProv).noquote() << m_error;

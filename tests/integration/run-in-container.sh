@@ -4,7 +4,6 @@ set -euo pipefail
 case "${TEST_DISTRO:?}" in
     arch)
         real_pm=/usr/bin/pacman
-        package_script=sdata/arch-dist/installDP.sh
         packages="tree jq"
         query=(pacman -Q)
         remove=(pacman -Rns --noconfirm)
@@ -13,7 +12,6 @@ case "${TEST_DISTRO:?}" in
         ;;
     fedora)
         real_pm=/usr/bin/dnf
-        package_script=sdata/fedora-dist/installDP_fedora.sh
         packages="tree jq"
         query=(rpm -q)
         remove=(dnf remove -y)
@@ -22,7 +20,6 @@ case "${TEST_DISTRO:?}" in
         ;;
     debian)
         real_pm=/usr/bin/apt-get
-        package_script=sdata/debian-dist/installDP_debian.sh
         packages="tree jq"
         query=(dpkg -s)
         remove=(apt-get purge -y)
@@ -60,7 +57,20 @@ export HOME="$test_root/home"
 export XDG_CACHE_HOME="$test_root/cache"
 export BASE_DISTRO="$TEST_DISTRO"
 export PACKAGE_GROUP=core
-export CAELESTIA_INTEGRATION_PACKAGES="$packages"
+# Match the TUI Runner, which supplies this for unattended Arch installs.
+export CONFIRM_ARG=--noconfirm
+export BUNDLE_DIR="$PWD"
+package_script="$test_root/package-test.sh"
+cat > "$package_script" <<'PKG'
+#!/usr/bin/env bash
+set -euo pipefail
+source "$BUNDLE_DIR/scripts/lib/log.sh"
+source "$BUNDLE_DIR/scripts/lib/privileges.sh"
+source "$BUNDLE_DIR/scripts/lib/packages.sh"
+for package in tree jq; do
+    install_if_missing "$package" || install_if_missing "$package"
+done
+PKG
 
 echo "[case] idempotent real package install"
 bash "$package_script"
@@ -69,7 +79,7 @@ for package in $packages; do
     "${query[@]}" "$package" >/dev/null
 done
 
-echo "[case] batch failure followed by real-manager retry"
+echo "[case] package failure followed by real-manager retry"
 "${remove[@]}" tree
 state="$test_root/fail-once"
 touch "$state"
@@ -80,7 +90,7 @@ case "$TEST_DISTRO" in
 esac
 cat > "$test_root/bin/$proxy" <<EOF
 #!/usr/bin/env bash
-if [[ -f "$state" && "\$*" == *"tree jq"* ]]; then
+if [[ -f "$state" && "\$*" == *"tree"* ]]; then
     rm -f "$state"
     echo "injected first batch failure" >&2
     exit 75
@@ -93,18 +103,28 @@ bash "$package_script"
 "${query[@]}" tree >/dev/null
 
 echo "[case] cancellation terminates the active package transaction"
+# The retry case installed tree. Remove it so install_if_missing reaches the
+# blocked transaction rather than immediately returning "already installed".
+"${remove[@]}" tree
 cat > "$test_root/bin/$proxy" <<EOF
 #!/usr/bin/env bash
-trap 'exit 130' INT TERM
+touch "$test_root/cancel-started"
 sleep 30 &
-wait
+sleeper=\$!
+trap 'kill "\$sleeper" 2>/dev/null || true; wait "\$sleeper" 2>/dev/null || true; exit 130' INT TERM
+wait "\$sleeper"
 EOF
 chmod +x "$test_root/bin/$proxy"
 set +e
 timeout --signal=TERM --kill-after=2 1 bash "$package_script" >"$test_root/cancel.log" 2>&1
 cancel_status=$?
 set -e
-[[ $cancel_status -eq 124 || $cancel_status -eq 137 || $cancel_status -eq 143 ]]
+if [[ ! -e "$test_root/cancel-started" ]] ||
+    [[ $cancel_status -ne 124 && $cancel_status -ne 137 && $cancel_status -ne 143 ]]; then
+    cat "$test_root/cancel.log" >&2
+    echo "Cancellation did not interrupt a started transaction (status $cancel_status)" >&2
+    exit 1
+fi
 
 echo "[case] rollback returns package state to the captured baseline"
 rm -f "$test_root/bin/$proxy"
@@ -119,7 +139,10 @@ case "$TEST_DISTRO" in
 esac
 if [[ $was_present -eq 0 ]]; then
     "${remove[@]}" "$rollback_pkg"
-    ! "${query[@]}" "$rollback_pkg" >/dev/null 2>&1
+    if "${query[@]}" "$rollback_pkg" >/dev/null 2>&1; then
+        echo "Rollback left $rollback_pkg installed" >&2
+        exit 1
+    fi
 fi
 
 echo "[ok] $TEST_DISTRO installer integration scenarios passed"

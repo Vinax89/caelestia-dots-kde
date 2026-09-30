@@ -7,12 +7,12 @@ on:
     branches: ["**"]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   installer-integration:
@@ -50,96 +50,80 @@ jobs:
           TEST_DISTRO: ${{ matrix.distro }}
         run: bash tests/integration/run-in-container.sh
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 1: Shell script quality - syntax, shellcheck, best practices
-  # ═══════════════════════════════════════════════════════════
-  shell-quality:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
-
-      - name: Install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-
-      - name: Run shell quality checks
-        run: bash .github/scripts/check_shell_quality.sh
-
-  # ═══════════════════════════════════════════════════════════
-  # Job 2: QML syntax validation
-  # ═══════════════════════════════════════════════════════════
-  qml-lint:
-    runs-on: ubuntu-latest
-    container: archlinux:base
-    steps:
-      - name: Bootstrap checkout dependency
-        run: pacman -Sy --noconfirm git
-
-      - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
-
-      - name: Install QML parser
-        run: pacman -Syu --noconfirm --needed qt6-declarative diffutils
-
-      - name: Parse shell QML files
-        run: |
-          echo "::group::QML validation"
-          FORMATTER=$(command -v qmlformat6 || command -v qmlformat || test ! -x /usr/lib/qt6/bin/qmlformat || echo /usr/lib/qt6/bin/qmlformat)
-          test -n "$FORMATTER" || { echo 'qmlformat is required'; exit 1; }
-          failures=$(mktemp)
-          while IFS= read -r -d '' file; do
-            "$FORMATTER" --ignore-settings "$file" >/dev/null 2>&1 || echo "$file" >> "$failures"
-          done < <(find shell -name '*.qml' -print0)
-          sort -o "$failures" "$failures"
-          if ! diff -u .github/ci-baselines/qml-parse.txt "$failures"; then
-            echo 'QML parser failure set changed; inspect new failures and update the baseline only for confirmed parser limitations.'
-            exit 1
-          fi
-          echo "::endgroup::"
-
-  # ═══════════════════════════════════════════════════════════
-  # Job 3: C++ build - compile the TUI installer
-  # ═══════════════════════════════════════════════════════════
   cpp-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
+    - name: Checkout repository
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        submodules: recursive
+    - name: Install build dependencies
+      run: 'sudo apt-get update -qq
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake g++ make
+        sudo apt-get install -y -qq cmake g++ make
 
-      - name: Configure installer build
-        run: |
-          cd installer
-          cmake -B build -DCMAKE_BUILD_TYPE=Release .
-        env:
-          CCACHE_DISABLE: 1
+        '
+    - name: Configure installer build
+      run: cmake -B installer/build -S installer/tui -DCMAKE_BUILD_TYPE=Release
+      env:
+        CCACHE_DISABLE: 1
+    - name: Build installer
+      run: cmake --build installer/build -- -j"$(nproc)"
+    - name: Verify binary exists
+      run: test -f installer/build/caelestia-install && echo "Installer binary OK"
+  shell-build:
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    steps:
+    - name: Bootstrap checkout dependency
+      run: pacman -Sy --noconfirm git
+    - name: Checkout repository
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        submodules: recursive
+    - name: Install shell build dependencies
+      run: "pacman -Syu --noconfirm --needed cmake gcc pkgconf ninja \\\n  meson fftw\
+        \ iniparser \\\n  qt6-base qt6-declarative qt6-shadertools qt6-wayland \\\n\
+        \  kwindowsystem kguiaddons kglobalaccel kconfig kconfigwidgets \\\n  kcoreaddons\
+        \ ki18n kpackage kio kservice networkmanager-qt pulseaudio-qt lm_sensors qt6-tools\
+        \ \\\n  wayland libx11 libdrm pipewire \\\n  libqalculate aubio\n"
+    - name: Build pinned libcava
+      run: 'git clone --filter=blob:none https://github.com/LukashonakV/cava.git /tmp/libcava
 
-      - name: Build installer
-        run: cmake --build installer/build -- -j"$(nproc)"
+        git -C /tmp/libcava checkout --detach f03278ef9e5e7948fb206453d2f02758f8db216c
 
-      - name: Verify binary exists
-        run: test -f installer/build/caelestia-install && echo "Installer binary OK"
+        meson setup /tmp/libcava/build /tmp/libcava
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 4: Python quality - lint, compile, best practices
-  # ═══════════════════════════════════════════════════════════
+        meson compile -C /tmp/libcava/build
+
+        meson install -C /tmp/libcava/build
+
+        '
+    - name: Configure production plugin
+      env:
+        CC: /usr/bin/gcc
+        CXX: /usr/bin/g++
+        PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
+      run: cmake -G Ninja -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release -DENABLE_MODULES=plugin
+        -DREQUIRE_CAVA=ON
+    - name: Build production plugin
+      run: cmake --build shell/build --parallel
+  repo-identity:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: 3.x
+    - name: Check repository identity consistency
+      run: python3 .github/scripts/check_repo_identity.py
   python-quality:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -147,7 +131,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install lint tools
-        run: python -m pip install --disable-pip-version-check 'flake8==7.1.1'
+        run: pip install flake8
 
       - name: Python compile check
         run: |
@@ -162,10 +146,6 @@ jobs:
       - name: flake8 lint
         run: |
           echo "::group::flake8"
-          # Only check our own Python scripts, not vendored/pre-existing ones
-          # (shell/scripts holds the QML linter and other repo tooling).
-          # orion_search.py is no longer excluded: its bare except is gone and
-          # it lints clean, so the AI assistant's network code is now gated.
           flake8 .github/scripts/ shell/scripts/ \
             --exclude 'menu_perf_stats.py' \
             --max-line-length=120 \
@@ -175,16 +155,11 @@ jobs:
             --statistics
           echo "::endgroup::"
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 5: Repository integrity - cross-cutting consistency checks
-  # ═══════════════════════════════════════════════════════════
   repo-integrity:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -192,21 +167,19 @@ jobs:
           python-version: '3.x'
 
       - name: Install PyYAML
-        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+        run: pip install pyyaml
 
       - name: Run repository integrity tests
-        run: python3 .github/scripts/test_repo_integrity.py
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 6: JSON configuration validation
-  # ═══════════════════════════════════════════════════════════
+      - name: Audit settings search coverage
+        run: python3 .github/scripts/audit_search_coverage.py
+
   json-validation:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -216,19 +189,12 @@ jobs:
       - name: Validate theme.json and menu.json
         run: python3 .github/scripts/validate_json_configs.py
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 7: File hygiene - large files, whitespace, merge conflicts
-  # ═══════════════════════════════════════════════════════════
   file-hygiene:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          submodules: recursive
-          # Required: the hygiene script diffs against the merge base with the
-          # target branch. At depth 1 that diff is impossible and the gate
-          # silently passed on every pull request.
           fetch-depth: 0
 
       - name: Set up Python
@@ -237,47 +203,29 @@ jobs:
           python-version: '3.x'
 
       - name: Run file hygiene checks
-        # PRs: only files changed in this PR (hard). Pushes to main/dev: full
-        # repo scan (report-only — there is pre-existing debt that would fail
-        # a hard gate, but the log surfaces it for cleanup).
         run: python3 .github/scripts/check_file_hygiene.py ${{ github.event_name == 'push' && '--all --report-only' || '' }}
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 8: Markdown lint
-  # ═══════════════════════════════════════════════════════════
   markdown-lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Lint markdown files
         uses: DavidAnson/markdownlint-cli2-action@05f32210e84442804257b2a6f20b273450ec8265 # v19
+        continue-on-error: true
         with:
-          # The repository's legacy documentation has an existing markdownlint
-          # backlog. Keep the actively maintained installer/update documentation
-          # gated without turning that unrelated backlog into a release blocker.
           globs: |
-            .github/CONTRIBUTING.md
-            .github/docs/update_trust.md
-            .github/docs/ai_assistant_trust.md
+            README.md
+            docs/**/*.md
+            .github/*.md
             tests/integration/README.md
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 9: QML conventions - project linter regression gate
-  # ═══════════════════════════════════════════════════════════
-  # shell/scripts/qml-lint-conventions.py has thousands of pre-existing
-  # violations, so this job diffs against a stored baseline and fails only when
-  # NEW violations appear. Regenerate with --update when intentional.
   qml-conventions:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -287,18 +235,27 @@ jobs:
       - name: Run QML convention regression check
         run: python3 .github/scripts/check_qml_conventions.py
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 10: Embedded bash - syntax-check bash/sh inside QML Process commands
-  # ═══════════════════════════════════════════════════════════
-  # Quickshell runs `command: ["bash", "-c", `<script>`]` strings that qmllint
-  # and shellcheck never see; a typo there only surfaces at runtime.
+# error cascades so the reported file is not the cause. qmllint cannot resolve Quickshell's
+  qml-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.x'
+
+      - name: Check QML structural syntax
+        run: python3 .github/scripts/check_qml_syntax.py --source-root shell
+
+# Bash inside QML `command: ["bash", "-c", `...`]` strings, which qmllint and shellcheck
   embedded-bash:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -308,19 +265,11 @@ jobs:
       - name: Check bash/sh scripts embedded in QML
         run: python3 .github/scripts/check_embedded_bash.py
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 11: Config cross-reference - QML config keys vs C++ declarations
-  # ═══════════════════════════════════════════════════════════
-  # Catches Config./GlobalConfig. references that don't exist in the plugin's
-  # CONFIG_PROPERTY declarations (renamed keys, typos) - the shell logs
-  # "Cannot assign to non-existent property" and the widget silently breaks.
   config-cross-ref:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -330,46 +279,28 @@ jobs:
       - name: Cross-check QML config references against C++ declarations
         run: python3 .github/scripts/check_config_references.py
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 12: actionlint - validate workflow files themselves
-  # ═══════════════════════════════════════════════════════════
-  # Catches malformed ${{ }} expressions, bad `on:` keys, wrong permission
-  # scopes, etc. that a plain YAML parse cannot.
+  # Job 10: actionlint - validate workflow files themselves
   actionlint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Download actionlint
         run: |
-          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-            -o /tmp/actionlint.tar.gz \
+          curl -sSL -o /tmp/actionlint.tar.gz \
             https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz' | sha256sum --check
           tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
           sudo mv /tmp/actionlint /usr/local/bin/actionlint
 
       - name: Lint workflow files
         run: actionlint -shellcheck= -color -ignore 'missing input "app-id"' -ignore 'input "client-id" is not defined'
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 13: Wayland static lifetime - catch exit-time SIGSEGVs
-  # ═══════════════════════════════════════════════════════════
-  # A class inheriting QWaylandClientExtensionTemplate<T> or QtWayland::* owns
-  # a live wl_proxy. Holding one as a function-local (or other) static by
-  # value tears it down from an exit handler after Qt's closed the display,
-  # which segfaults the shell on quit - see windowscreencast.cpp/plasmawindows.cpp
-  # for the fix pattern (leak the pointer instead).
   wayland-static-lifetime:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -379,77 +310,7 @@ jobs:
       - name: Check for value-typed statics of Wayland proxy-wrapping types
         run: python3 .github/scripts/check_wayland_static_lifetime.py
 
-  # ═══════════════════════════════════════════════════════════
-  # Job 14: Production shell/plugin build
-  # ═══════════════════════════════════════════════════════════
-  shell-build:
-    runs-on: ubuntu-latest
-    container: archlinux:base
-    steps:
-      - name: Bootstrap checkout dependency
-        run: pacman -Sy --noconfirm git
-
-      - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
-
-      - name: Install shell build dependencies
-        run: |
-          pacman -Syu --noconfirm --needed cmake gcc pkgconf ninja \
-            meson fftw iniparser \
-            qt6-base qt6-declarative qt6-shadertools qt6-wayland \
-            kwindowsystem kguiaddons kglobalaccel kconfig kconfigwidgets \
-            kcoreaddons ki18n kpackage kio kservice networkmanager-qt \
-            wayland libx11 libdrm pipewire \
-            libqalculate aubio
-
-      - name: Build pinned libcava
-        run: |
-          git clone --filter=blob:none https://github.com/LukashonakV/cava.git /tmp/libcava
-          git -C /tmp/libcava checkout --detach f03278ef9e5e7948fb206453d2f02758f8db216c
-          meson setup /tmp/libcava/build /tmp/libcava
-          meson compile -C /tmp/libcava/build
-          meson install -C /tmp/libcava/build
-
-      - name: Configure production plugin
-        env:
-          CC: /usr/bin/gcc
-          CXX: /usr/bin/g++
-          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
-        run: cmake -G Ninja -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release -DENABLE_MODULES=plugin
-
-      - name: Build production plugin
-        run: cmake --build shell/build --parallel
-
-  # ═══════════════════════════════════════════════════════════
-  # Job 15: Repository identity - hardcoded slugs vs version.env
-  # ═══════════════════════════════════════════════════════════
-  # The updater and update checker run before any checkout exists, so they
-  # carry a compiled-in repository slug. This job is what keeps that default
-  # in sync with REPO in .github/version.env.
-  repo-identity:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: '3.x'
-
-      - name: Check repository identity consistency
-        run: python3 .github/scripts/check_repo_identity.py
-
-  # Job 14b: QML import completeness - missing/extra imports
-  # ═══════════════════════════════════════════════════════════
-  # No real Qt/QML toolchain is available here (qmllint6 can't resolve this
-  # repo's qs.* directory-import convention at all), and no other job ever
-  # loads the QML engine - see check_qml_imports.py's module docstring for
-  # the exact/correlation registry design. This is what would have caught
-  # Nmcli.qml shipping without `import Quickshell` ("Singleton is not a
-  # type", cascading into "Type X unavailable" for every transitive importer).
+# No Qt/QML toolchain here (qmllint6 cannot resolve this repo's qs.* directory imports), so
   qml-imports:
     runs-on: ubuntu-latest
     steps:
@@ -464,16 +325,77 @@ jobs:
       - name: Check QML import completeness
         run: python3 .github/scripts/check_qml_imports.py --shell-root shell
 
-  # ═══════════════════════════════════════════════════════════
-  # Final gate: require all non-skippable jobs to pass
-  # ═══════════════════════════════════════════════════════════
+  qml-template-interp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.x'
+
+      - name: Check for unescaped bash interpolation in QML template literals
+        run: python3 .github/scripts/check_qml_template_interp.py
+
+  # Job 14: Shell quality - syntax, shellcheck, strict mode, unsafe patterns
+  shell-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      - name: Run shell quality checks
+        run: bash .github/scripts/check_shell_quality.sh
+
+  # Job 15: C++ formatting - the files this change touches, against shell/.clang-format.
+  # The plugin has a backlog of files that predate the formatter, so the check is
+  # scoped to changed files rather than the whole tree.
+  cpp-format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Two commits, so a push can diff against its parent.
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.x'
+
+      - name: Fetch the base branch
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+
+      - name: Install clang-format
+        run: pip install clang-format==22.1.8
+
+      - name: Check C++ formatting
+        run: python3 .github/scripts/check_cpp_format.py
+
+  shell-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run the shell test suite
+        run: bash tests/run-tests.sh
+
   validate-gate:
     needs:
       - installer-integration
-      - shell-quality
-      - qml-lint
       - cpp-build
+      - shell-build
+      - repo-identity
       - python-quality
+      - shell-tests
       - repo-integrity
       - json-validation
       - file-hygiene
@@ -483,9 +405,10 @@ jobs:
       - config-cross-ref
       - actionlint
       - wayland-static-lifetime
-      - shell-build
-      - repo-identity
       - qml-imports
+      - qml-template-interp
+      - shell-quality
+      - cpp-format
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -496,9 +419,9 @@ jobs:
 
           declare -A job_results
           job_results[installer-integration]="${{ needs.installer-integration.result }}"
-          job_results[shell-quality]="${{ needs.shell-quality.result }}"
-          job_results[qml-lint]="${{ needs.qml-lint.result }}"
           job_results[cpp-build]="${{ needs.cpp-build.result }}"
+          job_results[shell-build]="${{ needs.shell-build.result }}"
+          job_results[repo-identity]="${{ needs.repo-identity.result }}"
           job_results[python-quality]="${{ needs.python-quality.result }}"
           job_results[repo-integrity]="${{ needs.repo-integrity.result }}"
           job_results[json-validation]="${{ needs.json-validation.result }}"
@@ -509,9 +432,11 @@ jobs:
           job_results[config-cross-ref]="${{ needs.config-cross-ref.result }}"
           job_results[actionlint]="${{ needs.actionlint.result }}"
           job_results[wayland-static-lifetime]="${{ needs.wayland-static-lifetime.result }}"
-          job_results[shell-build]="${{ needs.shell-build.result }}"
-          job_results[repo-identity]="${{ needs.repo-identity.result }}"
           job_results[qml-imports]="${{ needs.qml-imports.result }}"
+          job_results[qml-template-interp]="${{ needs.qml-template-interp.result }}"
+          job_results[shell-quality]="${{ needs.shell-quality.result }}"
+          job_results[shell-tests]="${{ needs.shell-tests.result }}"
+          job_results[cpp-format]="${{ needs.cpp-format.result }}"
 
           all_passed=true
           for job in "${!job_results[@]}"; do

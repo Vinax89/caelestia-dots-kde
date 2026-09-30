@@ -16,10 +16,6 @@ import qs.modules.nexus.common
 PageBase {
     id: root
 
-    title: qsTr("Toggle & rearrange")
-    isSubPage: true
-    scrollable: true
-
     readonly property var componentMeta: {
         "logo": { icon: "rocket_launch", name: qsTr("Logo") },
         "workspaces": { icon: "workspaces", name: qsTr("Workspaces") },
@@ -29,7 +25,7 @@ PageBase {
             available: BarComponents.GithubStore.available,
             unavailableText: qsTr("GitHub token not detected")
         },
-        "activeWindow": { icon: "dock_to_right", name: qsTr("Active window") },
+        "greeter": { icon: "waving_hand", name: qsTr("Greeter") },
         "tray": { icon: "expand_more", name: qsTr("System tray") },
         "updateIndicator": { icon: "update", name: qsTr("Updates") },
         "clock": { icon: "schedule", name: qsTr("Clock") },
@@ -46,20 +42,229 @@ PageBase {
         "showDesktop": { icon: "keyboard_double_arrow_down", name: qsTr("Show Desktop") },
         "power": { icon: "power_settings_new", name: qsTr("Power menu") }
     }
-
     property bool isGlobalDragging: false
-
+    property string globalDragCompId: ""
     property string globalDragSourceList: ""
-
-    property int globalDragSourceIndex: -1
-
     property string globalDragHoveredList: ""
-
     readonly property real zonePadding: Tokens.padding.medium
-
     readonly property real emptyZoneHeight: 72
+    property Component panelDelegate: Component {
+        Item {
+            id: delegateWrapper
 
-    function getModel(name) {
+            required property int index
+            required property string compId
+            required property bool isPlaceholder
+
+            readonly property bool isAvailable: (componentMeta[compId]?.available ?? true)
+            readonly property string sourceList: {
+                if (ListView.view === leftList) return "left";
+                if (ListView.view === middleList) return "middle";
+                if (ListView.view === rightList) return "right";
+                return "library";
+            }
+            readonly property bool isDraggingThis: activeDragArea.drag.active
+
+            width: ListView.view ? ListView.view.width : 0
+            height: (root.isGlobalDragging && root.globalDragSourceList === sourceList && root.globalDragCompId === compId && root.globalDragHoveredList !== sourceList) ? 0 : 50
+            visible: height > 0
+            z: isDraggingThis ? 100 : 1
+
+            Behavior on height { Anim { type: Anim.FastSpatial } }
+
+            DropArea {
+                anchors.fill: parent
+                keys: ["component"]
+                onEntered: drag => {
+                    let sourceItem = drag.source;
+                    if (!sourceItem) return;
+
+                    let to = delegateWrapper.index;
+                    let targetModel = root.getModel(sourceList);
+                    if (!targetModel) return;
+
+                    if (sourceItem.sourceList === sourceList) {
+                        let from = root.findItemIndex(targetModel, root.globalDragCompId);
+                        if (from !== -1 && to !== -1 && from !== to) {
+                            targetModel.move(from, to, 1);
+                        }
+                    } else {
+                        let phIndex = -1;
+                        for (let i = 0; i < targetModel.count; i++) {
+                            if (targetModel.get(i).isPlaceholder) {
+                                phIndex = i;
+                                break;
+                            }
+                        }
+                        if (phIndex !== -1 && to !== -1 && phIndex !== to) {
+                            targetModel.move(phIndex, to, 1);
+                        }
+                    }
+                }
+            }
+
+            ConnectedRect {
+                id: activeDelegate
+
+                width: delegateWrapper.width
+                height: 50
+                radius: Tokens.rounding.medium
+                color: isPlaceholder ? "transparent" : (sourceList !== "library" ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainerLowest)
+                border.width: isPlaceholder ? 1 : 0
+                border.color: Colours.palette.m3outline
+                opacity: isPlaceholder ? 0.2 : (delegateWrapper.isAvailable ? 1.0 : 0.6)
+                scale: 1.0
+                Drag.active: activeDragArea.drag.active
+                Drag.source: delegateWrapper
+                Drag.hotSpot.x: width / 2
+                Drag.hotSpot.y: height / 2
+                Drag.keys: ["component"]
+                states: State {
+                    when: activeDragArea.drag.active
+
+                    ParentChange { target: activeDelegate; parent: root.flickable.contentItem }
+                    PropertyChanges { target: activeDelegate; scale: 1.05 }
+                }
+
+                Behavior on scale { Anim { type: Anim.FastSpatial } }
+
+                MouseArea {
+                    id: activeDragArea
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    drag.target: activeDelegate
+                    drag.axis: Drag.XAndYAxis
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: !isPlaceholder
+
+                    onPressed: {
+                        root.globalDragCompId = compId;
+                        root.globalDragSourceList = sourceList;
+                        root.globalDragHoveredList = sourceList;
+                    }
+
+                    onPositionChanged: {
+                        if (activeDragArea.drag.active && !root.isGlobalDragging) {
+                            root.isGlobalDragging = true;
+                        }
+                    }
+
+                    onReleased: {
+                        let draggedId = root.globalDragCompId;
+                        let srcList = root.globalDragSourceList;
+                        let hovList = root.globalDragHoveredList;
+
+                        root.isGlobalDragging = false;
+                        root.globalDragCompId = "";
+                        root.globalDragSourceList = "";
+                        root.globalDragHoveredList = "";
+
+                        if (draggedId !== "" && srcList !== "" && hovList !== "" && srcList !== hovList) {
+                            let srcModel = root.getModel(srcList);
+                            let dstModel = root.getModel(hovList);
+
+                            if (srcModel && dstModel) {
+                                let srcIdx = root.findItemIndex(srcModel, draggedId);
+                                let phIndex = -1;
+                                for (let i = 0; i < dstModel.count; i++) {
+                                    if (dstModel.get(i).isPlaceholder) {
+                                        phIndex = i;
+                                        break;
+                                    }
+                                }
+
+                                if (srcIdx !== -1) {
+                                    srcModel.remove(srcIdx);
+                                    if (phIndex !== -1) {
+                                        dstModel.set(phIndex, { compId: draggedId, isPlaceholder: false });
+                                    } else {
+                                        dstModel.append({ compId: draggedId, isPlaceholder: false });
+                                    }
+                                }
+                            }
+                        }
+
+                        root.clearAllPlaceholders();
+                        activeDelegate.x = 0;
+                        activeDelegate.y = 0;
+                        save();
+                    }
+
+                    onCanceled: {
+                        root.isGlobalDragging = false;
+                        root.globalDragCompId = "";
+                        root.globalDragSourceList = "";
+                        root.globalDragHoveredList = "";
+                        root.clearAllPlaceholders();
+                        activeDelegate.x = 0;
+                        activeDelegate.y = 0;
+                    }
+                }
+
+                StateLayer {
+                    anchors.fill: parent
+                    radius: Tokens.rounding.medium
+                    acceptedButtons: Qt.NoButton
+                    color: Colours.palette.m3onSurface
+                    opacity: activeDragArea.containsMouse && !isPlaceholder && !isDraggingThis ? 0.08 : 0
+
+                    Behavior on opacity { Anim { type: Anim.FastEffects } }
+                }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: Tokens.padding.medium
+                    spacing: Tokens.spacing.small
+                    visible: !isPlaceholder
+
+                    MaterialIcon {
+                        text: componentMeta[compId]?.icon ?? "widgets"
+                        color: sourceList !== "library" ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: {
+                            const base = componentMeta[compId]?.name ?? compId;
+                            if (delegateWrapper.isAvailable)
+                                return base;
+                            const reason = componentMeta[compId]?.unavailableText ?? qsTr("Not detected");
+                            return `${base} (${reason})`;
+                        }
+                        font: Tokens.font.body.small
+                        color: sourceList !== "library" ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
+                        elide: Text.ElideRight
+                    }
+
+                    IconButton {
+                        visible: sourceList === "library"
+                        icon: "add"
+                        type: IconButton.Text
+                        ToolTip.text: qsTr("Add to right zone")
+                        ToolTip.visible: hovered
+                        onClicked: root.moveItemToZone(compId, "right")
+                    }
+
+                    IconButton {
+                        visible: sourceList !== "library"
+                        icon: "close"
+                        type: IconButton.Text
+                        ToolTip.text: qsTr("Disable component")
+                        ToolTip.visible: hovered
+                        onClicked: root.moveItemToZone(compId, "library")
+                    }
+
+                    MaterialIcon {
+                        text: "drag_indicator"
+                        color: Colours.palette.m3onSurfaceVariant
+                    }
+                }
+            }
+        }
+    }
+
+    function getModel(name: string): ListModel {
         if (name === "left") return leftModel;
         if (name === "middle") return middleModel;
         if (name === "right") return rightModel;
@@ -67,7 +272,61 @@ PageBase {
         return null;
     }
 
-    function load() {
+    function findItemIndex(model: ListModel, compId: string): int {
+        if (!model) return -1;
+        for (let i = 0; i < model.count; i++) {
+            let item = model.get(i);
+            if (item && item.compId === compId && !item.isPlaceholder)
+                return i;
+        }
+        return -1;
+    }
+
+    function clearPlaceholders(exceptModelName: string): void {
+        const listNames = ["left", "middle", "right", "library"];
+        for (let name of listNames) {
+            if (name === exceptModelName) continue;
+            let model = getModel(name);
+            if (model) {
+                for (let i = model.count - 1; i >= 0; i--) {
+                    if (model.get(i).isPlaceholder)
+                        model.remove(i);
+                }
+            }
+        }
+    }
+
+    function clearAllPlaceholders(): void {
+        clearPlaceholders("");
+    }
+
+    function moveItemToZone(compId: string, targetZone: string): void {
+        const listNames = ["left", "middle", "right", "library"];
+        let foundSource = "";
+        let foundIdx = -1;
+
+        for (let name of listNames) {
+            let model = getModel(name);
+            let idx = findItemIndex(model, compId);
+            if (idx !== -1) {
+                foundSource = name;
+                foundIdx = idx;
+                break;
+            }
+        }
+
+        if (foundIdx === -1 || foundSource === targetZone) return;
+
+        let srcModel = getModel(foundSource);
+        let dstModel = getModel(targetZone);
+        if (srcModel && dstModel) {
+            srcModel.remove(foundIdx);
+            dstModel.append({ compId: compId, isPlaceholder: false });
+            save();
+        }
+    }
+
+    function load(): void {
         let entries = Config.bar.entries;
         leftModel.clear();
         middleModel.clear();
@@ -98,15 +357,15 @@ PageBase {
         }
     }
 
-    function defaultEntries() {
+    function defaultEntries(): var {
         return [
             { id: "logo", enabled: true, zone: "left" },
             { id: "workspaces", enabled: true, zone: "left" },
-            { id: "activeWindow", enabled: true, zone: "left" },
+            { id: "greeter", enabled: true, zone: "left" },
             { id: "dock", enabled: true, zone: "middle" },
             { id: "tray", enabled: true, zone: "right" },
             { id: "updateIndicator", enabled: true, zone: "right" },
-            { id: "github", enabled: true, zone: "right" },
+            { id: "github", enabled: false, zone: "right" },
             { id: "clock", enabled: true, zone: "right" },
             { id: "statusIcons", enabled: true, zone: "right" },
             { id: "kbLayoutIndicator", enabled: false, zone: "right" },
@@ -122,7 +381,7 @@ PageBase {
         ];
     }
 
-    function resetToDefaults() {
+    function resetToDefaults(): void {
         const entries = defaultEntries();
         GlobalConfig.bar.entries = entries;
 
@@ -147,7 +406,7 @@ PageBase {
         }
     }
 
-    function save() {
+    function save(): void {
         let newEntries = [];
 
         for (let i = 0; i < leftModel.count; i++) {
@@ -174,21 +433,22 @@ PageBase {
         GlobalConfig.bar.entries = newEntries;
     }
 
+    title: qsTr("Toggle & rearrange")
+    isSubPage: true
+    scrollable: true
+
     Component.onCompleted: load()
 
     RowLayout {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.large
+        spacing: Tokens.spacing.large
+
         ListModel { id: leftModel }
         ListModel { id: middleModel }
         ListModel { id: rightModel }
         ListModel { id: libraryModel }
 
-        anchors.fill: parent
-
-        anchors.margins: Tokens.padding.large
-
-        spacing: Tokens.spacing.large
-
-        // Left Side: Active Components Zones
         ColumnLayout {
             Layout.fillWidth: true
             Layout.preferredWidth: 1
@@ -207,7 +467,6 @@ PageBase {
                 color: Colours.palette.m3onSurfaceVariant
             }
 
-            // Left Zone
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, leftList.contentHeight + root.zonePadding * 2)
@@ -215,12 +474,12 @@ PageBase {
                 radius: Tokens.rounding.large
 
                 Text {
-                    text: qsTr("Left Zone")
-                    font: Tokens.font.label.large
-                    color: Colours.palette.m3onSurfaceVariant
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: Tokens.padding.small
+                    text: qsTr("Left Zone")
+                    font: Tokens.font.label.large
+                    color: Colours.palette.m3onSurfaceVariant
                     visible: leftModel.count === 0 || (leftModel.count === 1 && leftModel.get(0).isPlaceholder)
                 }
 
@@ -231,14 +490,18 @@ PageBase {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
                         root.globalDragHoveredList = "left";
+                        root.clearPlaceholders("left");
 
                         if (sourceItem.sourceList !== "left") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < leftModel.count; i++) {
-                                if (leftModel.get(i).isPlaceholder) hasPlaceholder = true;
+                                if (leftModel.get(i).isPlaceholder) {
+                                    hasPlaceholder = true;
+                                    break;
+                                }
                             }
                             if (!hasPlaceholder) {
-                                leftModel.append({ compId: sourceItem.compId, isPlaceholder: true });
+                                leftModel.append({ compId: root.globalDragCompId, isPlaceholder: true });
                             }
                         }
                     }
@@ -253,14 +516,12 @@ PageBase {
                     spacing: Tokens.spacing.small
                     model: leftModel
                     clip: true
-
-                    move: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                    moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    move: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
+                    moveDisplaced: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
                     delegate: root.panelDelegate
                 }
             }
 
-            // Middle Zone
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, middleList.contentHeight + root.zonePadding * 2)
@@ -268,12 +529,12 @@ PageBase {
                 radius: Tokens.rounding.large
 
                 Text {
-                    text: qsTr("Middle Zone")
-                    font: Tokens.font.label.large
-                    color: Colours.palette.m3onSurfaceVariant
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: Tokens.padding.small
+                    text: qsTr("Middle Zone")
+                    font: Tokens.font.label.large
+                    color: Colours.palette.m3onSurfaceVariant
                     visible: middleModel.count === 0 || (middleModel.count === 1 && middleModel.get(0).isPlaceholder)
                 }
 
@@ -284,14 +545,18 @@ PageBase {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
                         root.globalDragHoveredList = "middle";
+                        root.clearPlaceholders("middle");
 
                         if (sourceItem.sourceList !== "middle") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < middleModel.count; i++) {
-                                if (middleModel.get(i).isPlaceholder) hasPlaceholder = true;
+                                if (middleModel.get(i).isPlaceholder) {
+                                    hasPlaceholder = true;
+                                    break;
+                                }
                             }
                             if (!hasPlaceholder) {
-                                middleModel.append({ compId: sourceItem.compId, isPlaceholder: true });
+                                middleModel.append({ compId: root.globalDragCompId, isPlaceholder: true });
                             }
                         }
                     }
@@ -306,14 +571,12 @@ PageBase {
                     spacing: Tokens.spacing.small
                     model: middleModel
                     clip: true
-
-                    move: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                    moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    move: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
+                    moveDisplaced: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
                     delegate: root.panelDelegate
                 }
             }
 
-            // Right Zone
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: Math.max(root.emptyZoneHeight, rightList.contentHeight + root.zonePadding * 2)
@@ -321,12 +584,12 @@ PageBase {
                 radius: Tokens.rounding.large
 
                 Text {
-                    text: qsTr("Right Zone")
-                    font: Tokens.font.label.large
-                    color: Colours.palette.m3onSurfaceVariant
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: Tokens.padding.small
+                    text: qsTr("Right Zone")
+                    font: Tokens.font.label.large
+                    color: Colours.palette.m3onSurfaceVariant
                     visible: rightModel.count === 0 || (rightModel.count === 1 && rightModel.get(0).isPlaceholder)
                 }
 
@@ -337,14 +600,18 @@ PageBase {
                         let sourceItem = drag.source;
                         if (!sourceItem) return;
                         root.globalDragHoveredList = "right";
+                        root.clearPlaceholders("right");
 
                         if (sourceItem.sourceList !== "right") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < rightModel.count; i++) {
-                                if (rightModel.get(i).isPlaceholder) hasPlaceholder = true;
+                                if (rightModel.get(i).isPlaceholder) {
+                                    hasPlaceholder = true;
+                                    break;
+                                }
                             }
                             if (!hasPlaceholder) {
-                                rightModel.append({ compId: sourceItem.compId, isPlaceholder: true });
+                                rightModel.append({ compId: root.globalDragCompId, isPlaceholder: true });
                             }
                         }
                     }
@@ -359,15 +626,13 @@ PageBase {
                     spacing: Tokens.spacing.small
                     model: rightModel
                     clip: true
-
-                    move: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                    moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    move: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
+                    moveDisplaced: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
                     delegate: root.panelDelegate
                 }
             }
         }
 
-        // Right Side: Library
         ColumnLayout {
             Layout.fillWidth: true
             Layout.preferredWidth: 1
@@ -411,12 +676,12 @@ PageBase {
                 color: "transparent"
 
                 Text {
-                    text: qsTr("Empty")
-                    font: Tokens.font.label.large
-                    color: Colours.palette.m3onSurfaceVariant
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
                     anchors.topMargin: Tokens.padding.small
+                    text: qsTr("Empty")
+                    font: Tokens.font.label.large
+                    color: Colours.palette.m3onSurfaceVariant
                     visible: libraryModel.count === 0 || (libraryModel.count === 1 && libraryModel.get(0).isPlaceholder)
                 }
 
@@ -428,14 +693,18 @@ PageBase {
                         if (!sourceItem) return;
 
                         root.globalDragHoveredList = "library";
+                        root.clearPlaceholders("library");
 
                         if (sourceItem.sourceList !== "library") {
                             let hasPlaceholder = false;
                             for (let i = 0; i < libraryModel.count; i++) {
-                                if (libraryModel.get(i).isPlaceholder) hasPlaceholder = true;
+                                if (libraryModel.get(i).isPlaceholder) {
+                                    hasPlaceholder = true;
+                                    break;
+                                }
                             }
                             if (!hasPlaceholder) {
-                                libraryModel.append({ compId: sourceItem.compId, isPlaceholder: true });
+                                libraryModel.append({ compId: root.globalDragCompId, isPlaceholder: true });
                             }
                         }
                     }
@@ -450,192 +719,9 @@ PageBase {
                     spacing: Tokens.spacing.small
                     model: libraryModel
                     clip: true
-
-                    move: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                    moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
-
+                    move: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
+                    moveDisplaced: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
                     delegate: root.panelDelegate
-                }
-            }
-        }
-    }
-
-    property Component panelDelegate: Component {
-
-        Item {
-            id: delegateWrapper
-
-            required property int index
-            required property string compId
-            required property bool isPlaceholder
-            readonly property bool isAvailable: (componentMeta[compId]?.available ?? true)
-
-            property string sourceList: {
-                if (ListView.view === leftList) return "left";
-                if (ListView.view === middleList) return "middle";
-                if (ListView.view === rightList) return "right";
-                return "library";
-            }
-
-            width: ListView.view.width
-            height: (root.isGlobalDragging && root.globalDragSourceList === sourceList && root.globalDragSourceIndex === index && root.globalDragHoveredList !== sourceList) ? 0 : 50
-            visible: height > 0
-
-            Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-            property bool isDraggingThis: activeDragArea.drag.active
-
-            z: isDraggingThis ? 100 : 1
-
-            DropArea {
-                anchors.fill: parent
-                keys: ["component"]
-                onEntered: drag => {
-                    let sourceItem = drag.source;
-                    if (!sourceItem) return;
-
-                    let from = -1;
-                    let to = delegateWrapper.index;
-                    let targetModel = root.getModel(sourceList);
-
-                    if (sourceItem.sourceList === sourceList) {
-                        from = root.globalDragSourceIndex;
-                    } else {
-                        for (let i = 0; i < targetModel.count; i++) {
-                            if (targetModel.get(i).isPlaceholder) { from = i; break; }
-                        }
-                    }
-
-                    if (from !== -1 && to !== -1 && from !== to) {
-                        targetModel.move(from, to, 1);
-                        if (sourceItem.sourceList === sourceList) {
-                            root.globalDragSourceIndex = to;
-                        }
-                    }
-                }
-            }
-
-            StyledRect {
-                id: activeDelegate
-
-                width: delegateWrapper.width
-                height: 50
-                color: isDraggingThis ? Colours.layer(Colours.palette.m3surfaceContainerHighest, 2) : (sourceList !== "library" ? Colours.palette.m3surfaceContainerHigh : Colours.palette.m3surfaceContainer)
-                radius: Tokens.rounding.medium
-                border.color: isDraggingThis ? Colours.palette.m3outline : (sourceList === "library" ? Colours.palette.m3outlineVariant : "transparent")
-                border.width: isDraggingThis ? 2 : (sourceList === "library" ? 1 : 0)
-                opacity: isPlaceholder ? 0.2 : (delegateWrapper.isAvailable ? 1.0 : 0.55)
-
-                MouseArea {
-                    id: activeDragArea
-
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    drag.target: isPlaceholder || !delegateWrapper.isAvailable ? null : activeDelegate
-                    drag.axis: Drag.XAndYAxis
-
-                    onPressed: {
-                        if (isPlaceholder || !delegateWrapper.isAvailable) return;
-                        root.isGlobalDragging = true;
-                        root.globalDragSourceList = sourceList;
-                        root.globalDragSourceIndex = index;
-                        root.globalDragHoveredList = sourceList;
-                    }
-
-                    onReleased: {
-                        if (isPlaceholder || !delegateWrapper.isAvailable) return;
-
-                        let finalHovered = root.globalDragHoveredList;
-                        root.isGlobalDragging = false;
-
-                        let targetModel = root.getModel(finalHovered);
-                        let sourceModel = root.getModel(sourceList);
-
-                        if (finalHovered !== sourceList && finalHovered !== "" && targetModel) {
-                            let pIndex = -1;
-                            for (let i = 0; i < targetModel.count; i++) {
-                                if (targetModel.get(i).isPlaceholder) { pIndex = i; break; }
-                            }
-
-                            let proceed = true;
-
-                            if (pIndex !== -1 && proceed) {
-                                targetModel.remove(pIndex);
-                                targetModel.insert(pIndex, { compId: compId, isPlaceholder: false });
-                                sourceModel.remove(root.globalDragSourceIndex);
-                            }
-                        }
-
-                        for (let i = leftModel.count - 1; i >= 0; i--) {
-                            if (leftModel.get(i).isPlaceholder) leftModel.remove(i);
-                        }
-                        for (let i = middleModel.count - 1; i >= 0; i--) {
-                            if (middleModel.get(i).isPlaceholder) middleModel.remove(i);
-                        }
-                        for (let i = rightModel.count - 1; i >= 0; i--) {
-                            if (rightModel.get(i).isPlaceholder) rightModel.remove(i);
-                        }
-                        for (let i = libraryModel.count - 1; i >= 0; i--) {
-                            if (libraryModel.get(i).isPlaceholder) libraryModel.remove(i);
-                        }
-
-                        activeDelegate.x = 0;
-                        activeDelegate.y = 0;
-                        save();
-                    }
-                }
-
-                StateLayer {
-                    anchors.fill: parent
-                    radius: Tokens.rounding.medium
-                    acceptedButtons: Qt.NoButton
-                    color: Colours.palette.m3onSurface
-                    opacity: activeDragArea.containsMouse && !isPlaceholder && !isDraggingThis ? 0.08 : 0
-
-                    Behavior on opacity { NumberAnimation { duration: 150 } }
-                }
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: Tokens.padding.medium
-                    spacing: Tokens.spacing.small
-                    visible: !isPlaceholder
-
-                    MaterialIcon {
-                        text: componentMeta[compId]?.icon ?? "widgets"
-                        color: sourceList !== "library" ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: {
-                            const base = componentMeta[compId]?.name ?? compId;
-                            if (delegateWrapper.isAvailable)
-                                return base;
-                            const reason = componentMeta[compId]?.unavailableText ?? qsTr("Not detected");
-                            return `${base} (${reason})`;
-                        }
-                        font: Tokens.font.body.small
-                        color: sourceList !== "library" ? Colours.palette.m3onSurface : Colours.palette.m3onSurfaceVariant
-                    }
-
-                    MaterialIcon {
-                        text: "drag_indicator"
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                }
-
-                Drag.active: activeDragArea.drag.active
-                Drag.source: delegateWrapper
-                Drag.hotSpot.x: width / 2
-                Drag.hotSpot.y: height / 2
-                Drag.keys: ["component"]
-
-                states: State {
-                    when: activeDragArea.drag.active
-
-                    ParentChange { target: activeDelegate; parent: root.flickable.contentItem }
-                    PropertyChanges { target: activeDelegate; scale: 1.05 }
                 }
             }
         }

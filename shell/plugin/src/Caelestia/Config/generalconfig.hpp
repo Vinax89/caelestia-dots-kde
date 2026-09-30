@@ -1,63 +1,41 @@
 #pragma once
 
-#include "configobject.hpp"
-
 #include <QFileInfo>
 #include <QStandardPaths>
+
+#include "../Settings/objectnode.hpp"
+#include "common.hpp"
 
 namespace caelestia::config {
 
 using Qt::StringLiterals::operator""_s;
+using settings::vmap;
 
-class GeneralApps : public ConfigObject {
-    Q_OBJECT
-    QML_ANONYMOUS
+class GeneralApps : public settings::ObjectNode {
+    CONFIG_NODE(GeneralApps, settings::ObjectNode)
 
     CONFIG_GLOBAL_PROPERTY(QStringList, terminal, { u"foot"_s })
     CONFIG_GLOBAL_PROPERTY(QStringList, audio, { u"xdg-open"_s })
     CONFIG_GLOBAL_PROPERTY(QStringList, playback, { u"xdg-open"_s })
     CONFIG_GLOBAL_PROPERTY(QStringList, explorer, { u"xdg-open"_s })
-
-public:
-    explicit GeneralApps(QObject* parent = nullptr)
-        : ConfigObject(parent) {}
 };
 
-class GeneralIdle : public ConfigObject {
-    Q_OBJECT
-    QML_ANONYMOUS
+class GeneralBatteryWarnLevel : public settings::ObjectNode {
+    CONFIG_NODE(GeneralBatteryWarnLevel, settings::ObjectNode)
 
-    CONFIG_GLOBAL_PROPERTY(bool, lockBeforeSleep, true)
-    CONFIG_GLOBAL_PROPERTY(bool, inhibitWhenAudio, true)
-    CONFIG_GLOBAL_PROPERTY(QVariantList, timeouts,
-        {
-            vmap({
-                { u"timeout"_s, 180 },
-                { u"idleAction"_s, u"lock"_s },
-            }),
-            vmap({
-                { u"timeout"_s, 300 },
-                { u"idleAction"_s, u"dpms off"_s },
-                { u"returnAction"_s, u"dpms on"_s },
-            }),
-            vmap({
-                { u"timeout"_s, 600 },
-                { u"idleAction"_s, QStringList{ u"suspendThenHibernate"_s } },
-                { u"enabled"_s, false },
-            }),
-        })
-
-public:
-    explicit GeneralIdle(QObject* parent = nullptr)
-        : ConfigObject(parent) {}
+    CONFIG_PROPERTY(int, level, -1)
+    CONFIG_PROPERTY(QString, title, {})
+    CONFIG_PROPERTY(QString, message, {})
+    CONFIG_PROPERTY(QString, icon, {})
+    CONFIG_PROPERTY(bool, critical, false)
 };
+CONFIG_LIST_TYPE(GeneralBatteryWarnLevel, GeneralBatteryWarnList)
 
-class GeneralBattery : public ConfigObject {
-    Q_OBJECT
-    QML_ANONYMOUS
+class GeneralBattery : public settings::ObjectNode {
+    CONFIG_NODE(GeneralBattery, settings::ObjectNode)
 
-    CONFIG_GLOBAL_PROPERTY(QVariantList, warnLevels,
-        {
+    CONFIG_GLOBAL_LIST(GeneralBatteryWarnList, warnLevels,
+        DEFAULT_ARG({
             vmap({
                 { u"level"_s, 20 },
                 { u"title"_s, u"Low battery"_s },
@@ -77,37 +55,25 @@ class GeneralBattery : public ConfigObject {
                 { u"icon"_s, u"battery_android_alert"_s },
                 { u"critical"_s, true },
             }),
-        })
-    CONFIG_GLOBAL_PROPERTY(int, criticalLevel, 3)
-
-public:
-    explicit GeneralBattery(QObject* parent = nullptr)
-        : ConfigObject(parent) {}
+        }))
 };
 
-class GeneralConfig : public ConfigObject {
-    Q_OBJECT
-    QML_ANONYMOUS
+class GeneralConfig : public settings::ObjectNode {
+    CONFIG_NODE(GeneralConfig, settings::ObjectNode)
 
-    CONFIG_GLOBAL_PROPERTY(QString, logo)
+    CONFIG_GLOBAL_PROPERTY(QString, logo, QString())
     CONFIG_PROPERTY(bool, showOverFullscreen, false)
     CONFIG_PROPERTY(qreal, mediaGifSpeedAdjustment, 300)
     CONFIG_PROPERTY(qreal, sessionGifSpeed, 0.7)
+    CONFIG_PROPERTY(QString, language, QStringLiteral("system"))
     CONFIG_PROPERTY(bool, debugLogs, false)
     CONFIG_PROPERTY(bool, checkUpdates, true)
     CONFIG_PROPERTY(bool, magicLampEnabled, true)
+    CONFIG_PROPERTY(bool, caelestiaMode, false)
     CONFIG_PROPERTY(bool, krohnkiteEnabled, false)
-    CONFIG_PROPERTY(QString, krohnkiteLastLayout, "BTree")
+    CONFIG_PROPERTY(QString, krohnkiteLastLayout, QStringLiteral("BTree"))
     CONFIG_SUBOBJECT(GeneralApps, apps)
-    CONFIG_SUBOBJECT(GeneralIdle, idle)
     CONFIG_SUBOBJECT(GeneralBattery, battery)
-
-public:
-    explicit GeneralConfig(QObject* parent = nullptr)
-        : ConfigObject(parent)
-        , m_apps(new GeneralApps(this))
-        , m_idle(new GeneralIdle(this))
-        , m_battery(new GeneralBattery(this)) {}
 };
 
 } // namespace caelestia::config

@@ -6,13 +6,12 @@ import Caelestia.Config
 import Caelestia.Services
 import qs.components
 import qs.components.controls
+import qs.services
 import qs.utils
 import qs.modules.nexus.common
 
 PageBase {
     id: root
-
-    title: qsTr("Shortcuts")
 
     property var shellShortcuts: []
 
@@ -35,14 +34,14 @@ PageBase {
         return searchable.includes(query);
     }
 
-    function updateLists() {
+    function updateLists(): void {
         let all = KeybindsModel.query("")
         let shell = []
         let apps = []
         let workspaces = []
         let tiling = []
 
-        const shellRegex = /^(nexus|launcher|dashboard|showall|screenshot|googleLens|screenRecording|lock|session|sidebar|aiAssistant|utilities|emoji|clipboard|windowSwitcher.*|wallpaper|keybinds)$/
+        const shellRegex = /^(nexus|launcher|dashboard|showall|screenshot|googleLens|screenRecording|lock|session|sidebar|aiAssistant|utilities|emoji|clipboard|windowSwitcher.*|wallpaper|keybinds|whatsnew)$/
         const workspaceRegex = /^workspace.*$/
         const tilingRegex = /^krohnkite.*$/
 
@@ -72,15 +71,16 @@ PageBase {
         tilingShortcuts = tiling
     }
 
-    onShortcutQueryChanged: updateLists()
-
-    function openCaptureDialog(name: string, currentKey: string, targetItem: var) {
+    function openCaptureDialog(name: string, currentKey: string, targetItem: var): void {
         dialogLoader.active = true
         dialogLoader.item.shortcutName = name
         dialogLoader.item.currentKey = currentKey
         dialogLoader.item.targetItem = targetItem
         dialogLoader.item.open()
     }
+
+    title: qsTr("Shortcuts")
+    onShortcutQueryChanged: updateLists()
 
     ColumnLayout {
         anchors.horizontalCenter: parent.horizontalCenter
@@ -91,11 +91,11 @@ PageBase {
         Component.onCompleted: updateLists()
 
         Connections {
-            target: KeybindsModel
-
-            function onKeybindsChanged() {
+            function onKeybindsChanged(): void {
                 updateLists()
             }
+
+            target: KeybindsModel
         }
 
         Loader {
@@ -115,48 +115,18 @@ PageBase {
             }
         }
 
-        StyledRect {
+        SearchBar {
+            id: searchField
+
             Layout.fillWidth: true
-            implicitHeight: searchLayout.implicitHeight + Tokens.padding.medium * 2
-            radius: Tokens.rounding.full
-            color: Colours.tPalette.m3surfaceContainerLowest
-            border.color: Colours.palette.m3outlineVariant
-
-            RowLayout {
-                id: searchLayout
-
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.margins: Tokens.padding.large
-                spacing: Tokens.spacing.small
-
-                MaterialIcon {
-                    text: "search"
-                    color: Colours.palette.m3onSurfaceVariant
-                    fontStyle: Tokens.font.icon.medium
-                }
-
-                StyledTextField {
-                    id: searchField
-
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Search shortcuts")
-                    color: Colours.palette.m3onSurface
-                    font: Tokens.font.body.medium
-                    onTextChanged: root.shortcutQuery = text
-                }
-
-                IconButton {
-                    visible: searchField.text.length > 0
-                    icon: "close"
-                    font: Tokens.font.icon.medium
-                    type: IconButton.Text
-                    padding: Tokens.padding.extraSmall
-                    isRound: true
-                    onClicked: searchField.clear()
-                }
-            }
+            placeholderText: qsTr("Search shortcuts")
+            font: Tokens.font.body.medium
+            bg.color: Colours.tPalette.m3surfaceContainerLowest
+            bg.border.color: Colours.palette.m3outlineVariant
+            searchIcon.fontStyle: Tokens.font.icon.medium
+            clearIcon.font: Tokens.font.icon.medium
+            clearIcon.padding: Tokens.padding.extraSmall
+            onTextChanged: root.shortcutQuery = text
         }
 
         SectionHeader {

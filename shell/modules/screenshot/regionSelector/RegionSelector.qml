@@ -1,5 +1,6 @@
 import ".."
 import QtQuick
+import QtCore
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
@@ -10,10 +11,12 @@ Scope {
     id: root
 
     property bool screenshotActive: false
-    property bool showWindowOutlines: false
 
-    property var action: RegionSelection.SnipAction.Copy
+    property var action: ScreenshotAction.SnipAction.Copy
+
     property var selectionMode: RegionSelection.SelectionMode.RectCorners
+
+    property bool showWindowOutlines: false
 
     function dismiss() {
         root.screenshotActive = false
@@ -32,78 +35,74 @@ Scope {
 
             required property var modelData
 
-            active: root.screenshotActive && modelData.name === Hypr.focusedMonitor.name
+            active: root.screenshotActive && modelData.name === Kwin.cursorOutputName()
 
             sourceComponent: RegionSelection {
                 screen: regionSelectorLoader.modelData
                 onDismiss: root.dismiss()
                 action: root.action
                 selectionMode: root.selectionMode
+                showWindowOutlines: root.showWindowOutlines
+                onShowWindowOutlinesChanged: root.showWindowOutlines = showWindowOutlines
             }
         }
     }
 
     function screenshot() {
-        root.action = RegionSelection.SnipAction.Copy
+        root.action = ScreenshotAction.SnipAction.Copy
         root.selectionMode = RegionSelection.SelectionMode.RectCorners
         root.screenshotActive = true
     }
 
     function search() {
-        root.action = RegionSelection.SnipAction.Search
-        if (false) {
-            root.selectionMode = RegionSelection.SelectionMode.Circle
-        } else {
-            root.selectionMode = RegionSelection.SelectionMode.RectCorners
-        }
+        root.action = ScreenshotAction.SnipAction.Search
+        root.selectionMode = RegionSelection.SelectionMode.RectCorners
         root.screenshotActive = true
     }
 
     function ocr() {
-        root.action = RegionSelection.SnipAction.CharRecognition
+        root.action = ScreenshotAction.SnipAction.CharRecognition
         root.selectionMode = RegionSelection.SelectionMode.RectCorners
         root.screenshotActive = true
     }
 
     function record() {
-        root.action = RegionSelection.SnipAction.Record
+        root.action = ScreenshotAction.SnipAction.Record
         root.selectionMode = RegionSelection.SelectionMode.RectCorners
-        // If already open then re-trigger to stop recording
         if (root.screenshotActive) root.screenshotActive = false
         root.screenshotActive = true
     }
 
     function recordWithSound() {
-        root.action = RegionSelection.SnipAction.RecordWithSound
+        root.action = ScreenshotAction.SnipAction.RecordWithSound
         root.selectionMode = RegionSelection.SelectionMode.RectCorners
-        // If already open then re-trigger to stop recording
         if (root.screenshotActive) root.screenshotActive = false
         root.screenshotActive = true
     }
 
     CustomShortcut {
         name: "regionScreenshot"
-        description: "Takes a screenshot of the selected region"
+        description: qsTr("Takes a screenshot of the selected region")
         onPressed: root.screenshot()
     }
     CustomShortcut {
         name: "regionSearch"
-        description: "Searches the selected region"
+        description: qsTr("Searches the selected region")
         onPressed: root.search()
     }
     CustomShortcut {
         name: "regionOcr"
-        description: "Recognizes text in the selected region"
+        description: qsTr("Recognizes text in the selected region")
         onPressed: root.ocr()
     }
     CustomShortcut {
         name: "regionRecord"
-        description: "Records the selected region"
+        description: qsTr("Records the selected region")
         onPressed: root.record()
     }
     CustomShortcut {
         name: "regionRecordWithSound"
-        description: "Records the selected region with sound"
+        description: qsTr("Records the selected region with sound")
         onPressed: root.recordWithSound()
     }
 }

@@ -1,9 +1,10 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Effects
-import QtQuick.Layouts
+import Caelestia
 import Caelestia.Config
 import Caelestia.Services
 import qs.components
@@ -102,13 +103,6 @@ ConnectedRect {
                             radius: width / 2
                             color: Colours.palette.m3error
 
-                            SequentialAnimation on opacity {
-                                loops: Animation.Infinite
-
-                                NumberAnimation { from: 0.3; to: 1.0; duration: 1000 }
-                                NumberAnimation { from: 1.0; to: 0.3; duration: 1000 }
-                            }
-
                             layer.enabled: true
 
                             layer.effect: MultiEffect {
@@ -144,6 +138,10 @@ ConnectedRect {
                                     root.keybindEdited(parts.join("; "))
                                 }
                             }
+
+                            Behavior on color {
+                                CAnim {}
+                            }
                         }
                     }
                 }
@@ -165,6 +163,10 @@ ConnectedRect {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.addClicked(addIcon)
                 }
+
+                Behavior on color {
+                    CAnim {}
+                }
             }
 
             MaterialIcon {
@@ -181,6 +183,10 @@ ConnectedRect {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.resetClicked()
+                }
+
+                Behavior on color {
+                    CAnim {}
                 }
             }
         }

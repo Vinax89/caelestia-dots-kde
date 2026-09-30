@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# 00-backup-themes.sh  Backs up current KDE settings with konsave so uninstall.sh can restore them.
 
 set -euo pipefail
 
@@ -13,9 +12,7 @@ KONSAVE_VENV_DIR="$CACHE_DIR/konsave-venv"
 KONSAVE_BIN=""
 HAD_USER_KONSAVE_CONF=false
 
-info() { echo "  [INFO]  $*"; }
-ok() { echo "  [OK]    $*"; }
-die() { echo "  [ERR]   $*"; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
 
 ensure_konsave() {
     if command -v konsave >/dev/null 2>&1; then
@@ -49,19 +46,17 @@ restore_user_konsave_conf() {
         return 0
     fi
 
-    # If we did not create a backup, do not delete an existing user config.
     if [[ "$HAD_USER_KONSAVE_CONF" != "true" ]]; then
         rm -f "$USER_KONSAVE_CONF"
     fi
 }
 
-# Remember whether the user already had a konsave config before we modify it.
 if [[ -f "$USER_KONSAVE_CONF" ]]; then
     HAD_USER_KONSAVE_CONF=true
 fi
 
 trap restore_user_konsave_conf EXIT
-echo "  Backing up current KDE configuration with konsave..."
+info "Backing up current KDE configuration with konsave..."
 
 mkdir -p "$CACHE_DIR"
 BACKUP_DIR="$BUNDLE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
@@ -92,6 +87,7 @@ save:
             - plasmarc
             - kdeglobals
             - kwinrc
+            - kwinrulesrc
             - kcminputrc
             - plasmanotifyrc
             - powerdevilrc

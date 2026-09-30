@@ -1,121 +1,29 @@
 #!/usr/bin/env bash
-# 07-kde-apps.sh  Install KDE-specific applications:
-#   - kvantum + kvantum-qt5 (Qt style engine for Material You look)
-#   - kde-material-you-colors (AUR widget/daemon for wallpaper-adaptive colors)
-#
-# Idempotent: checks before installing.
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
+# shellcheck source=scripts/lib/packages.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/packages.sh"
+
 echo
 echo ""
-echo "  Step 7/11  KDE Theme Apps"
+info "Installing KDE theme applications"
 echo ""
 
-install_if_missing() {
-    local pkg="$1"
-    if [[ "$BASE_DISTRO" == "arch" ]]; then
-        if pacman -Qi "$pkg" >/dev/null 2>&1; then
-            echo "  [SKIP] $pkg already installed."
-            return 0
-        fi
-        echo "  Installing $pkg..."
-        yay -S --needed ${CONFIRM_ARG:-} "$pkg" 2>/dev/null || \
-        sudo pacman -S --needed ${CONFIRM_ARG:-} "$pkg" 2>/dev/null || {
-            echo -e "  \033[0;31m[FAIL] Could not install $pkg  skipping.\033[0m"
-            return 1
-        }
-        echo "  [OK]  $pkg installed."
-    elif [[ "$BASE_DISTRO" == "fedora" ]]; then
-        if dnf list --installed "$pkg" >/dev/null 2>&1; then
-            echo "  [SKIP] $pkg already installed."
-            return 0
-        fi
-        echo "  Installing $pkg..."
-        sudo dnf install -y "$pkg" 2>/dev/null || {
-            echo -e "  \033[0;31m[FAIL] Could not install $pkg  skipping.\033[0m"
-            return 1
-        }
-        echo "  [OK]  $pkg installed."
-    elif [[ "$BASE_DISTRO" == "debian" ]]; then
-        if dpkg -s "$pkg" >/dev/null 2>&1; then
-            echo "  [SKIP] $pkg already installed."
-            return 0
-        fi
-        echo "  Installing $pkg..."
-        sudo apt-get install -y "$pkg" 2>/dev/null || {
-            echo -e "  \033[0;31m[FAIL] Could not install $pkg  skipping.\033[0m"
-            return 1
-        }
-        echo "  [OK]  $pkg installed."
-    fi
-}
-
-#  Kvantum
 if [[ "${INSTALL_KVANTUM:-true}" == "true" ]]; then
     if [[ "$BASE_DISTRO" == "debian" ]]; then
-        install_if_missing qt6-style-kvantum || install_if_missing kvantum
+        install_if_missing qt6-style-kvantum kvantum
         install_if_missing qt5-style-kvantum || true
     else
         install_if_missing kvantum
-        install_if_missing kvantum-qt5 || true   # optional qt5 support
+        install_if_missing kvantum-qt5 || true
     fi
 else
-    echo "  [SKIP] Skipping Kvantum installation by user choice."
+    skip "Skipping Kvantum installation by user choice."
 fi
 
-#  uv (required for kde-material-you-colors on fedora)
-if ! command -v uv >/dev/null 2>&1; then
-    echo "  [WARN] uv is not installed; skipping automatic remote installer."
-    echo "         Install uv from your distribution package or https://docs.astral.sh/uv/"
-fi
-
-#  kde-material-you-colors
-if [[ "${APPLY_MATERIAL_YOU:-true}" == "true" ]]; then
-    if [[ "$BASE_DISTRO" == "arch" ]]; then
-        install_if_missing kde-material-you-colors
-    elif [[ "$BASE_DISTRO" == "fedora" ]]; then
-        if ! command -v kde-material-you-colors >/dev/null 2>&1; then
-            echo "  Installing kde-material-you-colors via uv..."
-            sudo dnf install -y dbus-devel dbus-glib-devel python3-devel
-            uv tool install kde-material-you-colors >/dev/null 2>&1 || {
-                echo -e "  \033[0;31m[FAIL] Could not install kde-material-you-colors  skipping.\033[0m"
-            }
-        else
-            echo "  [SKIP] kde-material-you-colors already installed."
-        fi
-    elif [[ "$BASE_DISTRO" == "debian" ]]; then
-        if ! command -v kde-material-you-colors >/dev/null 2>&1; then
-            echo "  Installing kde-material-you-colors via uv..."
-            sudo apt-get install -y libdbus-1-dev libdbus-glib-1-dev python3-dev
-            uv tool install kde-material-you-colors >/dev/null 2>&1 || {
-                echo -e "  \033[0;31m[FAIL] Could not install kde-material-you-colors  skipping.\033[0m"
-            }
-        else
-            echo "  [SKIP] kde-material-you-colors already installed."
-        fi
-    fi
-else
-    echo "  [SKIP] Skipping kde-material-you-colors installation. Uninstalling if present..."
-
-    # Stop the service if running
-    systemctl --user stop kde-material-you-colors.service 2>/dev/null || true
-    systemctl --user disable kde-material-you-colors.service 2>/dev/null || true
-
-    # Uninstall the package
-    if [[ "$BASE_DISTRO" == "arch" ]]; then
-        sudo pacman -Rs --noconfirm kde-material-you-colors 2>/dev/null || true
-    elif [[ "$BASE_DISTRO" == "fedora" ]]; then
-        uv tool uninstall kde-material-you-colors 2>/dev/null || true
-    elif [[ "$BASE_DISTRO" == "debian" ]]; then
-        uv tool uninstall kde-material-you-colors 2>/dev/null || true
-    fi
-fi
-
-#  darkly (plasma theme)
-# (darkly is installed via illogical-impulse-fonts-themes in installDP.sh or feddeps.toml)
-
-# Update plasma configuration for default look/feel if needed
-    kwriteconfig6 --file plasmarc --group "Theme" --key "name" "Darkly" 2>/dev/null || true
+kwriteconfig6 --file plasmarc --group "Theme" --key "name" "darkly" 2>/dev/null || true
 
 echo "[OK]  KDE extra apps step complete."

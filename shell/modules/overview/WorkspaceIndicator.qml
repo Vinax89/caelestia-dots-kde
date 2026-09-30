@@ -5,20 +5,20 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Caelestia.Config
-import Caelestia.Services
 import qs.components
 import qs.services
 
 Item {
     id: root
 
+    required property string screenName
     property int count: 0
     property int currentIndex: 0
     readonly property int activeWsId: currentIndex + 1
     property int maxWidth: 1000
     readonly property real requiredWidth: (count + 1) * 200 + count * Tokens.spacing.small
     readonly property real scaleFactor: requiredWidth > maxWidth ? maxWidth / requiredWidth : 1.0
-    property real swipeOffset: typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState.swipeOffset : 0.0
+    property real swipeOffset: Kwin.swipeOffsetByOutput?.[screenName] ?? Kwin.swipeOffset
     property bool isSwiping: false
     property var closingWindows: []
     readonly property var occupied: {
@@ -30,23 +30,18 @@ Item {
         if (kwinList) {
             for (let i = 0; i < kwinList.length; ++i) {
                 const w = kwinList[i];
+                if (w.output !== root.screenName)
+                    continue;
                 if (w.workspace) {
                     const wid = typeof w.workspace.id === "number" ? w.workspace.id : (typeof w.workspace.index === "number" ? w.workspace.index : null);
-                    if (wid !== null) occ[wid] = true;
-                }
-            }
-        } else if (typeof Hypr !== "undefined") {
-            const wins = Hypr.toplevels.values;
-            for (let i = 0; i < wins.length; ++i) {
-                if (wins[i].workspace && typeof wins[i].workspace.id === "number") {
-                    occ[wins[i].workspace.id] = true;
+                    if (wid !== null)
+                        occ[wid] = true;
                 }
             }
         }
         return occ;
     }
-    // Force QML dependency tracker to bind to windowList correctly
-    property var kwinWindowList: KWinActiveWindowBridge.windowList
+    property var kwinWindowList: Kwin.windowList
 
     signal workspaceSelected(int index)
     signal workspaceReselected(int index)
@@ -66,12 +61,10 @@ Item {
 
     Connections {
         function onWorkspacesChanged() {
-            if (typeof KWinActiveWindowBridge !== "undefined") {
-                KWinActiveWindowBridge.refreshWindows();
-            }
+            Kwin.refreshWindows();
         }
 
-        target: typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState : null
+        target: Kwin
     }
     Timer {
         id: wsSwipeSettleTimer
@@ -102,6 +95,7 @@ Item {
                 activeWsId: root.activeWsId
                 workspaces: workspaces
                 mask: layout
+                screenName: root.screenName
             }
         }
         GridLayout {
@@ -122,6 +116,7 @@ Item {
                 WsComponents.Workspace {
                     scaleFactor: root.scaleFactor
                     activeWsId: root.activeWsId
+                    screenName: root.screenName
                     occupied: root.occupied
                     groupOffset: 0
                     swipeOffset: root.swipeOffset
@@ -149,11 +144,7 @@ Item {
                     anchors.fill: parent
                     radius: parent.radius
                     onClicked: {
-                        if (typeof KWinWorkspaceState !== "undefined") {
-                            KWinWorkspaceState.createWorkspace();
-                        } else if (typeof Hypr !== "undefined") {
-                            Hypr.dispatch("workspace empty");
-                        }
+                        Kwin.createWorkspace();
                     }
                 }
                 Layout.alignment: Qt.AlignVCenter
@@ -204,8 +195,8 @@ Item {
                     const toWs = insertIndex + 1;
 
                     if (fromWs !== toWs) {
-                        if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.windowList) {
-                            const kwinList = KWinActiveWindowBridge.windowList;
+                        if (Kwin.windowList.length > 0) {
+                            const kwinList = Kwin.windowList;
                             let windowsByWs = {};
                             for (let i = 0; i < kwinList.length; ++i) {
                                 let w = kwinList[i];
@@ -213,10 +204,10 @@ Item {
                                     let wid = null;
                                     if (typeof w.workspace.index === "number") wid = w.workspace.index;
                                     else if (typeof w.workspace.id === "number") wid = w.workspace.id;
-                                    else if (typeof w.workspace.id === "string" && typeof KWinWorkspaceState !== "undefined") {
-                                        for (let k = 0; k < KWinWorkspaceState.workspaces.length; ++k) {
-                                            if (KWinWorkspaceState.workspaces[k].id === w.workspace.id) {
-                                                wid = KWinWorkspaceState.workspaces[k].index;
+                                    else if (typeof w.workspace.id === "string") {
+                                        for (let k = 0; k < Kwin.workspaces.length; ++k) {
+                                            if (Kwin.workspaces[k].id === w.workspace.id) {
+                                                wid = Kwin.workspaces[k].index;
                                                 break;
                                             }
                                         }
@@ -232,33 +223,33 @@ Item {
                                 let temp = windowsByWs[fromWs] || [];
                                 for (let i = fromWs; i < toWs; ++i) {
                                     let wins = windowsByWs[i + 1] || [];
-                                    for (let j = 0; j < wins.length; ++j) KWinActiveWindowBridge.setWindowDesktop(wins[j], i);
+                                    for (let j = 0; j < wins.length; ++j) Kwin.setWindowDesktop(wins[j], i);
                                 }
-                                for (let j = 0; j < temp.length; ++j) KWinActiveWindowBridge.setWindowDesktop(temp[j], toWs);
+                                for (let j = 0; j < temp.length; ++j) Kwin.setWindowDesktop(temp[j], toWs);
                             } else {
                                 let temp = windowsByWs[fromWs] || [];
                                 for (let i = fromWs; i > toWs; --i) {
                                     let wins = windowsByWs[i - 1] || [];
-                                    for (let j = 0; j < wins.length; ++j) KWinActiveWindowBridge.setWindowDesktop(wins[j], i);
+                                    for (let j = 0; j < wins.length; ++j) Kwin.setWindowDesktop(wins[j], i);
                                 }
-                                for (let j = 0; j < temp.length; ++j) KWinActiveWindowBridge.setWindowDesktop(temp[j], toWs);
+                                for (let j = 0; j < temp.length; ++j) Kwin.setWindowDesktop(temp[j], toWs);
                             }
 
-                            if (typeof KWinWorkspaceState !== "undefined") {
-                                const actId = root.activeWsId;
-                                let newActId = actId;
-                                if (actId === fromWs) {
-                                    newActId = toWs;
-                                } else if (fromWs < toWs && actId > fromWs && actId <= toWs) {
-                                    newActId = actId - 1;
-                                } else if (fromWs > toWs && actId >= toWs && actId < fromWs) {
-                                    newActId = actId + 1;
-                                }
-                                if (newActId !== actId) {
-                                    const targetUuid = KWinWorkspaceState.workspaces[newActId - 1]?.id;
-                                    if (targetUuid) KWinWorkspaceState.switchTo(targetUuid);
-                                }
+                            const actId = root.activeWsId;
+                            let newActId = actId;
+                            if (actId === fromWs) {
+                                newActId = toWs;
+                            } else if (fromWs < toWs && actId > fromWs && actId <= toWs) {
+                                newActId = actId - 1;
+                            } else if (fromWs > toWs && actId >= toWs && actId < fromWs) {
+                                newActId = actId + 1;
                             }
+                            if (newActId !== actId) {
+                                const targetUuid = Kwin.workspaces[newActId - 1]?.id;
+                                if (targetUuid)
+                                    Kwin.switchToWorkspace(targetUuid, root.screenName);
+                            }
+
                         }
                     }
                     drop.accept();

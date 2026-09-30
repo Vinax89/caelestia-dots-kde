@@ -5,7 +5,6 @@ import Quickshell.Io
 import Quickshell.Widgets
 import Caelestia
 import Caelestia.Config
-import Caelestia.Services
 import qs.components
 import qs.components.containers
 import qs.components.controls
@@ -21,14 +20,17 @@ PageBase {
     isSubPage: true
 
     function saveToken(token) {
+        saveTokenProc.environment = ({ CAELESTIA_STEAMGRIDDB_KEY: token });
         if (!token) {
-            Quickshell.execDetached(["secret-tool", "clear", "service", "caelestia-shell", "account", "steamgriddb"]);
+            saveTokenProc.command = ["secret-tool", "clear", "service", "caelestia-shell", "account", "steamgriddb"];
         } else {
-            // `<<< "$1"` writes the secret to a temp file on disk (that is how bash
-        // implements here-strings) and appends a trailing newline. Piping from
-        // printf does neither -- the same form AiSettingsPage.qml already uses.
-        Quickshell.execDetached(["sh", "-c", "printf %s \"$1\" | secret-tool store --label=\"Caelestia SteamGridDB Key\" service caelestia-shell account steamgriddb", "--", token]);
+            saveTokenProc.command = ["bash", "-c", "printf %s \"$CAELESTIA_STEAMGRIDDB_KEY\" | secret-tool store --label=\"Caelestia SteamGridDB Key\" service caelestia-shell account steamgriddb"];
         }
+        saveTokenProc.running = true;
+    }
+
+    property Process saveTokenProc: Process {
+        id: saveTokenProc
     }
 
     property Process readTokenProc: Process {
@@ -154,7 +156,7 @@ PageBase {
                         anchors.leftMargin: Tokens.padding.medium
                         anchors.rightMargin: Tokens.padding.medium
                         verticalAlignment: TextInput.AlignVCenter
-                        placeholderText: "API Key..."
+                        placeholderText: qsTr("API Key...")
                         echoMode: TextInput.Password
                         passwordCharacter: "•"
                         onAccepted: root.saveToken(text)
@@ -184,7 +186,7 @@ PageBase {
             text: qsTr("Target windows picker")
         }
 
-        AutoEnableRow {
+        WindowPickerRow {
             Layout.fillWidth: true
             first: true
             last: true
@@ -296,7 +298,7 @@ PageBase {
                             Layout.leftMargin: Math.round(Tokens.font.icon.large.pointSize * 1.5) + Tokens.spacing.medium
                             Layout.preferredHeight: 24
 
-                            placeholderText: qsTr("Custom label (optional) — use {class}, {title}")
+                            placeholderText: qsTr("Custom label (optional) - use {class}, {title}")
                             font: Tokens.font.label.small
                             verticalAlignment: TextInput.AlignVCenter
 
@@ -338,7 +340,7 @@ PageBase {
             text: qsTr("Hidden Steam Games")
         }
 
-        AutoEnableRow {
+        WindowPickerRow {
             Layout.fillWidth: true
             first: true
             last: true
@@ -539,7 +541,7 @@ PageBase {
                     IconTextButton {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "Save presence"
+                        text: qsTr("Save presence")
                         icon: "save"
                         type: TextButton.Filled
                         onClicked: {
@@ -549,124 +551,6 @@ PageBase {
                             GlobalConfig.services.arpcLargeImage = manualLargeImage.text;
                             GlobalConfig.services.arpcSmallImage = manualSmallImage.text;
                             GlobalConfig.save();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    component AutoEnableRow: PopupRow {
-        id: row
-
-        readonly property int popupHeight: layout.height - y - Tokens.padding.large - Tokens.padding.extraExtraLarge
-
-        signal selected(windowClass: string)
-
-        keepPopupAsChild: {
-            if (root.nState.animatingContainer || root.opacity < 1)
-                return true;
-
-            let p = root.parent;
-            while (p && p.objectName !== "PageContainer")
-                p = p.parent;
-            return p?.opacity < 1;
-        }
-        popup.topMovement: Math.max(Tokens.sizes.nexus.minPopupHeight - popupHeight, Tokens.padding.large)
-
-        Loader {
-            anchors.centerIn: parent
-            active: row.popup.animDriver > 0
-
-            sourceComponent: Item {
-                implicitWidth: Tokens.sizes.nexus.popupWidth
-                implicitHeight: {
-                    let maxH = CUtils.clamp(row.popupHeight, Tokens.sizes.nexus.minPopupHeight, Tokens.sizes.nexus.maxPopupHeight);
-                    let contentH = list.contentHeight;
-                    if (contentH > 0) return Math.min(contentH, maxH);
-                    return maxH;
-                }
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 0
-
-                    VerticalFadeListView {
-                        id: list
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-
-                        Connections {
-                            target: KWinActiveWindowBridge
-
-                            function onWindowListChanged() {
-                                list.updateModel();
-                            }
-                        }
-
-                        function updateModel() {
-                            let toplevels = [];
-                            for (const toplevel of KWinActiveWindowBridge.windowList) {
-                                if (toplevel.title || toplevel.class) {
-                                    toplevels.push(toplevel);
-                                }
-                            }
-                            list.model = toplevels.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? ""));
-                        }
-
-                        Component.onCompleted: updateModel()
-
-                        delegate: StateLayer {
-                            id: windowItem
-
-                            required property var modelData
-                            required property int index
-
-                            anchors.fill: undefined
-                            anchors.left: list.contentItem.left
-                            anchors.right: list.contentItem.right
-                            implicitHeight: itemLayout.implicitHeight + itemLayout.anchors.margins * 2
-                            radius: Tokens.rounding.small
-
-                            onClicked: {
-                                row.popup.open = false;
-                                row.selected(modelData.class ?? "");
-                            }
-
-                            RowLayout {
-                                id: itemLayout
-
-                                anchors.fill: parent
-                                anchors.margins: Tokens.padding.medium
-                                spacing: Tokens.spacing.medium
-
-                                IconImage {
-                                    asynchronous: true
-                                    implicitSize: Math.round(Tokens.font.icon.large.pointSize * 1.8)
-                                    source: Quickshell.iconPath(windowItem.modelData.class ?? "", "image-missing")
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 0
-
-                                    StyledText {
-                                        Layout.fillWidth: true
-                                        text: windowItem.modelData.title ?? "Unknown"
-                                        font: Tokens.font.body.small
-                                        elide: Text.ElideRight
-                                    }
-
-                                    StyledText {
-                                        Layout.fillWidth: true
-                                        visible: text !== ""
-                                        text: windowItem.modelData.class ?? ""
-                                        color: Colours.palette.m3onSurfaceVariant
-                                        font: Tokens.font.label.small
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                            }
                         }
                     }
                 }

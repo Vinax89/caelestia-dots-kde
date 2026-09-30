@@ -36,6 +36,9 @@ StyledRect {
             },
             {
                 id: "nightlight"
+            },
+            {
+                id: "easyeffects"
             }
         ].filter(t => !disabledIds.has(t.id));
 
@@ -48,7 +51,11 @@ StyledRect {
             seenIds.add(item.id);
 
             if (item.id === "vpn") {
-                return GlobalConfig.utilities.vpn.provider.some(p => typeof p === "object" ? (p.enabled === true) : false);
+                return GlobalConfig.utilities.vpn.selectedProvider.length > 0;
+            }
+
+            if (item.id === "easyeffects") {
+                return EasyEffects.available;
             }
 
             return true;
@@ -170,6 +177,14 @@ StyledRect {
                     }
                 }
                 DelegateChoice {
+                    roleValue: "gameMode"
+                    delegate: Toggle {
+                        icon: "gamepad"
+                        checked: GameMode.enabled
+                        onClicked: GameMode.enabled = !GameMode.enabled
+                    }
+                }
+                DelegateChoice {
                     roleValue: "dnd"
                     delegate: Toggle {
                         icon: "notifications_off"
@@ -182,7 +197,7 @@ StyledRect {
                     delegate: Toggle {
                         icon: "vpn_key"
                         checked: VPN.connected && VPN.status.state !== "needs-auth" && VPN.status.state !== "error"
-                        enabled: !VPN.connecting
+                        enabled: !VPN.connecting && !VPN.disconnecting
                         isToggle: VPN.status.state !== "needs-auth" && VPN.status.state !== "error"
                         inactiveOnColour: Colours.palette.m3onSurfaceVariant
                         onClicked: VPN.toggle()
@@ -222,7 +237,7 @@ StyledRect {
                         isToggle: false
                         inactiveOnColour: Colours.palette.m3onSurfaceVariant
                         onClicked: {
-                            Quickshell.execDetached([Paths.absolutePath("root:/scripts/restart-shell.sh")]);
+                            Launch.exec(["bash", "-c", `bash "${Quickshell.shellPath("scripts/restart_shell.sh")}"`]);
                         }
                     }
                 }
@@ -238,6 +253,23 @@ StyledRect {
                         onClicked: {
                             const newVal = !GlobalConfig.background.videoWallpaperPaused;
                             GlobalConfig.background.videoWallpaperPaused = newVal;
+                        }
+                    }
+                }
+                DelegateChoice {
+                    roleValue: "easyeffects"
+                    delegate: Toggle {
+                        checked: EasyEffects.active
+                        icon: "graphic_eq"
+                        onClicked: EasyEffects.toggle()
+
+                        MouseArea {
+                            acceptedButtons: Qt.RightButton
+                            anchors.fill: parent
+                            onClicked: {
+                                EasyEffects.open();
+                                root.visibilities.utilities = false;
+                            }
                         }
                     }
                 }

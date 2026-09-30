@@ -6,7 +6,7 @@ namespace {
 
 constexpr qreal kKib = 1024.0;
 
-} // namespace
+}
 
 DiskInfo::DiskInfo(QString mount, quint64 usedBytes, quint64 totalBytes, bool hasRoot, QObject* parent)
     : QObject(parent)
@@ -50,17 +50,17 @@ void DiskInfo::update(quint64 usedBytes, quint64 totalBytes, bool hasRoot) {
     m_hasRoot = hasRoot;
 
     if (usedDiff) {
-        Q_EMIT usedChanged();
+        emit usedChanged();
     }
     if (totalDiff) {
-        Q_EMIT totalChanged();
+        emit totalChanged();
     }
     if (usedDiff || totalDiff) {
-        Q_EMIT freeChanged();
-        Q_EMIT percChanged();
+        emit freeChanged();
+        emit percChanged();
     }
     if (rootDiff) {
-        Q_EMIT hasRootChanged();
+        emit hasRootChanged();
     }
 }
 

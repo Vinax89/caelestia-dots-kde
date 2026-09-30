@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# 01-ensure-prereqs.sh  Ensure prerequisites are installed.
-# Idempotent: exits immediately if present.
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
+# shellcheck source=scripts/lib/packages.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/packages.sh"
 clone_verified() {
     local url="$1" dest="$2" allow_unverified="${3:-0}"
     git clone --depth 1 "$url" "$dest"
@@ -19,18 +21,17 @@ clone_verified() {
 if [[ "$BASE_DISTRO" == "arch" ]]; then
     ensure_yay() {
         if command -v yay >/dev/null 2>&1; then
-            echo "[OK]  yay is already installed."
+            ok "yay is already installed."
             return 0
         fi
 
-        echo "==> yay not found  installing..."
+        info "yay not found, installing..."
 
         if ! command -v pacman >/dev/null 2>&1; then
-            echo -e "\033[0;31m[ERR] pacman not found. This installer requires Arch Linux.\033[0m"
-            exit 1
+            die "pacman not found. This installer requires Arch Linux."
         fi
 
-        sudo pacman -S --needed --noconfirm base-devel git
+        caelestia_sudo pacman -S --needed --noconfirm base-devel git
 
         local tmpdir
         tmpdir="$(mktemp -d)"
@@ -40,57 +41,55 @@ if [[ "$BASE_DISTRO" == "arch" ]]; then
             makepkg -si --noconfirm
         )
         rm -rf "$tmpdir"
-        echo "[OK]  yay installed."
+        ok "yay installed."
     }
 
     ensure_yay
 
-    echo "==> Enabling ccache for makepkg builds (caches AUR rebuilds)..."
-    # ccache must be present BEFORE flipping !ccache -> ccache in makepkg.conf,
-    # otherwise every makepkg/yay build aborts with "Cannot find the ccache
-    # binary required for compiler cache usage" (exit status 15).
+    info "Enabling ccache for makepkg builds (caches AUR rebuilds)..."
     if ! command -v ccache >/dev/null 2>&1; then
-        echo "==> ccache not found  installing..."
-        sudo pacman -S --needed --noconfirm ccache
+        info "ccache not found, installing..."
+        caelestia_sudo pacman -S --needed --noconfirm ccache
     fi
-    if [[ -f /etc/makepkg.conf ]]; then
-        sudo sed -i 's/!ccache/ccache/' /etc/makepkg.conf
+    if [[ -f /etc/makepkg.conf ]] && grep -q '!ccache' /etc/makepkg.conf; then
+        info "Enabling ccache in /etc/makepkg.conf (system-wide makepkg setting)..."
+        mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/caelestia"
+        touch "${XDG_STATE_HOME:-$HOME/.local/state}/caelestia/ccache-enabled"
+        caelestia_sudo sed -i 's/!ccache/ccache/' /etc/makepkg.conf
     fi
-    echo "[OK]  makepkg ccache configured."
+    ok "makepkg ccache configured."
 
-    echo "==> Configuring yay sudo looping and disabling interactive menus..."
+    info "Configuring yay sudo looping and disabling interactive menus..."
     yay -Y --sudoloop --nocleanmenu --nodiffmenu --save 2>/dev/null || true
-    echo "[OK]  yay configured."
+    ok "yay configured."
 
 elif [[ "$BASE_DISTRO" == "fedora" ]]; then
-    echo "==> Checking for Fedora prerequisites (dnf, yq, createrepo_c, jq)..."
+    info "Checking for Fedora prerequisites (dnf, yq, createrepo_c, jq)..."
 
     if ! command -v dnf >/dev/null 2>&1; then
-        echo -e "\033[0;31m[ERR] dnf not found. This installer requires Fedora 42 or later.\033[0m"
-        exit 1
+        die "dnf not found. This installer requires Fedora 42 or later."
     fi
 
     if command -v yq >/dev/null 2>&1 && command -v createrepo_c >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-        echo "[OK]  Prerequisites are already installed."
+        ok "Prerequisites are already installed."
     else
-        echo "==> Missing prerequisites  installing..."
-        sudo dnf install -y yq createrepo_c jq
-        echo "[OK]  Prerequisites installed."
+        info "Missing prerequisites, installing..."
+        caelestia_sudo dnf install -y yq createrepo_c jq
+        ok "Prerequisites installed."
     fi
 elif [[ "$BASE_DISTRO" == "debian" ]]; then
-    echo "==> Checking for Debian prerequisites (apt-get, yq, jq, build-essential)..."
+    info "Checking for Debian prerequisites (apt-get, yq, jq, build-essential)..."
 
     if ! command -v apt-get >/dev/null 2>&1; then
-        echo -e "\033[0;31m[ERR] apt-get not found. This installer requires a Debian-based distribution.\033[0m"
-        exit 1
+        die "apt-get not found. This installer requires a Debian-based distribution."
     fi
 
     if command -v yq >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && command -v g++ >/dev/null 2>&1; then
-        echo "[OK]  Prerequisites are already installed."
+        ok "Prerequisites are already installed."
     else
-        echo "==> Missing prerequisites  installing..."
-        sudo apt-get update
-        sudo apt-get install -y yq jq build-essential git curl
-        echo "[OK]  Prerequisites installed."
+        info "Missing prerequisites, installing..."
+        caelestia_sudo apt-get update
+        caelestia_sudo apt-get install -y yq jq build-essential git curl
+        ok "Prerequisites installed."
     fi
 fi

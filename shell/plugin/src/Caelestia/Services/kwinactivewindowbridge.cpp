@@ -1,15 +1,20 @@
 #include "kwinactivewindowbridge.hpp"
-#include "plasmawindows.hpp"
-#include "kwinworkspacestate.hpp"
+
+#include <QDBusConnection>
+#include <QDBusMessage>
 #include <QGuiApplication>
 #include <QSaveFile>
 #include <QScreen>
+#include <QTimer>
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusMessage>
 
+#include "kwinworkspacestate.hpp"
+#include "plasmawindows.hpp"
+
 namespace caelestia::services {
 
-KWinActiveWindowBridge::KWinActiveWindowBridge(QObject *parent)
+KWinActiveWindowBridge::KWinActiveWindowBridge(QObject* parent)
     : QObject(parent) {
 
     m_updateTimer.setSingleShot(true);
@@ -19,9 +24,14 @@ KWinActiveWindowBridge::KWinActiveWindowBridge(QObject *parent)
     auto* plasmaWindows = PlasmaWindows::instance();
     connect(plasmaWindows, &PlasmaWindows::windowAdded, this, &KWinActiveWindowBridge::onWindowAdded);
     connect(plasmaWindows, &PlasmaWindows::handleLost, this, &KWinActiveWindowBridge::onWindowLost);
+
+    // Clear any stale highlight from a previous session or crash on startup
+    clearHighlight();
 }
 
-KWinActiveWindowBridge::~KWinActiveWindowBridge() = default;
+KWinActiveWindowBridge::~KWinActiveWindowBridge() {
+    clearHighlight();
+}
 
 QVariantMap KWinActiveWindowBridge::activeWindow() const {
     return m_activeWindow;
@@ -31,7 +41,11 @@ QString KWinActiveWindowBridge::activeOutputName() const {
     return m_activeOutputName;
 }
 
-void KWinActiveWindowBridge::setActiveOutputName(const QString &outputName) {
+QString KWinActiveWindowBridge::highlightedAddress() const {
+    return m_highlightedAddress;
+}
+
+void KWinActiveWindowBridge::setActiveOutputName(const QString& outputName) {
     if (m_activeOutputName != outputName) {
         m_activeOutputName = outputName;
         writeActiveOutputFile(outputName);
@@ -42,13 +56,13 @@ void KWinActiveWindowBridge::setActiveOutputName(const QString &outputName) {
 // caelestia-record reads this file to pick the focused monitor's refresh
 // rate for gpu-screen-recorder. QSaveFile (temp + atomic rename) means a
 // concurrent reader never sees a torn or empty write.
-void KWinActiveWindowBridge::writeActiveOutputFile(const QString &outputName) {
+void KWinActiveWindowBridge::writeActiveOutputFile(const QString& outputName) {
     if (outputName.isEmpty())
         return;
     const QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR");
     if (runtimeDir.isEmpty())
         return;
-    QSaveFile f(runtimeDir + "/qs_kwin_active_output.txt");
+    QSaveFile f(runtimeDir + QStringLiteral("/qs_kwin_active_output.txt"));
     if (f.open(QIODevice::WriteOnly)) {
         f.write(outputName.toUtf8());
         f.commit();
@@ -59,12 +73,49 @@ QVariantList KWinActiveWindowBridge::windowList() const {
     return m_windowList;
 }
 
+QVariantList KWinActiveWindowBridge::windowsForWorkspace(const QVariant& workspace, bool includeOnAllWorkspaces) const {
+    const bool hasNumberTarget = workspace.type() == QVariant::Int && workspace.toInt() > 0;
+    const bool hasStringTarget = workspace.type() == QVariant::String && !workspace.toString().isEmpty();
+
+    QVariantList out;
+    for (const QVariant& v : m_windowList) {
+        const QVariantMap window = v.toMap();
+        const QVariantMap ws = window.value(QStringLiteral("workspace")).toMap();
+        if (ws.isEmpty()) {
+            out.push_back(v);
+            continue;
+        }
+        const QVariant id = ws.value(QStringLiteral("id"));
+        const QString uuid = ws.value(QStringLiteral("uuid")).toString();
+        const bool onAll = (id.type() == QVariant::Int && id.toInt() == -1) || uuid.isEmpty();
+        if (onAll) {
+            if (includeOnAllWorkspaces)
+                out.push_back(v);
+            continue;
+        }
+        if (!hasNumberTarget && !hasStringTarget) {
+            out.push_back(v);
+            continue;
+        }
+        if (hasNumberTarget && id.type() == QVariant::Int && id.toInt() == workspace.toInt()) {
+            out.push_back(v);
+            continue;
+        }
+        if (hasStringTarget && uuid == workspace.toString()) {
+            out.push_back(v);
+            continue;
+        }
+    }
+    return out;
+}
+
 QString KWinActiveWindowBridge::pendingFocusAddress() const {
     return m_pendingFocusAddress;
 }
 
 QString KWinActiveWindowBridge::cursorOutputName() const {
-    const auto message = QDBusMessage::createMethodCall("org.kde.KWin", "/KWin", "org.kde.KWin", "activeOutputName");
+    const auto message = QDBusMessage::createMethodCall(QStringLiteral("org.kde.KWin"), QStringLiteral("/KWin"),
+        QStringLiteral("org.kde.KWin"), QStringLiteral("activeOutputName"));
     return QDBusConnection::sessionBus().call(message).arguments().value(0).toString();
 }
 
@@ -80,7 +131,9 @@ void KWinActiveWindowBridge::onWindowAdded(const QString& uuid) {
 }
 
 void KWinActiveWindowBridge::onWindowLost(const QString& uuid) {
-    Q_UNUSED(uuid);
+    if (!m_highlightedAddress.isEmpty() && m_highlightedAddress == uuid) {
+        clearHighlight();
+    }
     scheduleWindowListUpdate();
 }
 
@@ -90,26 +143,102 @@ void KWinActiveWindowBridge::scheduleWindowListUpdate() {
     }
 }
 
+void KWinActiveWindowBridge::sendToOutput(const QString& address, const QString& outputName) {
+    if (address.isEmpty() || outputName.isEmpty()) {
+        return;
+    }
+
+    QScreen* target = nullptr;
+    for (QScreen* screen : QGuiApplication::screens()) {
+        if (screen->name() == outputName) {
+            target = screen;
+            break;
+        }
+    }
+    if (!target) {
+        return;
+    }
+
+    QVariantMap window;
+    for (const QVariant& entry : m_windowList) {
+        const QVariantMap map = entry.toMap();
+        if (map.value(QStringLiteral("address")).toString() == address) {
+            window = map;
+            break;
+        }
+    }
+    if (window.isEmpty()) {
+        return;
+    }
+
+    const QString currentName = window.value(QStringLiteral("output")).toString();
+    QScreen* current = nullptr;
+    for (QScreen* screen : QGuiApplication::screens()) {
+        if (screen->name() == currentName) {
+            current = screen;
+            break;
+        }
+    }
+    if (!current || current == target) {
+        return;
+    }
+
+    const QPoint from = current->geometry().center();
+    const QPoint to = target->geometry().center();
+    QString action;
+    if (qAbs(to.x() - from.x()) >= qAbs(to.y() - from.y())) {
+        action = to.x() > from.x() ? QStringLiteral("Window One Screen to the Right")
+                                   : QStringLiteral("Window One Screen to the Left");
+    } else {
+        action = to.y() > from.y() ? QStringLiteral("Window One Screen Down") : QStringLiteral("Window One Screen Up");
+    }
+
+    focusWindow(address);
+
+    QTimer::singleShot(120, this, [action]() {
+        QDBusMessage msg =
+            QDBusMessage::createMethodCall(QStringLiteral("org.kde.kglobalaccel"), QStringLiteral("/component/kwin"),
+                QStringLiteral("org.kde.kglobalaccel.Component"), QStringLiteral("invokeShortcut"));
+        msg << action;
+        QDBusConnection::sessionBus().call(msg, QDBus::NoBlock);
+    });
+}
+
 QString KWinActiveWindowBridge::getOutputNameForGeometry(int x, int y, int w, int h) const {
-    QRect windowRect(x, y, w, h);
+    const QRect windowRect(x, y, w, h);
+
+    QScreen* bestScreen = nullptr;
     int maxIntersectArea = 0;
-    QString bestScreenName = "";
 
     for (QScreen* screen : QGuiApplication::screens()) {
-        QRect intersect = screen->geometry().intersected(windowRect);
-        int area = intersect.width() * intersect.height();
+        const QRect intersect = screen->geometry().intersected(windowRect);
+        const int area = intersect.width() * intersect.height();
         if (area > maxIntersectArea) {
             maxIntersectArea = area;
-            bestScreenName = screen->name();
+            bestScreen = screen;
         }
     }
 
-    return bestScreenName;
+    if (!bestScreen) {
+        qreal bestDistance = -1;
+        const QPoint windowCentre = windowRect.center();
+        for (QScreen* screen : QGuiApplication::screens()) {
+            const QPoint delta = screen->geometry().center() - windowCentre;
+            const qreal distance =
+                static_cast<qreal>(delta.x()) * delta.x() + static_cast<qreal>(delta.y()) * delta.y();
+            if (bestDistance < 0 || distance < bestDistance) {
+                bestDistance = distance;
+                bestScreen = screen;
+            }
+        }
+    }
+
+    return bestScreen ? bestScreen->name() : QString();
 }
 
 QVariantMap KWinActiveWindowBridge::windowToVariant(PlasmaWindowHandle* w) const {
     QVariant desktopId = -1;
-    QVariant desktopUuid = "";
+    QVariant desktopUuid = QString();
     if (!w->desktops().isEmpty()) {
         QString firstDesktop = w->desktops().first();
         bool ok;
@@ -118,32 +247,25 @@ QVariantMap KWinActiveWindowBridge::windowToVariant(PlasmaWindowHandle* w) const
             desktopId = parsed;
             desktopUuid = firstDesktop;
         } else {
-            // Plasma 6 uses UUIDs for desktops. Pass the UUID string directly to QML.
             desktopUuid = firstDesktop;
             if (auto wsState = KWinWorkspaceState::instance()) {
                 int idx = wsState->indexForId(firstDesktop);
-                if (idx != -1) desktopId = idx;
+                if (idx != -1)
+                    desktopId = idx;
             }
         }
     }
 
-    QVariantMap map = {
-        {"address", w->uuid()},
-        {"pid", w->pid()},
-        {"title", w->title()},
-        {"class", w->appId()},
-        {"x", w->x()},
-        {"y", w->y()},
-        {"width", w->width()},
-        {"height", w->height()},
-        {"fullscreen", w->isFullscreen()},
-        {"maximized", w->isMaximized()},
-        {"minimized", w->isMinimized()},
-        {"focused", w->isActive()},
-        {"floating", !w->isFullscreen() && !w->isMaximized()}, // Fallback for floating state
-        {"output", getOutputNameForGeometry(w->x(), w->y(), w->width(), w->height())},
-        {"workspace", QVariantMap{{"id", desktopId}, {"uuid", desktopUuid}}}
-    };
+    QVariantMap map = { { QStringLiteral("address"), w->uuid() }, { QStringLiteral("pid"), w->pid() },
+        { QStringLiteral("title"), w->title() }, { QStringLiteral("class"), w->appId() },
+        { QStringLiteral("x"), w->x() }, { QStringLiteral("y"), w->y() }, { QStringLiteral("width"), w->width() },
+        { QStringLiteral("height"), w->height() }, { QStringLiteral("fullscreen"), w->isFullscreen() },
+        { QStringLiteral("maximized"), w->isMaximized() }, { QStringLiteral("minimized"), w->isMinimized() },
+        { QStringLiteral("focused"), w->isActive() },
+        { QStringLiteral("floating"), !w->isFullscreen() && !w->isMaximized() },
+        { QStringLiteral("output"), getOutputNameForGeometry(w->x(), w->y(), w->width(), w->height()) },
+        { QStringLiteral("workspace"),
+            QVariantMap{ { QStringLiteral("id"), desktopId }, { QStringLiteral("uuid"), desktopUuid } } } };
     return map;
 }
 
@@ -153,7 +275,8 @@ void KWinActiveWindowBridge::buildWindowList() {
     bool activeWindowFound = false;
 
     auto* plasmaWindows = PlasmaWindows::instance();
-// qDebug() << "KWinActiveWindowBridge::buildWindowList called, total UUIDs:" << plasmaWindows->windowUuids().size();
+    // qDebug() << "KWinActiveWindowBridge::buildWindowList called, total UUIDs:" <<
+    // plasmaWindows->windowUuids().size();
     for (const QString& uuid : plasmaWindows->windowUuids()) {
         if (auto* handle = plasmaWindows->handleFor(uuid)) {
             QVariantMap w = windowToVariant(handle);
@@ -163,18 +286,20 @@ void KWinActiveWindowBridge::buildWindowList() {
                 activeWindowFound = true;
             }
         } else {
-// qDebug() << "KWinActiveWindowBridge: handleFor returned nullptr for uuid" << uuid;
         }
     }
 
-// qDebug() << "KWinActiveWindowBridge: Emitting windowListChanged with" << m_windowList.size() << "windows.";
     emit windowListChanged();
 
     if (activeWindowFound && m_activeWindow != newActiveWindow) {
         m_activeWindow = newActiveWindow;
         emit activeWindowChanged();
-        
-        if (m_activeWindow.value("address").toString() == m_pendingFocusAddress) {
+
+        const QString newOutput = newActiveWindow.value(QStringLiteral("output")).toString();
+        if (!newOutput.isEmpty())
+            setActiveOutputName(newOutput);
+
+        if (m_activeWindow.value(QStringLiteral("address")).toString() == m_pendingFocusAddress) {
             m_pendingFocusAddress.clear();
             emit pendingFocusAddressChanged();
         }
@@ -184,53 +309,64 @@ void KWinActiveWindowBridge::buildWindowList() {
     }
 }
 
-void KWinActiveWindowBridge::focusWindow(const QString &address) {
+void KWinActiveWindowBridge::focusWindow(const QString& address) {
+    if (!m_highlightedAddress.isEmpty()) {
+        clearHighlight();
+    }
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
         m_pendingFocusAddress = address;
         emit pendingFocusAddressChanged();
-        
-        // To focus a window, we set the active state
-        handle->set_state(QtWayland::org_kde_plasma_window_management::state_active, QtWayland::org_kde_plasma_window_management::state_active);
+
+        handle->setState(QtWayland::org_kde_plasma_window_management::state_minimized, false);
+        handle->setState(QtWayland::org_kde_plasma_window_management::state_active, true);
     }
 }
 
-void KWinActiveWindowBridge::closeWindow(const QString &address) {
+void KWinActiveWindowBridge::closeWindow(const QString& address) {
+    if (!m_highlightedAddress.isEmpty() && m_highlightedAddress == address) {
+        clearHighlight();
+    }
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
         handle->close();
     }
 }
 
-void KWinActiveWindowBridge::minimizeWindow(const QString &address) {
+void KWinActiveWindowBridge::minimizeWindow(const QString& address) {
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
-        handle->set_state(QtWayland::org_kde_plasma_window_management::state_minimized, QtWayland::org_kde_plasma_window_management::state_minimized);
+        handle->setState(QtWayland::org_kde_plasma_window_management::state_minimized, true);
     }
 }
 
-void KWinActiveWindowBridge::maximizeWindow(const QString &address, bool horz, bool vert) {
+void KWinActiveWindowBridge::maximizeWindow(const QString& address, bool horz, bool vert) {
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
-        handle->set_state(QtWayland::org_kde_plasma_window_management::state_maximized, QtWayland::org_kde_plasma_window_management::state_maximized);
+        const auto max = QtWayland::org_kde_plasma_window_management::state_maximized;
+        handle->setState(max, horz || vert);
     }
 }
 
-void KWinActiveWindowBridge::raiseWindow(const QString &address) {
+void KWinActiveWindowBridge::raiseWindow(const QString& address) {
     focusWindow(address);
 }
 
-void KWinActiveWindowBridge::setWindowProperty(const QString &address, const QString &property, bool enable) {
+void KWinActiveWindowBridge::setWindowProperty(const QString& address, const QString& property, bool enable) {
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
         uint32_t state = 0;
-        if (property == "keep_above") state = QtWayland::org_kde_plasma_window_management::state_keep_above;
-        else if (property == "keep_below") state = QtWayland::org_kde_plasma_window_management::state_keep_below;
-        else if (property == "skip_taskbar") state = QtWayland::org_kde_plasma_window_management::state_skiptaskbar;
-        else if (property == "demands_attention") state = QtWayland::org_kde_plasma_window_management::state_demands_attention;
+        if (property == QStringLiteral("keep_above"))
+            state = QtWayland::org_kde_plasma_window_management::state_keep_above;
+        else if (property == QStringLiteral("keep_below"))
+            state = QtWayland::org_kde_plasma_window_management::state_keep_below;
+        else if (property == QStringLiteral("skip_taskbar"))
+            state = QtWayland::org_kde_plasma_window_management::state_skiptaskbar;
+        else if (property == QStringLiteral("demands_attention"))
+            state = QtWayland::org_kde_plasma_window_management::state_demands_attention;
 
         if (state != 0) {
-            handle->set_state(enable ? state : 0, state);
+            handle->setState(state, enable);
         }
     }
 }
 
-void KWinActiveWindowBridge::setWindowDesktop(const QString &address, int desktopId) {
+void KWinActiveWindowBridge::setWindowDesktop(const QString& address, int desktopId) {
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
         if (auto wsState = KWinWorkspaceState::instance()) {
             QString uuid = wsState->uuidForIndex(desktopId);
@@ -249,17 +385,45 @@ void KWinActiveWindowBridge::setWindowDesktop(const QString &address, int deskto
 
 void KWinActiveWindowBridge::setFullscreen(const QString& address, bool fullscreen) {
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
-        handle->set_state(fullscreen ? QtWayland::org_kde_plasma_window_management::state_fullscreen : 0, QtWayland::org_kde_plasma_window_management::state_fullscreen);
+        handle->setState(QtWayland::org_kde_plasma_window_management::state_fullscreen, fullscreen);
     }
 }
 
 void KWinActiveWindowBridge::setMaximized(const QString& address, bool maximized) {
     if (auto* handle = PlasmaWindows::instance()->handleFor(address)) {
-        handle->set_state(maximized ? QtWayland::org_kde_plasma_window_management::state_maximized : 0, QtWayland::org_kde_plasma_window_management::state_maximized);
+        handle->setState(QtWayland::org_kde_plasma_window_management::state_maximized, maximized);
     }
 }
 
+void KWinActiveWindowBridge::highlightWindow(const QString& address) {
+    if (address == m_highlightedAddress && !address.isEmpty()) {
+        return;
+    }
+    m_highlightedAddress = address;
+    emit highlightedAddressChanged();
 
+    auto msg =
+        QDBusMessage::createMethodCall(QStringLiteral("org.kde.KWin"), QStringLiteral("/org/kde/KWin/HighlightWindow"),
+            QStringLiteral("org.kde.KWin.HighlightWindow"), QStringLiteral("highlightWindows"));
+    QStringList list;
+    if (!address.isEmpty()) {
+        list << address;
+    }
+    msg << list;
+    QDBusConnection::sessionBus().send(msg);
+}
+
+void KWinActiveWindowBridge::clearHighlight() {
+    if (!m_highlightedAddress.isEmpty()) {
+        highlightWindow(QString());
+    } else {
+        auto msg = QDBusMessage::createMethodCall(QStringLiteral("org.kde.KWin"),
+            QStringLiteral("/org/kde/KWin/HighlightWindow"), QStringLiteral("org.kde.KWin.HighlightWindow"),
+            QStringLiteral("highlightWindows"));
+        msg << QStringList();
+        QDBusConnection::sessionBus().send(msg);
+    }
+}
 
 void KWinActiveWindowBridge::refreshWindows() {
     scheduleWindowListUpdate();

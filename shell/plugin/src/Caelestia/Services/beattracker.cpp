@@ -1,8 +1,9 @@
 #include "beattracker.hpp"
 
+#include <aubio/aubio.h>
+
 #include "audiocollector.hpp"
 #include "audioprovider.hpp"
-#include <aubio/aubio.h>
 
 namespace caelestia::services {
 
@@ -29,7 +30,11 @@ void BeatProcessor::process() {
         return;
     }
 
-    AudioCollector::instance().readChunk(m_in->data);
+    const quint32 count = AudioCollector::instance().readChunk(m_in->data);
+
+    if (isSilent(m_in->data, static_cast<std::size_t>(count))) {
+        return;
+    }
 
     aubio_tempo_do(m_tempo, m_in, m_out);
     if (!qFuzzyIsNull(m_out->data[0])) {

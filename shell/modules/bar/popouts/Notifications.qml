@@ -12,14 +12,9 @@ ColumnLayout {
 
     required property PopoutState popouts
 
-    property bool _isSidebarOpen: popouts.sidebarOpen && popouts.isHorizontal
-
-    readonly property real masterScale: !isNaN(GlobalConfig.bar.previewScale) ? GlobalConfig.bar.previewScale : 1.0
-    readonly property real elementOffset: GlobalConfig.bar.perElementPreviewScale ? (!isNaN(GlobalConfig.bar.previewScales.notifications) ? GlobalConfig.bar.previewScales.notifications : 0.0) : 0.0
-    readonly property real barScaleOffset: GlobalConfig.bar.previewScaleWithBar ? (!isNaN(GlobalConfig.bar.scale) ? GlobalConfig.bar.scale : 1.0) : 1.0
-    readonly property real scaleOffset: Math.max(0.1, (masterScale + elementOffset) * barScaleOffset)
-    readonly property real elementFontOffset: GlobalConfig.bar.perElementFontScale ? (!isNaN(GlobalConfig.bar.previewFontScales.notifications) ? GlobalConfig.bar.previewFontScales.notifications : 0.0) : 0.0
-    readonly property real fontScale: Math.max(0.1, scaleOffset + (!isNaN(GlobalConfig.bar.fontScaleOffset) ? GlobalConfig.bar.fontScaleOffset : 0.0) + elementFontOffset)
+    property real scaleOffset: 1.0
+    property real fontScale: 1.0
+    property bool _isSidebarOpen: false
 
     width: Math.max(300 * scaleOffset, _isSidebarOpen ? (Tokens.sizes.sidebar.width * scaleOffset) - Tokens.padding.extraLargeIncreased : 0)
     implicitWidth: Math.max(300 * scaleOffset, _isSidebarOpen ? (Tokens.sizes.sidebar.width * scaleOffset) - Tokens.padding.extraLargeIncreased : 0)
@@ -49,7 +44,10 @@ ColumnLayout {
             y: Tokens.padding.medium * root.scaleOffset
             spacing: Tokens.spacing.medium * root.scaleOffset
 
-            Toggle {
+            PopoutToggleRow {
+                scaleOffset: root.scaleOffset
+                fontScale: root.fontScale
+                rightMargin: Tokens.padding.small * root.scaleOffset
                 label: qsTr("Do not disturb")
                 checked: Notifs.dnd
                 toggle.onToggled: Notifs.dnd = checked
@@ -72,25 +70,5 @@ ColumnLayout {
         icon: "clear_all"
 
         onClicked: Notifs.clear()
-    }
-
-    component Toggle: RowLayout {
-        required property string label
-        property alias checked: toggle.checked
-        property alias toggle: toggle
-
-        Layout.fillWidth: true
-        Layout.rightMargin: Tokens.padding.small * root.scaleOffset
-        spacing: Tokens.spacing.medium * root.scaleOffset
-
-        StyledText {
-            Layout.fillWidth: true
-            text: parent.label
-            font.pointSize: Tokens.font.body.medium.pointSize * root.fontScale
-        }
-
-        StyledSwitch {
-            id: toggle
-        }
     }
 }

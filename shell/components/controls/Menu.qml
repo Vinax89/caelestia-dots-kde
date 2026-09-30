@@ -73,7 +73,6 @@ MouseArea {
 
     opacity: expanded ? 1 : 0
     visible: opacity > 0
-    onExpandedChanged: { console.log("Menu expanded:", expanded, "opacity:", opacity, "x:", menu.x, "y:", menu.y, "w:", menu.width, "h:", menu.height, "enabled:", enabled); }
 
     Behavior on opacity {
         Anim {
@@ -97,20 +96,26 @@ MouseArea {
         property real animScale: root.expanded ? 1 : 0.0
 
         x: {
-            watcher.transform; // mapToItem is not reactive so this forces updates
+            watcher.transform;
             const item = root.attachTo;
+            if (!item || !root.parent)
+                return 0;
             let off = root.attachSideX === Menu.Left ? 0 : item.width;
             if (root.thisSideX === Menu.Right)
                 off -= width;
-            return item.mapToItem(root.parent, off, 0).x + root.marginX;
+            const pt = item.mapToItem(root.parent, off, 0);
+            return (pt ? pt.x : 0) + root.marginX;
         }
         y: {
-            watcher.transform; // mapToItem is not reactive so this forces updates
+            watcher.transform;
             const item = root.attachTo;
+            if (!item || !root.parent)
+                return 0;
             let off = root.attachSideY === Menu.Top ? 0 : item.height;
             if (root.thisSideY === Menu.Bottom)
                 off -= height;
-            return item.mapToItem(root.parent, 0, off).y + root.marginY;
+            const pt = item.mapToItem(root.parent, 0, off);
+            return (pt ? pt.y : 0) + root.marginY;
         }
 
         radius: Tokens.rounding.large
@@ -142,14 +147,11 @@ MouseArea {
             }
 
             radius: parent.radius
-            // Fade alpha to 0 instead of the literal "transparent" string, which
-            // would animate RGB through black via StyledRect's inherited
-            // Behavior on color.
             color: root.transparentBackground
-                ? Qt.alpha(Colours.palette.m3surfaceContainerHigh, 0)
+                ? Qt.alpha(Colours.palette.m3surfaceContainerLow, 0)
                 : (GlobalConfig.appearance.pitchBlack
                     ? "#000000"
-                    : Colours.palette.m3surfaceContainerHigh)
+                    : Colours.palette.m3surfaceContainerLow)
 
             Flickable {
                 id: flickable
@@ -184,7 +186,7 @@ MouseArea {
                         required property MenuItem modelData
                         readonly property bool active: modelData === root?.active
 
-                        visible: modelData.visible
+                        visible: modelData?.visible ?? false
 
                         Layout.fillWidth: true
                         implicitWidth: menuOptionRow.implicitWidth + Tokens.padding.medium * 2

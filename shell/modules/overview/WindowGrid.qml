@@ -1,13 +1,11 @@
 pragma ComponentBehavior: Bound
 
-import org.kde.pipewire as Pipewire
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Widgets
 import Caelestia.Config
 import Caelestia.Layouts
-import Caelestia.Services
 import qs.components
 import qs.components.controls
 import qs.components.images
@@ -20,35 +18,61 @@ Item {
     property var cardItems: []
     property var activeInfoClient: null
     property var panels: null
+    required property ShellScreen screen
     property var closingWindows: []
     property alias indicatorContainer: indicatorContainer
     readonly property real overviewBorderThickness: Math.min(width, height) * 0.15
     readonly property real indicatorSpace: indicatorContainer.height + Tokens.padding.large * 2
     readonly property real verticalOffset: indicatorSpace - overviewBorderThickness
-    readonly property int activeWsId: typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState.activeId : 1
+    readonly property int activeWsId: {
+        const perOutput = Kwin.activeByOutput[root.screen.name];
+        if (perOutput > 0)
+            return perOutput;
+        return Kwin.activeWsId > 0 ? Kwin.activeWsId : 1;
+    }
     property bool ignoreNextSwitch: false
     property bool _initialized: false
     property bool isDragging: false
+    readonly property real edgeBand: 140
+    readonly property int edgeDirection: {
+        if (!root.isDragging || Visibilities.dragAddress === "" || Visibilities.dragOriginScreen !== root.screen.name)
+            return 0;
+        const local = Visibilities.dragX - root.screen.x;
+        const span = root.screen.width;
+        if (local < 0 || local >= span)
+            return 0;
+        if (local < root.edgeBand)
+            return -1;
+        if (local > span - root.edgeBand)
+            return 1;
+        return 0;
+    }
     readonly property real hoverScale: 1.02
     property int selectedIndex: -1
     readonly property var currentWindows: {
-        if (typeof KWinWorkspaceState === "undefined" || listView.currentIndex < 0)
+        if (listView.currentIndex < 0)
             return [];
-        const wsList = KWinWorkspaceState.workspaces;
+        const wsList = Kwin.workspaces;
         if (listView.currentIndex >= wsList.length)
             return [];
         const wsId = wsList[listView.currentIndex].index;
-        const all = typeof KWinActiveWindowBridge !== "undefined" ? KWinActiveWindowBridge.windowList : null;
-        const out = [];
-        if (all)
-            for (let i = 0; i < all.length; ++i)
-                if (all[i].workspace && (all[i].workspace.id === wsId || all[i].workspace.index === wsId))
-                    out.push(all[i]);
-        return out;
+        const _ = Kwin.windowList;
+        return Kwin.filterWindows(Kwin.windowsForWorkspace(wsId, false), null, root.screen.name);
     }
 
     signal requestWindowInfo(var client)
     signal requestClose()
+
+    /// The screen containing a point in global coordinates, or null.
+    function screenAtGlobal(gx: real, gy: real): var {
+        const all = Quickshell.screens;
+        for (let i = 0; i < all.length; ++i) {
+            const s = all[i];
+            if (gx >= s.x && gx < s.x + s.width && gy >= s.y && gy < s.y + s.height)
+                return s;
+        }
+        return null;
+    }
 
     function cycleSelection(backwards: bool): void {
         const n = root.currentWindows.length;
@@ -66,16 +90,15 @@ Item {
         const addr = wins[root.selectedIndex].address;
         if (!addr)
             return;
-        if (typeof KWinActiveWindowBridge !== "undefined")
-            KWinActiveWindowBridge.focusWindow(addr);
-        if (typeof KWinWorkspaceState !== "undefined" && listView.currentIndex >= 0)
-            KWinWorkspaceState.switchTo(KWinWorkspaceState.workspaces[listView.currentIndex].index);
+                    Kwin.focusWindow(addr);
+        if (listView.currentIndex >= 0)
+            Kwin.switchToWorkspace(Kwin.workspaces[listView.currentIndex].index, root.screen.name);
         root.requestClose();
     }
     function syncPage() {
-        if (typeof KWinWorkspaceState === "undefined") return;
-        for (let i = 0; i < KWinWorkspaceState.workspaces.length; ++i) {
-            const wId = KWinWorkspaceState.workspaces[i].index;
+        if (root.isDragging) return;
+        for (let i = 0; i < Kwin.workspaces.length; ++i) {
+            const wId = Kwin.workspaces[i].index;
             if (wId === activeWsId) {
                 if (listView.currentIndex !== i) {
                     listView.currentIndex = i;
@@ -92,6 +115,7 @@ Item {
     onOpacityChanged: {
         if (opacity <= 0) {
             selectedIndex = -1;
+            root.isDragging = false;
         } else {
             if (Visibilities.preOverviewActiveWindowAddress !== "") {
                 const targetAddress = Visibilities.preOverviewActiveWindowAddress;
@@ -105,22 +129,19 @@ Item {
                         }
                     }
                 }
-                root.selectedIndex = foundIndex; // -1 if not found
+                root.selectedIndex = foundIndex;
             } else {
                 root.selectedIndex = -1;
             }
         }
     }
-    onActiveWsIdChanged: Qt.callLater(syncPage)
+    onActiveWsIdChanged: root.syncPage()
     Component.onCompleted: {
-        if (typeof KWinWorkspaceState !== "undefined") {
-            const count = KWinWorkspaceState.workspaces.length;
-            for (let i = 0; i < count; ++i) {
-                workspaceModel.append({});
-            }
-        } else {
+        const count = Kwin.workspaces.length;
+        for (let i = 0; i < count; ++i) {
             workspaceModel.append({});
         }
+
         Qt.callLater(syncPage);
     }
 
@@ -164,7 +185,7 @@ Item {
     }
     Connections {
         function onWorkspacesChanged() {
-            const newCount = KWinWorkspaceState.workspaces.length;
+            const newCount = Kwin.workspaces.length;
             while (workspaceModel.count < newCount) {
                 workspaceModel.append({});
             }
@@ -173,12 +194,12 @@ Item {
             }
         }
 
-        target: typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState : null
+        target: Kwin
     }
     ListView {
         id: listView
 
-        property real rawSwipeOffset: typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState.swipeOffset : 0.0
+        property real rawSwipeOffset: Kwin.swipeOffsetByOutput?.[root.screen.name] ?? Kwin.swipeOffset
 
         property real targetContentX: (currentIndex + rawSwipeOffset) * width
 
@@ -187,15 +208,16 @@ Item {
         anchors.bottomMargin: verticalOffset
         orientation: ListView.Horizontal
         highlightRangeMode: ListView.NoHighlightRange
-        cacheBuffer: 100000 // Keep all pages instantiated to prevent drag-and-drop interruption
+        cacheBuffer: 100000
         boundsBehavior: Flickable.StopAtBounds
-        interactive: false // Disable native scroll to prevent fighting KWin swipe tracking
+        interactive: false
         contentX: root._initialized ? targetContentX : currentIndex * width
         model: workspaceModel
 
         onCountChanged: Qt.callLater(root.syncPage)
         onCurrentIndexChanged: {
             if (root.ignoreNextSwitch) return;
+            if (root.isDragging) return;
             switchTimer.restart();
         }
 
@@ -203,32 +225,13 @@ Item {
             id: page
 
             required property int index
-            readonly property int wsId: (typeof KWinWorkspaceState !== "undefined" && KWinWorkspaceState.workspaces && index < KWinWorkspaceState.workspaces.length) ? KWinWorkspaceState.workspaces[index].index : index + 1
-            readonly property string wsName: (typeof KWinWorkspaceState !== "undefined" && KWinWorkspaceState.workspaces && index < KWinWorkspaceState.workspaces.length) ? KWinWorkspaceState.workspaces[index].name : wsId.toString()
+            readonly property int wsId: (Kwin.workspaces && index < Kwin.workspaces.length) ? Kwin.workspaces[index].index : index + 1
+            readonly property string wsName: (Kwin.workspaces && index < Kwin.workspaces.length) ? Kwin.workspaces[index].name : wsId.toString()
             property var wsWindows: []
-            readonly property var _winTrigger: typeof KWinActiveWindowBridge !== "undefined" ? KWinActiveWindowBridge.windowList : null
-            readonly property var _hyprTrigger: (typeof Hypr !== "undefined" && Hypr.toplevels) ? Hypr.toplevels.values : null
+            readonly property var _winTrigger: Kwin.windowList
 
-            function _updateWsWindows() {
-                const kwinList = typeof KWinActiveWindowBridge !== "undefined" ? KWinActiveWindowBridge.windowList : null;
-                const hyprList = (typeof Hypr !== "undefined" && Hypr.toplevels) ? Hypr.toplevels.values : null;
-
-                let arr = [];
-                if (kwinList) {
-                    for (let i = 0; i < kwinList.length; ++i) {
-                        const w = kwinList[i];
-                        if (w.workspace && (w.workspace.id === wsId || w.workspace.index === wsId)) {
-                            arr.push(w);
-                        }
-                    }
-                } else if (hyprList) {
-                    for (let i = 0; i < hyprList.length; ++i) {
-                        const w = hyprList[i];
-                        if (w.workspace && w.workspace.id === wsId) {
-                            arr.push(w);
-                        }
-                    }
-                }
+            function _updateWsWindows(): void {
+                const arr = Kwin.filterWindows(Kwin.windowsForWorkspace(wsId, false), null, root.screen.name);
 
                 let changed = arr.length !== wsWindows.length;
                 if (!changed) {
@@ -244,16 +247,15 @@ Item {
                     wsWindows = arr;
                 }
             }
-            
+
             on_WinTriggerChanged: _updateWsWindows()
-            on_HyprTriggerChanged: _updateWsWindows()
             onWsIdChanged: _updateWsWindows()
 
             width: listView.width
             height: listView.height
             Component.onCompleted: {
                 _updateWsWindows();
-                //console.log("WindowGrid Page initialized. wsId:", wsId, "windows found:", wsWindows.length, "Total windows globally:", typeof KWinActiveWindowBridge !== "undefined" ? KWinActiveWindowBridge.windowList.length : -1);
+                //console.log("WindowGrid Page initialized. wsId:", wsId, "windows found:", wsWindows.length, "Total windows globally:", Kwin.windowList.length);
             }
             onWsWindowsChanged: {
                 //console.log("WindowGrid Page updated. wsId:", wsId, "windows found:", wsWindows.length);
@@ -272,14 +274,10 @@ Item {
                             const addr = sourceItem.clientAddress;
                             const targetId = page.wsId;
                             Qt.callLater(() => {
-                                if (typeof KWinActiveWindowBridge !== "undefined") {
-                                    KWinActiveWindowBridge.setWindowDesktop(addr, targetId);
-                                } else {
-                                    Hypr.dispatch(Hypr.usingLua ? `hl.dsp.movetoworkspace({ workspace = "${targetId}", window = "address:0x${addr}" })` : `movetoworkspace ${targetId},address:0x${addr}`);
-                                }
+                                Kwin.setWindowDesktop(addr, targetId);
                             });
+                            drop.accept();
                         }
-                        drop.accept();
                     }
                 }
             }
@@ -312,20 +310,44 @@ Item {
 
                             property bool closing: false
                             property url infoScreenshot: ""
+                            property real dropTargetScale: 0
+                            readonly property bool morphed: dragHandler.active && activeWin.dropTargetScale > 0
+
+                            function publishDrag(): void {
+                                if (!dragHandler.active)
+                                    return;
+                                const p = dragHandler.centroid.scenePosition;
+                                Visibilities.setDrag(activeWin.clientAddress, root.screen.x + p.x, root.screen.y + p.y, activeWin.width, activeWin.height, root.screen.name);
+                            }
 
                             x: dragHandler.active ? x : layoutProps.x
                             y: dragHandler.active ? y : layoutProps.y
                             width: layoutProps.width
                             height: layoutProps.height
-                            color: Colours.palette.m3surfaceContainer
+                            color: activeWin.morphed ? "transparent" : Colours.palette.m3surfaceContainer
                             radius: Tokens.rounding.large
-                            scale: closing ? 0 : (activeWin.isSelected && !dragHandler.active ? root.hoverScale : 1)
-                            opacity: closing ? 0 : 1
-                            border.width: activeWin.isSelected ? 2 : 0
+                            scale: {
+                                if (closing)
+                                    return 0;
+                                if (dragHandler.active && activeWin.dropTargetScale > 0)
+                                    return activeWin.dropTargetScale;
+                                return activeWin.isSelected && !dragHandler.active ? root.hoverScale : 1;
+                            }
+                            // Once the drag is over another screen that screen
+                            // draws it, and the half still poking out here would
+                            // otherwise sit there as a stream-less icon.
+                            opacity: closing || Visibilities.streamClaim === activeWin.clientAddress ? 0 : 1
+                            border.width: activeWin.isSelected && !activeWin.morphed ? 2 : 0
                             border.color: Colours.palette.m3primary
+
+                            onXChanged: activeWin.publishDrag()
+                            onYChanged: activeWin.publishDrag()
 
                             Component.onCompleted: {
                                 root.cardItems = [...root.cardItems, activeWin];
+                                if (modelData && !DesktopEntries.heuristicLookup(modelData.iconName || modelData.class || "")) {
+                                    WinIcons.request(modelData.class, modelData.title, modelData.pid ?? 0, modelData.address ? String(modelData.address) : "");
+                                }
                             }
                             Component.onDestruction: {
                                 root.cardItems = root.cardItems.filter(x => x !== activeWin);
@@ -351,24 +373,43 @@ Item {
                                 onActiveChanged: {
                                     root.isDragging = active;
                                     if (!active) {
-                                        let dropAction = activeWin.Drag.drop();
-                                        if (dropAction !== Qt.IgnoreAction) {
-                                            return; // Handled by DropArea
+                                        activeWin.dropTargetScale = 0;
+                                        Visibilities.clearDrag();
+                                        switchTimer.restart();
+
+
+                                        const target = root.screenAtGlobal(Visibilities.dragX, Visibilities.dragY);
+                                        if (target && target.name !== root.screen.name) {
+                                            const addr = clientAddress;
+                                            activeWin.Drag.cancel();
+                                            activeWin.visible = false;
+                                            Qt.callLater(() => {
+                                                Kwin.sendToOutput(addr, target.name);
+                                            });
+                                            return;
                                         }
 
-                                        if (typeof KWinWorkspaceState === "undefined" || typeof KWinActiveWindowBridge === "undefined") return;
-                                        const targetWsId = KWinWorkspaceState.workspaces[listView.currentIndex].index;
+                                        let dropAction = activeWin.Drag.drop();
+                                        if (dropAction !== Qt.IgnoreAction) {
+                                            return;
+                                        }
+
+                                        const targetWsId = Kwin.workspaces[listView.currentIndex].index;
                                         if (targetWsId !== page.wsId) {
                                             activeWin.visible = false;
                                             const addr = clientAddress;
                                             Qt.callLater(() => {
-                                                KWinActiveWindowBridge.setWindowDesktop(addr, targetWsId);
+                                                Kwin.setWindowDesktop(addr, targetWsId);
                                             });
                                         }
                                     }
                                 }
                             }
-                            Behavior on scale { Anim {} }
+                            Behavior on scale {
+                                Anim {
+                                    type: dragHandler.active ? Anim.SlowSpatial : Anim.DefaultSpatial
+                                }
+                            }
                             Behavior on opacity {
                                 NumberAnimation {
                                     id: opacityAnim
@@ -380,11 +421,7 @@ Item {
                             Connections {
                                 function onRunningChanged() {
                                     if (!opacityAnim.running && activeWin.closing) {
-                                        if (typeof KWinActiveWindowBridge !== "undefined") {
-                                            KWinActiveWindowBridge.closeWindow(modelData.address);
-                                        } else {
-                                            Hypr.dispatch(Hypr.usingLua ? `hl.dsp.window.close({ window = "address:0x${modelData.address}" })` : `closewindow address:0x${modelData.address}`);
-                                        }
+                                        Kwin.closeWindow(modelData.address);
                                     }
                                 }
 
@@ -406,35 +443,38 @@ Item {
                                 }
                             }
 
+                            IconImage {
+                                anchors.centerIn: parent
+                                asynchronous: true
+                                implicitSize: Math.round(Math.min(activeWin.width, activeWin.height) * 0.62)
+                                opacity: activeWin.morphed ? 1 : 0
+                                source: WinIcons.sourceForClient(modelData)
+                                visible: opacity > 0.01
+                                z: 10
+
+                                Behavior on opacity {
+                                    Anim {
+                                        type: Anim.SlowEffects
+                                    }
+                                }
+                            }
+
                             Item {
                                 id: cardLayout
 
                                 anchors.fill: parent
                                 anchors.margins: Tokens.padding.small
+                                opacity: activeWin.morphed ? 0 : 1
+                                visible: opacity > 0.01
+
+                                Behavior on opacity {
+                                    Anim {
+                                        type: Anim.SlowEffects
+                                    }
+                                }
 
                                 StyledClippingRect {
                                     id: thumb
-
-                                    property var streamRequest: null
-                                    readonly property int screencastSerial: streamRequest ? (streamRequest.objectSerial || streamRequest.nodeId) : 0
-
-                                    function updateStream() {
-                                        const isStolen = root.activeInfoClient && root.activeInfoClient.address === modelData.address;
-                                        // Only the page in view and its immediate
-                                        // neighbours, so a workspace three swipes
-                                        // away is not being captured for nothing.
-                                        const nearView = Math.abs(page.index - listView.currentIndex) <= 1;
-                                        if (root.opacity > 0 && nearView && modelData.address && !isStolen) {
-                                            if (!streamRequest) {
-                                                streamRequest = ScreencastManager.requestStream(modelData.address);
-                                            }
-                                        } else {
-                                            if (streamRequest) {
-                                                ScreencastManager.releaseStream(modelData.address);
-                                                streamRequest = null;
-                                            }
-                                        }
-                                    }
 
                                     anchors.top: parent.top
                                     anchors.left: parent.left
@@ -442,39 +482,13 @@ Item {
                                     height: parent.height - (caption.opacity * (caption.implicitHeight + Tokens.padding.extraSmall * 2))
                                     color: Colours.tPalette.m3surfaceContainerHighest
                                     radius: Tokens.rounding.medium
-                                    // Deferred out of incubation: see ScreencastManager.
-                                    Component.onCompleted: Qt.callLater(updateStream)
-                                    Component.onDestruction: {
-                                        if (streamRequest && modelData.address) {
-                                            ScreencastManager.releaseStream(modelData.address);
-                                        }
-                                    }
 
-                                    Connections {
-                                        function onOpacityChanged() {
-                                            thumb.updateStream();
-                                        }
-                                        function onActiveInfoClientChanged() {
-                                            thumb.updateStream();
-                                        }
-
-                                        target: root
-                                    }
-                                    Connections {
-                                        function onCurrentIndexChanged() {
-                                            thumb.updateStream();
-                                        }
-
-                                        target: listView
-                                    }
-                                    IconImage {
-                                        anchors.centerIn: parent
-                                        implicitSize: thumb.height * 0.5
-                                        asynchronous: true
-                                        visible: thumb.screencastSerial === 0
-                                        source: modelData.iconName ? Icons.getAppIcon(modelData.iconName, "image-missing") : (modelData.class ? Icons.getAppIcon(modelData.class, "image-missing") : "")
-                                    }
-                                    Pipewire.PipeWireSourceItem {
+                                    WindowPreview {
+                                        active: root.opacity > 0
+                                            && (dragHandler.active || Math.abs(page.index - listView.currentIndex) <= 1)
+                                            && !(root.activeInfoClient && root.activeInfoClient.address === modelData.address)
+                                            && Visibilities.streamClaim !== modelData.address
+                                        address: modelData.address ?? ""
                                         width: {
                                             const wAspect = activeWin.windowAspect;
                                             const containerAspect = thumb.width / Math.max(1, thumb.height);
@@ -486,14 +500,8 @@ Item {
                                             return (wAspect > containerAspect) ? thumb.height : thumb.width / wAspect;
                                         }
                                         anchors.centerIn: parent
-                                        visible: thumb.screencastSerial !== 0
-                                        Component.onCompleted: {
-                                        if ("objectSerial" in this) {
-                                            this.objectSerial = Qt.binding(() => thumb.streamRequest ? thumb.streamRequest.objectSerial : 0)
-                                        } else if ("nodeId" in this) {
-                                            this.nodeId = Qt.binding(() => thumb.streamRequest ? thumb.streamRequest.nodeId : 0)
-                                        }
-                                    }
+                                        fallbackIcon: WinIcons.sourceForClient(modelData)
+                                        sourceAspect: activeWin.windowAspect
                                     }
 
                                     Image {
@@ -521,7 +529,7 @@ Item {
                                     IconImage {
                                         implicitSize: Math.round(titleText.implicitHeight * 1.1)
                                         asynchronous: true
-                                        source: modelData.class ? Icons.getAppIcon(modelData.class, "image-missing") : ""
+                                        source: WinIcons.sourceForClient(modelData)
                                     }
                                     StyledText {
                                         id: titleText
@@ -532,8 +540,6 @@ Item {
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
-
-                                    Behavior on opacity { Anim {} }
                                 }
                             }
 
@@ -543,17 +549,11 @@ Item {
                                 stateOpacity: containsMouse || manualHoverOverride ? 0.02 : 0
                                 onClicked: {
                                     if (modelData.address) {
-                                        if (typeof KWinActiveWindowBridge !== "undefined") {
-                                            KWinActiveWindowBridge.focusWindow(modelData.address);
-                                        } else {
-                                            Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ window = "address:0x${modelData.address}" })` : `focuswindow address:0x${modelData.address}`);
-                                        }
-                                        if (typeof KWinWorkspaceState !== "undefined") {
-                                            KWinWorkspaceState.switchTo(page.wsId);
-                                        }
+                                        Kwin.focusWindow(modelData.address);
+                                        Kwin.switchToWorkspace(page.wsId, root.screen.name);
                                     }
-                                    const v = typeof Visibilities !== "undefined" ? Visibilities.getForActive() : null;
-                                    if (v) v.overview = false;
+                                    if (typeof Visibilities !== "undefined")
+                                        Visibilities.setOverview(false);
                                 }
                             }
 
@@ -562,7 +562,7 @@ Item {
                                 anchors.right: cardLayout.right
                                 anchors.margins: Tokens.padding.small
                                 spacing: Tokens.spacing.small
-                                opacity: hover.hovered ? 1 : 0
+                                opacity: hover.hovered && !dragHandler.active ? 1 : 0
                                 visible: opacity > 0.01
 
                                 Behavior on opacity { Anim {} }
@@ -632,10 +632,10 @@ Item {
 
             interval: 50
             onTriggered: {
-                if (typeof KWinWorkspaceState !== "undefined" && KWinWorkspaceState.workspaces.length > listView.currentIndex) {
-                    const wId = KWinWorkspaceState.workspaces[listView.currentIndex].index;
-                    if (KWinWorkspaceState.activeId !== wId) {
-                        KWinWorkspaceState.switchTo(wId);
+                if (Kwin.workspaces.length > listView.currentIndex) {
+                    const wId = Kwin.workspaces[listView.currentIndex].index;
+                    if (root.activeWsId !== wId) {
+                        Kwin.switchToWorkspace(wId, root.screen.name);
                     }
                 }
             }
@@ -662,8 +662,8 @@ Item {
             enabled: root._initialized
 
             NumberAnimation {
-                duration: rawSwipeOffset === 0.0 ? 300 : 0
-                easing.type: rawSwipeOffset === 0.0 ? Easing.OutCubic : Easing.Linear
+                duration: listView.rawSwipeOffset === 0.0 ? 300 : 0
+                easing.type: listView.rawSwipeOffset === 0.0 ? Easing.OutCubic : Easing.Linear
             }
         }
     }
@@ -683,6 +683,7 @@ Item {
 
             anchors.centerIn: parent
             maxWidth: Math.max(200, root.width - 100)
+            screenName: root.screen.name
             count: listView.count
             currentIndex: listView.currentIndex
             closingWindows: root.closingWindows
@@ -693,11 +694,7 @@ Item {
             onWorkspaceReselected: root.requestClose()
             onCreateWorkspaceRequest: {
                 root.ignoreNextSwitch = true;
-                if (typeof KWinWorkspaceState !== "undefined") {
-                    KWinWorkspaceState.createWorkspace();
-                } else if (typeof Hypr !== "undefined") {
-                    Hypr.dispatch("workspace empty");
-                }
+                Kwin.createWorkspace();
                 ignoreTimer.restart();
             }
         }
@@ -708,33 +705,74 @@ Item {
         interval: 500
         onTriggered: root.ignoreNextSwitch = false
     }
-    Timer {
-        id: edgeScrollCooldown
+    Item {
+        id: incoming
 
-        interval: 1000
-    }
-    DropArea {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 100
-        onEntered: {
-            if (!edgeScrollCooldown.running && listView.currentIndex > 0) {
-                listView.currentIndex -= 1;
-                edgeScrollCooldown.start();
+        readonly property var window: {
+            const addr = Visibilities.dragAddress;
+            if (!addr)
+                return null;
+            const all = Kwin.windowList || [];
+            for (let i = 0; i < all.length; ++i)
+                if (all[i].address === addr)
+                    return all[i];
+            return null;
+        }
+        readonly property bool arriving: Visibilities.dragAddress !== ""
+            && Visibilities.dragOriginScreen !== root.screen.name
+            && Visibilities.dragX >= root.screen.x
+            && Visibilities.dragX < root.screen.x + root.screen.width
+            && Visibilities.dragY >= root.screen.y
+            && Visibilities.dragY < root.screen.y + root.screen.height
+        readonly property real aspect: {
+            const w = incoming.window;
+            if (w && w.width > 0 && w.height > 0)
+                return w.width / w.height;
+            return 16 / 9;
+        }
+
+        height: Visibilities.dragHeight > 0 ? Visibilities.dragHeight : Math.round(width / Math.max(0.2, incoming.aspect))
+        opacity: arriving ? 1 : 0
+        visible: opacity > 0.01
+        width: Visibilities.dragWidth > 0 ? Visibilities.dragWidth : Math.round(Math.min(root.width, root.height) * 0.32)
+        x: Visibilities.dragX - root.screen.x - width / 2
+        y: Visibilities.dragY - root.screen.y - height / 2
+        z: 1000
+
+        onArrivingChanged: Visibilities.streamClaim = incoming.arriving ? Visibilities.dragAddress : ""
+
+        Behavior on opacity {
+            Anim {
+                type: Anim.DefaultEffects
+            }
+        }
+
+        StyledClippingRect {
+            anchors.fill: parent
+            color: Colours.palette.m3surfaceContainer
+            radius: Tokens.rounding.large
+
+            WindowPreview {
+                active: incoming.arriving
+                address: Visibilities.dragAddress
+                anchors.fill: parent
+                fallbackIcon: incoming.window ? WinIcons.sourceForClient(incoming.window) : ""
+                sourceAspect: incoming.aspect
             }
         }
     }
-    DropArea {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 100
-        onEntered: {
-            if (!edgeScrollCooldown.running && listView.currentIndex < listView.count - 1) {
+
+    Timer {
+        id: edgeDwell
+
+        interval: 900
+        repeat: true
+        running: root.isDragging && root.edgeDirection !== 0
+        onTriggered: {
+            if (root.edgeDirection < 0 && listView.currentIndex > 0)
+                listView.currentIndex -= 1;
+            else if (root.edgeDirection > 0 && listView.currentIndex < listView.count - 1)
                 listView.currentIndex += 1;
-                edgeScrollCooldown.start();
-            }
         }
     }
     StyledRect {

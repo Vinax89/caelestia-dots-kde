@@ -40,10 +40,11 @@ signals:
 
 private:
     void loadEmojis();
+    bool loadKdeDict(const QString& path);
+    bool loadTextFile(const QString& path);
     void loadFrequencies();
     void saveFrequencies();
 
-    QString m_emojiPath;
     QString m_freqPath;
 
     QVector<EmojiEntry> m_emojis;

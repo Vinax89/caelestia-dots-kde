@@ -69,8 +69,6 @@ Item {
     }
 
     IdleMonitor {
-        // A timeout of 0 means the feature is off, and IdleMonitor would treat
-        // it as "idle immediately".
         enabled: root.active && root.idleTimeout > 0
         timeout: root.idleTimeout
         onIsIdleChanged: root.userIdle = isIdle
@@ -96,38 +94,8 @@ Item {
         }
     }
 
-    function testRegexList(list, str) {
-        if (!list || !str) return false;
-        let arr = Array.from(list);
-        for (let i = 0; i < arr.length; i++) {
-            let pattern = arr[i];
-            if (pattern.startsWith("^") && pattern.endsWith("$")) {
-                let re = new RegExp(pattern);
-                if (re.test(str)) return true;
-            } else if (pattern === str) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    function findMatchingIndex(list, str) {
-        if (!list || !str) return -1;
-        let arr = Array.from(list);
-        for (let i = 0; i < arr.length; i++) {
-            let pattern = arr[i];
-            if (pattern.startsWith("^") && pattern.endsWith("$")) {
-                let re = new RegExp(pattern);
-                if (re.test(str)) return i;
-            } else if (pattern === str) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     Connections {
-        target: KWinActiveWindowBridge
+        target: Kwin
         enabled: root.active
         ignoreUnknownSignals: true
 
@@ -182,12 +150,9 @@ Item {
 
     function updatePresence() {
         if (!active || !DiscordIpc.connected) return;
-        if (fetchingSteam) return; // Prevent loop during async fetch
-        // Any of the triggers below can fire while away; none of them should
-        // put the presence back until the user actually returns.
+        if (fetchingSteam) return;
         if (userIdle) return;
 
-        // Priority 0: Manual Override
         if (GlobalConfig.services.arpcManualOverride && (GlobalConfig.services.arpcAppName || GlobalConfig.services.arpcDetails || GlobalConfig.services.arpcState)) {
             root.currentSteamAppId = "";
             root.sendActivity({
@@ -206,27 +171,23 @@ Item {
         let topTargetTitle = "";
         let topTargetMatchIdx = -1;
 
-        // Priority 2 prefers the focused window: a background app that happens
-        // to match the regex shouldn't describe you better than what you're
-        // actually looking at. Seeding the values here means the scan below
-        // only fills them in when nothing focused matched.
-        const activeClass = KWinActiveWindowBridge.activeWindow.class ?? "";
+        const activeClass = Kwin.activeWindow.class ?? "";
         if (activeClass !== "") {
-            const activeIdx = root.findMatchingIndex(GlobalConfig.services.arpcTargetWindows, activeClass);
+            const activeIdx = Strings.findMatchingIndex(GlobalConfig.services.arpcTargetWindows, activeClass);
             if (activeIdx >= 0) {
                 topTargetClass = activeClass;
-                topTargetTitle = KWinActiveWindowBridge.activeWindow.title ?? "";
+                topTargetTitle = Kwin.activeWindow.title ?? "";
                 topTargetMatchIdx = activeIdx;
             }
         }
 
-        for (const toplevel of KWinActiveWindowBridge.windowList) {
+        for (const toplevel of Kwin.windowList) {
             let winClass = toplevel.class ?? "";
             let winTitle = toplevel.title ?? "";
 
             if (GlobalConfig.services.arpcSteamAutoDetect && winClass.startsWith("steam_app_")) {
                 let appId = winClass.replace("steam_app_", "");
-                let isBlacklisted = root.testRegexList(GlobalConfig.services.arpcSteamBlacklist, appId) || root.testRegexList(GlobalConfig.services.arpcSteamBlacklist, "steam_app_" + appId);
+                let isBlacklisted = Strings.testRegexList(GlobalConfig.services.arpcSteamBlacklist, appId) || Strings.testRegexList(GlobalConfig.services.arpcSteamBlacklist, "steam_app_" + appId);
                 if (!isBlacklisted) {
                     topSteamClass = winClass;
                     topSteamTitle = winTitle;
@@ -235,7 +196,7 @@ Item {
             }
 
             if (topTargetClass === "") {
-                let matchIdx = root.findMatchingIndex(GlobalConfig.services.arpcTargetWindows, winClass);
+                let matchIdx = Strings.findMatchingIndex(GlobalConfig.services.arpcTargetWindows, winClass);
                 if (matchIdx >= 0) {
                     topTargetClass = winClass;
                     topTargetTitle = winTitle;
@@ -244,7 +205,6 @@ Item {
             }
         }
 
-        // Priority 1: Steam Games
         if (topSteamClass !== "") {
             let appId = topSteamClass.replace("steam_app_", "");
             if (appId !== root.currentSteamAppId || !root.currentSteamData) {
@@ -266,7 +226,6 @@ Item {
             root.currentSteamAppId = "";
         }
 
-        // Priority 2: Custom Apps (Target Windows)
         if (topTargetClass !== "") {
             let displayDetails = topTargetTitle;
             let labels = GlobalConfig.services.arpcTargetWindowLabels;
@@ -288,7 +247,6 @@ Item {
             return;
         }
 
-        // Priority 3: Caelestia Info
         if (GlobalConfig.services.arpcCaelestiaInfo) {
             let os = SysInfo.osPrettyName || SysInfo.osName || "Linux";
             let kernel = SysInfo.kernel ? SysInfo.kernel : "";
@@ -310,7 +268,7 @@ Item {
                 startTimestamp: root.shellStartTime,
                 buttons: [
                     { label: "Website", url: "https://caelestiashell.com" },
-                    { label: "GitHub", url: "https://github.com/caelestia-dots/" }
+                    { label: "GitHub", url: "https://github.com/Vinax89/caelestia-dots-kde" }
                 ]
             });
             return;

@@ -1,8 +1,8 @@
 #include "configattached.hpp"
-#include "config.hpp"
-#include "monitorconfigmanager.hpp"
 
 #include <qquickitem.h>
+
+#include "rootnodes.hpp"
 
 namespace caelestia::config {
 
@@ -30,7 +30,7 @@ void Config::inheritScreen(const QString& screen) {
     if (m_screen.isEmpty())
         m_config = nullptr;
     else
-        m_config = MonitorConfigManager::instance()->configForScreen(m_screen);
+        m_config = ConfigSingleton::instance()->forScreen(m_screen);
 
     propagateScreen();
     emit sourceChanged();
@@ -57,7 +57,7 @@ void Config::attachedParentChange(
     const Type* Config::name() const {                                                                                 \
         if (m_config)                                                                                                  \
             return m_config->name();                                                                                   \
-        return GlobalConfig::instance()->name();                                                                       \
+        return ConfigSingleton::instance()->name();                                                                    \
     }
 
 CONFIG_ATTACHED_GETTER(AppearanceConfig, appearance)
@@ -73,17 +73,17 @@ CONFIG_ATTACHED_GETTER(NotifsConfig, notifs)
 CONFIG_ATTACHED_GETTER(OsdConfig, osd)
 CONFIG_ATTACHED_GETTER(OverviewConfig, overview)
 CONFIG_ATTACHED_GETTER(ServiceConfig, services)
-CONFIG_ATTACHED_GETTER(ShimejiConfig, shimeji)
 CONFIG_ATTACHED_GETTER(SessionConfig, session)
 CONFIG_ATTACHED_GETTER(SidebarConfig, sidebar)
 CONFIG_ATTACHED_GETTER(UtilitiesConfig, utilities)
 CONFIG_ATTACHED_GETTER(WInfoConfig, winfo)
 CONFIG_ATTACHED_GETTER(UserPaths, paths)
+CONFIG_ATTACHED_GETTER(TabSwitchConfig, tabSwitch)
 
 #undef CONFIG_ATTACHED_GETTER
 
-GlobalConfig* Config::forScreen(const QString& screen) {
-    return GlobalConfig::forScreen(screen);
+ConfigRoot* Config::forScreen(const QString& screen) {
+    return ConfigSingleton::instance()->forScreen(screen);
 }
 
 Config* Config::qmlAttachedProperties(QObject* object) {

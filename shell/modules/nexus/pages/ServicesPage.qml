@@ -1,4 +1,3 @@
-import "../../../utils/scripts/solartime.js" as Solar
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -13,31 +12,6 @@ import qs.modules.nexus.common
 PageBase {
     id: root
 
-    readonly property list<MenuItem> autoSchemeItems: [
-        MenuItem {
-            text: qsTr("Sunrise and sunset")
-        },
-        MenuItem {
-            text: qsTr("Fixed times")
-        }
-    ]
-    readonly property list<string> autoSchemeValues: ["solar", "fixed"]
-
-    /// The hour of an "HH:MM" config value, for the steppers.
-    function schemeHour(time: string): int {
-        const minutes = Solar.parseTime(time);
-        return minutes < 0 ? 0 : Math.floor(minutes / 60);
-    }
-
-    /// Replaces only the hour, so minutes set by hand in the config file are
-    /// not thrown away by touching the stepper.
-    function withHour(time: string, hour: int): string {
-        const minutes = Solar.parseTime(time);
-        const mins = minutes < 0 ? 0 : minutes % 60;
-        return `${String(hour).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
-    }
-
-    // Lyrics backends, ordered to match LyricsBackend::Backend (Auto, Local, LRCLIB, NetEase)
     readonly property list<MenuItem> lyricsItems: [
         MenuItem {
             text: qsTr("Auto")
@@ -53,7 +27,6 @@ PageBase {
         }
     ]
 
-    // GPU options + the config string each maps to (see Gpu::parseType)
     readonly property list<MenuItem> gpuItems: [
         MenuItem {
             text: qsTr("Auto")
@@ -74,12 +47,12 @@ PageBase {
     function gpuKeyToIndex(key: string): int {
         const u = (key ?? "").trim().toUpperCase();
         if (u === "")
-            return 0; // Auto
+            return 0;
         if (u === "NVIDIA")
             return 1;
         if (u === "GENERIC")
             return 2;
-        return 3; // None
+        return 3;
     }
 
     title: qsTr("Services")
@@ -90,7 +63,6 @@ PageBase {
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
-        // Detected running players, used as default-player options
         Variants {
             id: playerVariants
 
@@ -105,7 +77,6 @@ PageBase {
             }
         }
 
-        // Polling
         SectionHeader {
             first: true
             text: qsTr("Polling")
@@ -143,7 +114,6 @@ PageBase {
             onMoved: v => GlobalConfig.nexus.networkRescanInterval = Math.round(v * 1000)
         }
 
-        // Media & lyrics
         SectionHeader {
             text: qsTr("Media & lyrics")
         }
@@ -168,7 +138,6 @@ PageBase {
             onSelected: item => GlobalConfig.services.defaultPlayer = item.text
         }
 
-        // Input increments
         SectionHeader {
             text: qsTr("Input increments")
         }
@@ -205,14 +174,13 @@ PageBase {
             onMoved: v => GlobalConfig.services.maxVolume = v / 100
         }
 
-        // Service tuning
         SectionHeader {
             text: qsTr("Service tuning")
         }
 
         NavRow {
             first: true
-            icon: "chat" // Using chat since discord icon might not be available in Material icons
+            icon: "chat"
             label: qsTr("Discord Rich Presence")
             status: qsTr("Broadcast your status to Vesktop")
             onClicked: root.nState.openSubPage(1)
@@ -226,47 +194,6 @@ PageBase {
             to: 120
             stepSize: 2
             onMoved: v => GlobalConfig.services.visualiserBars = v
-        }
-
-        ToggleRow {
-            text: Strings.localizeEnglishSpelling(qsTr("Smart colour scheme"))
-            subtext: qsTr("Derive theme mode and variant from the wallpaper")
-            checked: GlobalConfig.services.smartScheme
-            onToggled: GlobalConfig.services.smartScheme = checked
-        }
-
-        ToggleRow {
-            text: qsTr("Automatic light and dark")
-            subtext: qsTr("Switch the theme mode on a schedule")
-            checked: GlobalConfig.services.autoSchemeEnabled
-            onToggled: GlobalConfig.services.autoSchemeEnabled = checked
-        }
-
-        SelectRow {
-            Layout.fillWidth: true
-            label: qsTr("Schedule")
-            subtext: AutoScheme.coords ? qsTr("Sunrise and sunset use your weather location") : qsTr("Set a weather location to use sunrise and sunset")
-            menuItems: root.autoSchemeItems
-            active: root.autoSchemeItems[Math.max(0, root.autoSchemeValues.indexOf(GlobalConfig.services.autoSchemeMode))]
-            onSelected: item => GlobalConfig.services.autoSchemeMode = root.autoSchemeValues[root.autoSchemeItems.indexOf(item)]
-        }
-
-        StepperRow {
-            label: qsTr("Light mode hour")
-            subtext: qsTr("Switches at %1").arg(GlobalConfig.services.autoSchemeLightTime)
-            value: root.schemeHour(GlobalConfig.services.autoSchemeLightTime)
-            from: 0
-            to: 23
-            onMoved: h => GlobalConfig.services.autoSchemeLightTime = root.withHour(GlobalConfig.services.autoSchemeLightTime, h)
-        }
-
-        StepperRow {
-            label: qsTr("Dark mode hour")
-            subtext: qsTr("Switches at %1, also used when sunrise and sunset are unavailable").arg(GlobalConfig.services.autoSchemeDarkTime)
-            value: root.schemeHour(GlobalConfig.services.autoSchemeDarkTime)
-            from: 0
-            to: 23
-            onMoved: h => GlobalConfig.services.autoSchemeDarkTime = root.withHour(GlobalConfig.services.autoSchemeDarkTime, h)
         }
 
         SelectRow {

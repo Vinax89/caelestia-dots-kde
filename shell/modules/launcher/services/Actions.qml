@@ -21,7 +21,10 @@ Searcher {
     Variants {
         id: variants
 
-        model: GlobalConfig.launcher.actions.filter(a => (a.enabled ?? true) && (GlobalConfig.launcher.enableDangerousActions || !(a.dangerous ?? false)))
+        model: {
+            const enableDangerous = GlobalConfig.launcher.enableDangerousActions;
+            return GlobalConfig.launcher.actions.values.filter(a => a.enabled && (enableDangerous || !a.dangerous));
+        }
 
         Action {}
     }
@@ -29,7 +32,7 @@ Searcher {
     component Action: QtObject {
         required property var modelData
         readonly property string name: modelData.name ?? qsTr("Unnamed")
-        readonly property string desc: Strings.localizeEnglishSpelling(modelData.description ?? qsTr("No description"))
+        readonly property string desc: modelData.description ?? qsTr("No description")
         readonly property string icon: modelData.icon ?? "help_outline"
         readonly property list<string> command: modelData.command ?? []
         readonly property bool enabled: modelData.enabled ?? true

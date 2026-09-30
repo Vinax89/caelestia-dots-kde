@@ -18,8 +18,8 @@ MouseArea {
 
     property bool onClient
 
-    property real realBorderWidth: onClient ? (Hypr.options["general:border_size"] ?? 1) : 2
-    property real realRounding: onClient ? (Hypr.options["decoration:rounding"] ?? 0) : 0
+    property real realBorderWidth: onClient ? (Kwin.options["general:border_size"] ?? 1) : 2
+    property real realRounding: onClient ? (Kwin.options["decoration:rounding"] ?? 0) : 0
 
     property real ssx
     property real ssy
@@ -35,15 +35,14 @@ MouseArea {
     property real sh: Math.abs(sy - ey)
 
     property list<var> clients: {
-        const mon = Hypr.monitorFor(screen);
+        const mon = Kwin.monitorFor(screen);
         if (!mon)
             return [];
 
         const special = mon.lastIpcObject.specialWorkspace;
         const wsId = special.name ? special.id : mon.activeWorkspace.id;
 
-        return Hypr.toplevels.values.filter(c => c.workspace?.id === wsId).sort((a, b) => {
-            // Pinned first, then fullscreen, then floating, then any other
+        return Kwin.toplevels.values.filter(c => c.workspace?.id === wsId).sort((a, b) => {
             const ac = a.lastIpcObject;
             const bc = b.lastIpcObject;
             return (bc.pinned - ac.pinned) || ((bc.fullscreen !== 0) - (ac.fullscreen !== 0)) || (bc.floating - ac.floating);
@@ -99,9 +98,8 @@ MouseArea {
     cursorShape: Qt.CrossCursor
 
     Component.onCompleted: {
-        Hypr.extras.refreshOptions();
+        Kwin.extras.refreshOptions();
 
-        // Break binding if frozen
         if (loader.freeze)
             clients = clients;
 
@@ -199,8 +197,7 @@ MouseArea {
     }
 
     Process {
-        // hyprctl cursorpos is Hyprland-only; skip on KDE.
-        running: typeof KWinActiveWindowBridge === "undefined"
+        running: false
         command: ["hyprctl", "cursorpos", "-j"]
         stdout: StdioCollector {
             onStreamFinished: {

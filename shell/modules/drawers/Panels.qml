@@ -19,6 +19,8 @@ Item {
     id: root
 
     required property ShellScreen screen
+    Config.screen: screen.name
+    required property ScreenState screenState
     required property DrawerVisibilities visibilities
     required property Bar.BarWrapper bar
     required property real borderThickness
@@ -41,13 +43,9 @@ Item {
     readonly property real rightMargin: anchors.rightMargin
     readonly property real topMargin: anchors.topMargin
     readonly property real bottomMargin: anchors.bottomMargin
-    // Screen-relative cursor position, updated by ContentWindow from interactions.mouseX/Y
     property point cursorPos
-    // Resolved position string: auto → bar-derived, manual → as-is.
-    // When auto + cursor is in the default corner (no popups showing), flip to opposite corner.
-    // Resets to bar-derived corner on next notification arrival.
     readonly property string notifAutoPosition: {
-        const barPos = Config.bar.position;
+        const barPos = bar.position;
         const v = barPos === "bottom" ? "bottom" : "top";
         const h = barPos === "right" ? "left" : "right";
         return `${v}-${h}`;
@@ -67,12 +65,11 @@ Item {
     }
     readonly property bool notifAtTop: notifPosition.startsWith("top")
     readonly property bool notifAtBottom: notifPosition.startsWith("bottom")
-    // Height of the notification region, for other items to reference
     readonly property real notifReservedHeight: notifications.implicitHeight > 0 ? notifications.implicitHeight + Tokens.spacing.extraLarge : 0
 
     readonly property bool popoutIntersectsRight: {
         if (!popoutsWrapper.visible || popoutsWrapper.offsetScale >= 1) return false;
-        if (Config.bar.position === "top" || Config.bar.position === "bottom") {
+        if (bar.isHorizontal) {
             const notifLeft = notifications.x;
             const notifRight = notifLeft + (notifications.implicitWidth > 0 ? notifications.implicitWidth : Tokens.sizes.notifs.width);
             const popLeft = popoutsWrapper.x;
@@ -87,15 +84,33 @@ Item {
         }
     }
 
+    readonly property bool popoutIntersectsSidebar: {
+        if (!popoutsWrapper.visible || popoutsWrapper.offsetScale >= 1) return false;
+        if (!sidebar.visible) return false;
+        if (bar.isHorizontal) {
+            const sideLeft = sidebar.x;
+            const sideRight = sideLeft + sidebar.width;
+            const popLeft = popoutsWrapper.x;
+            const popRight = popoutsWrapper.x + popoutsWrapper.content.nonAnimWidth;
+            return popLeft < sideRight && popRight > sideLeft;
+        } else {
+            const sideTop = sidebar.y;
+            const sideBottom = sideTop + sidebar.height;
+            const popTop = popoutsWrapper.y;
+            const popBottom = popoutsWrapper.y + popoutsWrapper.content.nonAnimHeight;
+            return popTop < sideBottom && popBottom > sideTop;
+        }
+    }
+
     anchors.fill: parent
-    anchors.leftMargin: (Config.bar.position === "left" ? bar.implicitWidth + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
-    anchors.rightMargin: (Config.bar.position === "right" ? bar.implicitWidth + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
-    anchors.topMargin: (Config.bar.position === "top" ? bar.implicitHeight + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
-    anchors.bottomMargin: (Config.bar.position === "bottom" ? bar.implicitHeight + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
+    anchors.leftMargin: (bar.position === "left" ? bar.implicitWidth + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
+    anchors.rightMargin: (bar.position === "right" ? bar.implicitWidth + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
+    anchors.topMargin: (bar.position === "top" ? bar.implicitHeight + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
+    anchors.bottomMargin: (bar.position === "bottom" ? bar.implicitHeight + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge * 2 : 0) : borderThickness + (GlobalConfig.appearance.islands ? Tokens.spacing.extraLarge : 0))
     states: [
         State {
             name: "right"
-            when: Config.bar.position === "right"
+            when: bar.position === "right"
 
             AnchorChanges {
                 target: osdWrapper
@@ -135,7 +150,7 @@ Item {
         },
         State {
             name: "bottom"
-            when: Config.bar.position === "bottom"
+            when: bar.position === "bottom"
 
             AnchorChanges {
                 target: utilities
@@ -156,7 +171,8 @@ Item {
             PropertyChanges {
                 target: sidebar
                 anchors.topMargin: -4
-                anchors.bottomMargin: root.notifAtBottom ? root.notifReservedHeight : 0
+                anchors.bottomMargin: (root.notifAtBottom ? root.notifReservedHeight : 0)
+                    + (sidebar.shouldPush ? popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge : 0)
             }
         }
     ]
@@ -165,12 +181,12 @@ Item {
         id: osdWrapper
 
         property string vAnchor: "center"
-        property string hAnchor: Config.bar.position === "right" ? "left" : "right"
+        property string hAnchor: bar.position === "right" ? "left" : "right"
 
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
-        anchors.leftMargin: Config.bar.position === "right" ? sidebar.width * (1 - sidebar.offsetScale) + session.width * (1 - session.offsetScale) : 0
-        anchors.rightMargin: Config.bar.position !== "right" ? sidebar.width * (1 - sidebar.offsetScale) + session.width * (1 - session.offsetScale) : 0
+        anchors.leftMargin: bar.position === "right" ? sidebar.width * (1 - sidebar.offsetScale) + session.width * (1 - session.offsetScale) : 0
+        anchors.rightMargin: bar.position !== "right" ? sidebar.width * (1 - sidebar.offsetScale) + session.width * (1 - session.offsetScale) : 0
         clip: sidebar.visible || session.visible
         implicitWidth: osd.implicitWidth * (1 - osd.offsetScale)
         implicitHeight: osd.implicitHeight
@@ -195,20 +211,18 @@ Item {
         property string hAnchor: _notifH
         property bool shouldPush: root.popoutIntersectsRight && !popoutsWrapper.content.isDockPopout && !sidebar.visible
 
-        // Push offset when a bar popout would overlap this position
         readonly property real _pushOffset: shouldPush ? (popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge) : 0
 
         visibilities: root.visibilities
+        screen: root.screen
         sidebarPanel: sidebar
         osdPanel: osdWrapper
         sessionPanel: sessionWrapper
         utilitiesPanel: utilities
 
-        // Explicit size — never let anchors stretch the notification region
         width: implicitWidth
         height: implicitHeight
 
-        // Position via x/y — avoids QML anchor-binding issues with conditional clearing
         x: {
             if (_notifH === "left") return 0;
             if (_notifH === "right") return Math.max(0, parent.width - implicitWidth);
@@ -219,19 +233,15 @@ Item {
             return Math.max(0, parent.height - implicitHeight - _pushOffset);
         }
     }
-    // Auto-avoidance: check cursor position when the first notification of a batch arrives.
-    // If cursor is in the default corner, flip to opposite. On close, keep the flip until
-    // the next fresh arrival re-evaluates — this prevents a flicker during dismiss animation.
     Connections {
         function onPopupCountChanged() {
             const len = Notifs.popupCount;
-            // Only act on 0 → 1 transition (fresh batch arrival)
             if (len > 0 && root._prevPopupCount === 0 && GlobalConfig.notifs.position === "auto") {
-                const defV = Config.bar.position === "bottom" ? "bottom" : "top";
-                const defH = Config.bar.position === "left" ? "left" : "right";
+                const defParts = root.notifAutoPosition.split("-");
+                const defV = defParts[0];
+                const defH = defParts[1];
                 const notifW = Tokens.sizes.notifs.width;
                 const notifH = Math.min(root.height / 2, 600);
-                // Corner bounds in Panels-relative coordinates
                 const panelX = root.cursorPos.x - root.leftMargin;
                 const panelY = root.cursorPos.y - root.topMargin;
                 const cornerX = defH === "right" ? (root.width - notifW) : 0;
@@ -240,8 +250,6 @@ Item {
                     && panelY >= cornerY && panelY <= cornerY + notifH;
                 root.notifAutoFlipped = inCorner;
             }
-            // Do NOT reset on close (len === 0) — avoids flicker during dismiss animation.
-            // The flip resets implicitly on the next 0→1 transition above.
             root._prevPopupCount = len;
         }
 
@@ -251,12 +259,12 @@ Item {
         id: sessionWrapper
 
         property string vAnchor: "center"
-        property string hAnchor: Config.bar.position === "right" ? "left" : "right"
+        property string hAnchor: bar.position === "right" ? "left" : "right"
 
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
-        anchors.leftMargin: Config.bar.position === "right" ? sidebar.width * (1 - sidebar.offsetScale) : 0
-        anchors.rightMargin: Config.bar.position !== "right" ? sidebar.width * (1 - sidebar.offsetScale) : 0
+        anchors.leftMargin: bar.position === "right" ? sidebar.width * (1 - sidebar.offsetScale) : 0
+        anchors.rightMargin: bar.position !== "right" ? sidebar.width * (1 - sidebar.offsetScale) : 0
         clip: sidebar.visible
         implicitWidth: session.implicitWidth * (1 - session.offsetScale)
         implicitHeight: session.implicitHeight
@@ -289,6 +297,7 @@ Item {
         property string vAnchor: "top"
         property string hAnchor: "center"
 
+        screenState: root.screenState
         visibilities: root.visibilities
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
@@ -296,8 +305,8 @@ Item {
     BarPopouts.ClipWrapper {
         id: popoutsWrapper
 
-        property string vAnchor: (Config.bar.position === "top" || Config.bar.position === "bottom") ? Config.bar.position : "none"
-        property string hAnchor: (Config.bar.position === "left" || Config.bar.position === "right") ? Config.bar.position : "none"
+        property string vAnchor: (bar.position === "top" || bar.position === "bottom") ? bar.position : "none"
+        property string hAnchor: (bar.position === "left" || bar.position === "right") ? bar.position : "none"
 
         screen: root.screen
         bar: root.bar
@@ -307,8 +316,8 @@ Item {
     Utilities.Wrapper {
         id: utilities
 
-        property string vAnchor: Config.bar.position === "bottom" ? "top" : "bottom"
-        property string hAnchor: Config.bar.position === "right" ? "left" : "right"
+        property string vAnchor: bar.position === "bottom" ? "top" : "bottom"
+        property string hAnchor: bar.position === "right" ? "left" : "right"
 
         visibilities: root.visibilities
         sidebar: sidebar
@@ -320,7 +329,7 @@ Item {
         id: toasts
 
         property string vAnchor: "bottom"
-        property string hAnchor: Config.bar.position === "bottom" ? "left" : (Config.bar.position === "right" ? "left" : "right")
+        property string hAnchor: bar.position === "bottom" ? "left" : (bar.position === "right" ? "left" : "right")
 
         visibilities: root.visibilities
         anchors.bottom: sidebar.visible ? parent.bottom : utilities.top
@@ -331,20 +340,19 @@ Item {
         id: sidebar
 
         property string vAnchor: "bottom"
-        property string hAnchor: Config.bar.position === "right" ? "left" : "right"
-        property bool shouldPush: root.popoutIntersectsRight && !popoutsWrapper.content.isDockPopout
+        property string hAnchor: bar.position === "right" ? "left" : "right"
+        property bool shouldPush: root.popoutIntersectsSidebar && !popoutsWrapper.content.isDockPopout
 
         visibilities: root.visibilities
         popouts: popoutsWrapper.content
         utilities: utilities
-        // Default (non-bottom-bar): sidebar fills from top or below notifications (when notif is at top)
         anchors.top: parent.top
         anchors.bottom: utilities.top
         anchors.right: parent.right
         anchors.topMargin: root.notifAtTop
-            ? (root.notifReservedHeight + ((Config.bar.position === "top" && shouldPush) ? popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge : 0))
-            : ((Config.bar.position === "top" && shouldPush) ? (popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge) : 0)
-        anchors.bottomMargin: (Config.bar.position === "bottom" && shouldPush) ? (popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge) : 0
+            ? (root.notifReservedHeight + ((bar.position === "top" && shouldPush) ? popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge : 0))
+            : ((bar.position === "top" && shouldPush) ? (popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge) : 0)
+        anchors.bottomMargin: (bar.position === "bottom" && shouldPush) ? (popoutsWrapper.implicitHeight + Tokens.spacing.extraLarge) : 0
     }
     Overview.Wrapper {
         id: overview

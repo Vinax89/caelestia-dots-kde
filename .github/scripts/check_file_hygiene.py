@@ -185,7 +185,8 @@ def check_large_files(changed_files: list[str]) -> None:
             continue
 
         if size_kb > MAX_FILE_SIZE_KB:
-            if any(skip in rel_path for skip in ("wallpapers", "sounds", "assets")):
+            if (any(skip in rel_path for skip in ("wallpapers", "sounds", "assets"))
+                    or ("fonts" in filepath.parts and filepath.suffix.lower() in {".ttf", ".otf", ".woff", ".woff2"})):
                 warn(f"Large asset file: {rel_path} ({size_kb:.0f} KB)")
             else:
                 error(f"File too large ({size_kb:.0f} KB): {rel_path} - max allowed is {MAX_FILE_SIZE_KB} KB")

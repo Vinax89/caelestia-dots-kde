@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 03-deploy-configs.sh  Deploy Caelestia configuration files to ~/.config
 
 set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib/install-kind.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
 
 BUNDLE_DIR="${BUNDLE_DIR:?BUNDLE_DIR not set}"
 SRC_DIR="$BUNDLE_DIR/src"
@@ -16,10 +18,10 @@ if [[ -z "${BACKUP_DIR:-}" ]]; then
         BACKUP_DIR="$(cat "$BACKUP_DIR_FILE" 2>/dev/null || true)"
     fi
 
-    # Only reuse the cached backup dir if it belongs to *this* bundle's backups and matches the timestamp format.
     if [[ -n "$BACKUP_DIR" ]]; then
         case "$BACKUP_DIR" in
             "$BUNDLE_DIR/backups/"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+            "$CACHE_DIR/backups/"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
             *) BACKUP_DIR="" ;;
         esac
     fi
@@ -29,30 +31,35 @@ if [[ -z "${BACKUP_DIR:-}" ]]; then
     fi
 
     if [[ -z "$BACKUP_DIR" ]]; then
-        BACKUP_DIR="$BUNDLE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+        if install_is_packaged; then
+            BACKUP_DIR="$CACHE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+        else
+            BACKUP_DIR="$BUNDLE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+        fi
     fi
 fi
 
 echo
 echo ""
-echo "  Step 3/11  Config Deployment"
+info "Deploying configuration files"
 echo ""
 
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$DEPLOYED_DIR"
 
 if [[ ! -d "$DOTS_DIR" ]] || [[ -z "$(ls -A "$DOTS_DIR" 2>/dev/null)" ]]; then
-    echo "  [ERR] Missing src/dots content. Run: git submodule update --init --recursive src/dots"
-    exit 1
+    if install_is_packaged; then
+        die "Missing dotfiles in $DOTS_DIR. The package should have installed them; reinstall it."
+    fi
+    die "Missing src/dots content. Run: bash \"$BUNDLE_DIR/scripts/02a-submodules.sh\""
 fi
 
-echo "  Recording previous login shell..."
-getent passwd "$USER" | cut -d: -f7 > "$BACKUP_DIR/previous_shell.txt"
+info "Recording previous login shell..."
+getent passwd "$(id -un)" | cut -d: -f7 > "$BACKUP_DIR/previous_shell.txt"
 
-echo "  Backing up pre-install configs..."
+info "Backing up pre-install configs..."
 mkdir -p "$BACKUP_DIR/shellrc" "$BACKUP_DIR/.config" "$BACKUP_DIR/local"
 
-# Backup selected config dirs that may be overwritten/removed during install/uninstall
 for cfg in btop fastfetch fish foot kitty micro thunar; do
     if [[ -e "$HOME/.config/$cfg" ]]; then
         if ! cp -a "$HOME/.config/$cfg" "$BACKUP_DIR/.config/$cfg"; then
@@ -62,7 +69,6 @@ for cfg in btop fastfetch fish foot kitty micro thunar; do
     fi
 done
 
-# Backup Konsole config/profiles (system tweaks may modify these)
 if [[ -f "$HOME/.config/konsolerc" ]]; then
     if ! cp -a "$HOME/.config/konsolerc" "$BACKUP_DIR/.config/konsolerc"; then
         echo "[FATAL] Failed to back up $HOME/.config/konsolerc; refusing to deploy." >&2
@@ -174,8 +180,8 @@ deploy_config() {
             expected="$(<"$stamp")"
         fi
 
-        if [[ -z "$expected" || "$current" != "$expected" ]]; then
-            echo "    [SKIP] Preserving locally modified config: $config"
+        if [[ -n "$expected" && "$current" != "$expected" ]]; then
+            skip "Preserving locally modified config: $config"
             echo "           Backup: $BACKUP_DIR/.config/$config"
             return
         fi
@@ -191,7 +197,7 @@ deploy_config() {
     echo "    Deployed: $config"
 }
 
-echo "  Deploying Caelestia configs..."
+info "Deploying Caelestia configs..."
 for config in btop fastfetch foot kitty micro; do
     deploy_config "$config" "$DOTS_DIR/$config"
 done
@@ -206,27 +212,26 @@ if [[ "${INSTALL_THUNAR:-false}" == "true" ]]; then
                 cp "$thunar_source/$file" "$thunar_target/$file"
                 echo "    Deployed: thunar/$file"
             else
-                echo "    [WARN] Missing optional Thunar file: thunar/$file"
+                warn "Missing optional Thunar file: thunar/$file"
             fi
         done
     else
-        echo "    [WARN] Thunar integration files unavailable in src/dots/thunar"
+        warn "Thunar integration files unavailable in src/dots/thunar"
     fi
 else
-    echo "    [SKIP] Thunar integration files disabled by user choice"
+    skip "Thunar integration files disabled by user choice"
 fi
 
-echo "  Deploying extra configs..."
+info "Deploying extra configs..."
 for config in fish fastfetch; do
     if [[ "$config" == "fish" && "${INSTALL_FISH:-true}" != "true" ]]; then
-        echo "    [SKIP] fish config deployment disabled by user choice"
+        skip "fish config deployment disabled by user choice"
         continue
     fi
 
     deploy_config "$config" "$FISH_DIR/$config"
 done
 
-# Backup existing starship config
 if [[ -f "$HOME/.config/starship.toml" ]]; then
     mkdir -p "$BACKUP_DIR/.config"
     if ! cp "$HOME/.config/starship.toml" "$BACKUP_DIR/.config/starship.toml"; then
@@ -235,7 +240,6 @@ if [[ -f "$HOME/.config/starship.toml" ]]; then
     fi
 fi
 
-# Deploy starship.toml unless the previous Caelestia copy was locally edited.
 if [[ -f "$DOTS_DIR/starship.toml" ]]; then
     mkdir -p "$HOME/.config"
     starship_target="$HOME/.config/starship.toml"
@@ -246,8 +250,8 @@ if [[ -f "$DOTS_DIR/starship.toml" ]]; then
         if [[ -f "$starship_stamp" ]]; then
             starship_expected="$(<"$starship_stamp")"
         fi
-        if [[ -z "$starship_expected" || "$starship_current" != "$starship_expected" ]]; then
-            echo "    [SKIP] Preserving locally modified config: starship.toml"
+        if [[ -n "$starship_expected" && "$starship_current" != "$starship_expected" ]]; then
+            skip "Preserving locally modified config: starship.toml"
             echo "           Backup: $BACKUP_DIR/.config/starship.toml"
         else
             if ! install -m 0644 "$DOTS_DIR/starship.toml" "$starship_target"; then
@@ -267,17 +271,14 @@ if [[ -f "$DOTS_DIR/starship.toml" ]]; then
     fi
 fi
 
-#  Deploy Bridge Files
-echo "  Deploying bridge files (bin, applications, systemd, kwin script)..."
+info "Deploying bridge files (bin, applications, systemd, kwin script)..."
 mkdir -p \
     "$HOME/.local/bin" \
     "$HOME/.local/share/applications" \
     "$HOME/.config/systemd/user" \
     "$HOME/.local/share/kwin/scripts"
 
-# bin scripts
 if [[ -d "$SRC_DIR/bin" ]]; then
-    # Copy scripts, but skip C++ source files and build files
     for file in "$SRC_DIR/bin/"*; do
         if [[ ! "$file" == *.cpp && ! "$file" == *CMakeLists.txt && ! -d "$file" ]]; then
             if ! cp --remove-destination "$file" "$HOME/.local/bin/"; then
@@ -288,50 +289,7 @@ if [[ -d "$SRC_DIR/bin" ]]; then
     done
 fi
 
-# User systemd units
-for unit in "$BUNDLE_DIR/src/systemd/"*.service "$BUNDLE_DIR/src/systemd/"*.timer; do
-    [[ -f "$unit" ]] || continue
-    install -m 0644 "$unit" "$HOME/.config/systemd/user/$(basename "$unit")"
-done
-systemctl --user daemon-reload 2>/dev/null || true
-systemctl --user enable --now caelestia-update-checker.timer 2>/dev/null || \
-    echo "  [WARN]  Could not enable the Caelestia update checker timer." >&2
-
-# Update desktop database
 update-desktop-database "$HOME/.local/share/applications/" 2>/dev/null || true
-echo "  [OK]  Bridge files deployed."
+ok "Bridge files deployed."
 
-if [[ "${APPLY_LOCKSCREEN:-true}" != "false" ]]; then
-    echo "  Configuring KDE Lock Screen to use Caelestia..."
-    WALLPAPER_STAMP="${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/wallpaper-plugin-installed"
-    PLUGIN_OK=false
-    if [[ "${CAELESTIA_WALLPAPER_PLUGIN_INSTALLED:-false}" == "true" ]]; then
-        PLUGIN_OK=true
-    elif command -v kpackagetool6 >/dev/null 2>&1 \
-        && kpackagetool6 --list -t Plasma/Wallpaper 2>/dev/null \
-        | grep -q "net.dosowisko.PlasmaApplicationWallpaper"; then
-        PLUGIN_OK=true
-    elif ! command -v kpackagetool6 >/dev/null 2>&1 && [[ -f "$WALLPAPER_STAMP" ]]; then
-        PLUGIN_OK=true
-    fi
-
-    if $PLUGIN_OK && command -v kwriteconfig6 >/dev/null 2>&1; then
-        # The greeter runs this command through a shell, so the path must be
-        # shell-quoted (%q) rather than interpolated raw.
-        printf -v lockscreen_command 'quickshell -p %q' "$HOME/.config/quickshell/caelestia/lockscreen.qml"
-        kwriteconfig6 --file kscreenlockerrc --group Greeter --key WallpaperPlugin net.dosowisko.PlasmaApplicationWallpaper
-        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key command "$lockscreen_command"
-        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group net.dosowisko.PlasmaApplicationWallpaper --group General --key fps 1
-        kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key alwaysShowClock false
-        kwriteconfig6 --file kscreenlockerrc --group Greeter --group LnF --group General --key showMediaControls false
-        echo "  [OK]  KDE Lock Screen configured."
-    elif ! $PLUGIN_OK; then
-        echo "  [WARN] plasma-wallpaper-application plugin not installed. Skipping KDE Lock Screen configuration."
-    else
-        echo "  [WARN] KDE config tools not found. Skipping KDE Lock Screen configuration."
-    fi
-else
-    echo "  [SKIP] KDE Lock Screen configuration disabled by user choice."
-fi
-
-echo "[OK]  Config deployment complete."
+ok "Config deployment complete."

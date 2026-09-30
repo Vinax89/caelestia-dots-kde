@@ -8,6 +8,24 @@ import qs.modules.nexus.common
 PageBase {
     id: root
 
+    readonly property var builtinIcons: ({
+            lockStatus: qsTr("Lock keys"),
+            kbLayout: qsTr("Keyboard layout"),
+            audio: qsTr("Speakers"),
+            microphone: qsTr("Microphone"),
+            network: qsTr("Network"),
+            ethernet: qsTr("Ethernet"),
+            bluetooth: qsTr("Bluetooth"),
+            battery: qsTr("Battery"),
+            peripheralBattery: qsTr("Peripheral battery"),
+            nightlight: qsTr("Night light"),
+            notifications: qsTr("Notifications")
+        })
+    readonly property var addableIcons: {
+        const present = Config.bar.statusIcons.values.map(entry => entry.id);
+        return Object.keys(root.builtinIcons).filter(id => !present.includes(id)).map(id => ({ id: id, label: root.builtinIcons[id] }));
+    }
+
     title: qsTr("Status icons")
     isSubPage: true
 
@@ -17,84 +35,56 @@ PageBase {
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
-        // Visible icons
         SectionHeader {
             first: true
             text: qsTr("Visible icons")
         }
 
-        ToggleRow {
+        ListEditor {
+            function labelFor(item: var): string {
+                return root.builtinIcons[item.id] ?? item.id;
+            }
+
+            function toggledFor(item: var): bool {
+                return item.enabled;
+            }
+
+            z: 1
             first: true
-            text: qsTr("Speakers")
-            checked: Config.bar.status.showAudio
-            onToggled: GlobalConfig.bar.status.showAudio = checked
+            values: Config.bar.statusIcons.values
+            onItemMoved: (from, to) => GlobalConfig.bar.statusIcons.move(from, to)
+            onItemRemoved: index => GlobalConfig.bar.statusIcons.remove(index)
+            onItemToggled: (index, checked) => GlobalConfig.bar.statusIcons.at(index).enabled = checked
         }
 
-        ToggleRow {
-            text: qsTr("Microphone")
-            checked: Config.bar.status.showMicrophone
-            onToggled: GlobalConfig.bar.status.showMicrophone = checked
-        }
+        DialogSelectButton {
+            id: addItemContainer
 
-        ToggleRow {
-            text: qsTr("Keyboard layout")
-            checked: Config.bar.status.showKbLayout
-            onToggled: GlobalConfig.bar.status.showKbLayout = checked
-        }
+            rootParent: root.flickable
+            visible: root.addableIcons.length > 0
+            icon: "add"
+            label: qsTr("Add entry")
+            header: qsTr("Add new entry")
+            acceptLabel: qsTr("Add")
 
-        ToggleRow {
-            text: qsTr("Network")
-            checked: Config.bar.status.showNetwork
-            onToggled: GlobalConfig.bar.status.showNetwork = checked
-        }
+            model: root.addableIcons
 
-        ToggleRow {
-            text: qsTr("Wi-Fi")
-            checked: Config.bar.status.showWifi
-            onToggled: GlobalConfig.bar.status.showWifi = checked
-        }
-
-        ToggleRow {
-            text: qsTr("Bluetooth")
-            checked: Config.bar.status.showBluetooth
-            onToggled: GlobalConfig.bar.status.showBluetooth = checked
-        }
-
-        ToggleRow {
-            text: qsTr("Night Light")
-            checked: Config.bar.status.showNightLight
-            onToggled: GlobalConfig.bar.status.showNightLight = checked
-        }
-
-        ToggleRow {
-            text: qsTr("Battery")
-            checked: Config.bar.status.showBattery
-            onToggled: GlobalConfig.bar.status.showBattery = checked
-        }
-
-        ToggleRow {
-            text: qsTr("Peripheral Battery")
-            checked: Config.bar.status.showPeripheralBattery
-            onToggled: GlobalConfig.bar.status.showPeripheralBattery = checked
-        }
-
-        ToggleRow {
-            text: qsTr("Notifications")
-            checked: Config.bar.status.showNotifications
-            onToggled: GlobalConfig.bar.status.showNotifications = checked
+            onAccepted: {
+                if (selectedItem)
+                    GlobalConfig.bar.statusIcons.insert({ id: selectedItem, enabled: true });
+            }
         }
 
         ToggleRow {
             Layout.fillWidth: true
-            last: true
-            text: qsTr("Caps lock")
-            checked: Config.bar.status.showLockStatus
-            onToggled: GlobalConfig.bar.status.showLockStatus = checked
+            text: qsTr("Wi-Fi")
+            subtext: qsTr("Show the Wi-Fi icon alongside the network icon")
+            checked: Config.bar.status.showWifi
+            onToggled: GlobalConfig.bar.status.showWifi = checked
         }
 
-        // Behaviour
         SectionHeader {
-            text: Strings.localizeEnglishSpelling(qsTr("Behaviour"))
+            text: qsTr("Behavior")
         }
 
         ToggleRow {

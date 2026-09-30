@@ -12,6 +12,8 @@ Item {
     required property ShellScreen screen
     required property DrawerVisibilities visibilities
     required property var panels
+    Config.screen: root.screen.name
+    readonly property real maxWidth: screen.width
     readonly property bool shouldBeActive: visibilities.launcher && Config.launcher.enabled && !visibilities.overview
     readonly property real maxHeight: {
         let max = screen.height - Config.border.thickness * 2 + Tokens.padding.extraLarge;
@@ -25,16 +27,16 @@ Item {
         if (shouldBeActive) {
             implicitHeight = Qt.binding(() => content.implicitHeight);
         } else
-            implicitHeight = implicitHeight; // Break binding during close anim
+            implicitHeight = implicitHeight;
     }
     clip: Config.bar.position === "bottom"
     visible: offsetScale < 1
     anchors.bottomMargin: (Config.bar.position === "bottom" ? 0 : -implicitHeight - 5) * offsetScale
     height: Config.bar.position === "bottom" ? implicitHeight * (1 - offsetScale) : implicitHeight
     implicitHeight: content.implicitHeight
-    implicitWidth: content.implicitWidth || 630 // Hard coded fallback for first open
+    implicitWidth: content.implicitWidth || 630
     opacity: 1 - offsetScale
-    Component.onCompleted: Qt.callLater(() => Apps) // Load apps on init
+    Component.onCompleted: Qt.callLater(() => Apps)
 
     Behavior on offsetScale {
         enabled: !visibilities.skipLauncherAnim
@@ -51,6 +53,7 @@ Item {
             Content {
                 visibilities: root.visibilities
                 panels: root.panels
+                maxWidth: root.maxWidth
                 maxHeight: root.maxHeight
             }
         }

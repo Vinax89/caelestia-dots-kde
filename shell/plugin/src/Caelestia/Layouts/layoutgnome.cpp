@@ -1,12 +1,14 @@
 #include "layoutgnome.hpp"
 
-#include "layoututils.hpp"
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+
+#include "layoututils.hpp"
 
 namespace caelestia::layouts {
 
-LayoutGnome::LayoutGnome(QObject* parent) : QObject(parent) {}
+LayoutGnome::LayoutGnome(QObject* parent)
+    : QObject(parent) {}
 
 inline double lerp(double a, double b, double t) {
     return a + (b - a) * std::clamp(t, 0.0, 1.0);
@@ -44,19 +46,21 @@ bool LayoutGnome::isBetterScaleAndSpace(double oldScale, double oldSpace, double
     }
 }
 
-QVariantMap LayoutGnome::calculateLayout(const QVariantList& windows, double areaWidth, double areaHeight, double columnSpacing, double rowSpacing) {
+QVariantMap LayoutGnome::calculateLayout(
+    const QVariantList& windows, double areaWidth, double areaHeight, double columnSpacing, double rowSpacing) {
     QVariantMap result;
-    if (windows.isEmpty() || areaWidth <= 0 || areaHeight <= 0) return result;
+    if (windows.isEmpty() || areaWidth <= 0 || areaHeight <= 0)
+        return result;
 
     QList<WindowInfo> winInfos;
     for (const QVariant& wVar : windows) {
         QVariantMap w = wVar.toMap();
         WindowInfo info;
-        info.address = w.value("address").toString();
-        info.x = w.value("x").toDouble();
-        info.y = w.value("y").toDouble();
-        info.width = w.value("width", 800).toDouble();
-        info.height = w.value("height", 600).toDouble();
+        info.address = w.value(QStringLiteral("address")).toString();
+        info.x = w.value(QStringLiteral("x")).toDouble();
+        info.y = w.value(QStringLiteral("y")).toDouble();
+        info.width = w.value(QStringLiteral("width"), 800).toDouble();
+        info.height = w.value(QStringLiteral("height"), 600).toDouble();
         info.center_x = info.x + info.width / 2.0;
         info.center_y = info.y + info.height / 2.0;
         winInfos.append(info);
@@ -71,9 +75,10 @@ QVariantMap LayoutGnome::calculateLayout(const QVariantList& windows, double are
     double bestSpace = 0.0;
     int lastNumColumns = -1;
 
-    for (int numRows = 1; ; ++numRows) {
+    for (int numRows = 1;; ++numRows) {
         int numColumns = std::ceil((double)winInfos.size() / numRows);
-        if (numColumns == lastNumColumns) break;
+        if (numColumns == lastNumColumns)
+            break;
 
         double totalWidth = 0;
         for (const auto& win : winInfos) {
@@ -119,7 +124,7 @@ QVariantMap LayoutGnome::calculateLayout(const QVariantList& windows, double are
 
         double horizontalScale = (areaWidth - hspacing) / std::max(1.0, gridWidth);
         double verticalScale = (areaHeight - vspacing) / std::max(1.0, gridHeight);
-        double scale = std::min({horizontalScale, verticalScale, 0.95}); // WINDOW_PREVIEW_MAXIMUM_SCALE
+        double scale = std::min({ horizontalScale, verticalScale, 0.95 });
 
         double scaledLayoutWidth = gridWidth * scale + hspacing;
         double scaledLayoutHeight = gridHeight * scale + vspacing;
@@ -135,16 +140,17 @@ QVariantMap LayoutGnome::calculateLayout(const QVariantList& windows, double are
         lastNumColumns = numColumns;
     }
 
-    // Apply layout slots
     for (RowInfo& row : bestRowsData) {
         row.width = row.fullWidth * bestScale + std::max(0, (int)row.windows.size() - 1) * columnSpacing;
         row.height = row.fullHeight * bestScale;
     }
 
     double heightWithoutSpacing = 0;
-    for (const RowInfo& row : bestRowsData) heightWithoutSpacing += row.height;
+    for (const RowInfo& row : bestRowsData)
+        heightWithoutSpacing += row.height;
     double verticalSpacing = std::max(0, (int)bestRowsData.size() - 1) * rowSpacing;
-    double additionalVerticalScale = std::min(1.0, (areaHeight - verticalSpacing) / std::max(1.0, heightWithoutSpacing));
+    double additionalVerticalScale =
+        std::min(1.0, (areaHeight - verticalSpacing) / std::max(1.0, heightWithoutSpacing));
 
     double compensation = 0;
     double currentY = 0;
@@ -152,7 +158,8 @@ QVariantMap LayoutGnome::calculateLayout(const QVariantList& windows, double are
     for (RowInfo& row : bestRowsData) {
         double horizontalSpacing = std::max(0, (int)row.windows.size() - 1) * columnSpacing;
         double widthWithoutSpacing = row.width - horizontalSpacing;
-        double additionalHorizontalScale = std::min(1.0, (areaWidth - horizontalSpacing) / std::max(1.0, widthWithoutSpacing));
+        double additionalHorizontalScale =
+            std::min(1.0, (areaWidth - horizontalSpacing) / std::max(1.0, widthWithoutSpacing));
 
         if (additionalHorizontalScale < additionalVerticalScale) {
             row.additionalScale = additionalHorizontalScale;
@@ -190,10 +197,10 @@ QVariantMap LayoutGnome::calculateLayout(const QVariantList& windows, double are
             }
 
             QVariantMap props;
-            props["x"] = std::floor(cloneX);
-            props["y"] = std::floor(cloneY);
-            props["width"] = cloneWidth;
-            props["height"] = cloneHeight;
+            props[QStringLiteral("x")] = std::floor(cloneX);
+            props[QStringLiteral("y")] = std::floor(cloneY);
+            props[QStringLiteral("width")] = cloneWidth;
+            props[QStringLiteral("height")] = cloneHeight;
             result[win.address] = props;
 
             currentX += cellWidth + columnSpacing;

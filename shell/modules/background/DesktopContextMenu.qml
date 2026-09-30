@@ -5,6 +5,7 @@ import Quickshell
 import Caelestia.Config
 import qs.components.controls as Controls
 import qs.services
+import qs.utils
 import qs.modules.nexus
 
 Controls.Menu {
@@ -18,26 +19,6 @@ Controls.Menu {
     property var itemPool: ({})
     property var entryByKey: ({})
     property real perfMenuOpenStartedAt: 0
-
-    function defaultEntries() {
-        return [
-            { id: "toggle_desktop_icons", label: qsTr("Desktop Icons"), icon: "desktop_windows", action: "ToggleDesktopIcons", enabled: true, type: "default" },
-            { id: "next_wallpaper", label: qsTr("Next Wallpaper"), icon: "skip_next", action: "Wallpapers.next()", enabled: true, type: "default" },
-            { id: "wallpaper_style", label: qsTr("Wallpaper & style"), icon: "wallpaper", action: "WindowFactory.create()", enabled: true, type: "default" },
-            { id: "system_settings", label: qsTr("System Settings"), icon: "settings", command: "systemsettings", enabled: true, type: "default" },
-            { id: "open_terminal", label: qsTr("Open Terminal"), icon: "terminal", command: "terminal", enabled: true, type: "default" },
-            { id: "add_shortcut", label: qsTr("Add Shortcut..."), icon: "add", action: "OpenRightClickMenu", enabled: true, type: "default" }
-        ];
-    }
-
-    function cloneEntries(entries) {
-        return JSON.parse(JSON.stringify(entries));
-    }
-
-    function commandArgv(command) {
-        const tokens = command.match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"])*"|'[^']*')+/g) || [];
-        return tokens.map(token => token.replace(/^(['"])(.*)\1$/, "$2").replace(/\\(.)/g, "$1"));
-    }
 
     function executeEntryByKey(key) {
         let entry = root.entryByKey[key];
@@ -60,17 +41,17 @@ Controls.Menu {
                     GlobalConfig.save();
                 } else if (entry.action === "OpenRightClickMenu") {
                     WindowFactory.create(null, {
-                        initialPageIdx: 1, // Desktop
-                        initialSubPageIdx: 2 // Right Click Menu is index 2
+                        initialPageIdx: PageRegistry.indexForKey("desktop"),
+                        initialSubPageIdx: 2
                     });
                 } else if (entry.action === "OpenTerminal") {
-                    Quickshell.execDetached([...GlobalConfig.general.apps.terminal]);
+                    Launch.exec([...GlobalConfig.general.apps.terminal]);
                 }
             } else if (entry.command) {
                 if (entry.command === "terminal") {
-                    Quickshell.execDetached([...GlobalConfig.general.apps.terminal]);
+                    Launch.exec([...GlobalConfig.general.apps.terminal]);
                 } else {
-                    Quickshell.execDetached(typeof entry.command === "string" ? commandArgv(entry.command) : entry.command);
+                    Launch.exec(typeof entry.command === "string" ? entry.command.split(" ") : entry.command);
                 }
             }
         };
@@ -80,8 +61,8 @@ Controls.Menu {
     function applyEntries(entries, sourceName) {
         const buildStartedAt = Date.now();
         const normalized = (!entries || entries.length === 0)
-            ? cloneEntries(ContextMenuStore.defaultEntries())
-            : cloneEntries(entries);
+            ? ContextMenuStore.cloneEntries(ContextMenuStore.defaultEntries())
+            : ContextMenuStore.cloneEntries(entries);
         const newArr = [];
         const nextEntryByKey = {};
 
@@ -135,9 +116,6 @@ Controls.Menu {
     thisSideY: _flipY ? Controls.Menu.Bottom : Controls.Menu.Top
     transparentBackground: true
 
-    // While the menu is open the ContentWindow mask expands to cover the whole
-    // screen, so desktop right-clicks land on this full-screen catcher instead of
-    // Background.qml's TapHandler. Forward them so the menu reopens at the new spot.
     rightClickReposition: true
     onRightClickedAt: (x, y) => ContextMenuStore.openDesktopContextMenu(x, y, root.screenName)
 

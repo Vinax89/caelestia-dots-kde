@@ -1,9 +1,9 @@
 #pragma once
 
-#include "tickingservice.hpp"
-
 #include <qprocess.h>
 #include <qqmlintegration.h>
+
+#include "tickingservice.hpp"
 
 namespace caelestia::services {
 
@@ -14,10 +14,10 @@ class Gpu : public TickingService {
 
 public:
     enum Type {
-        Auto,    // user override is empty (config "") — defer to detected autoType
-        None,    // no usable GPU
-        Nvidia,  // queried via nvidia-smi
-        Generic, // queried via /sys/class/drm/card*/device/gpu_busy_percent
+        Auto,
+        None,
+        Nvidia,
+        Generic,
     };
     Q_ENUM(Type)
 
@@ -51,18 +51,23 @@ protected:
     void tick() override;
 
 private:
-    void detectTypeOnce();
-    void detectNameOnce();
+    void detectGpu();
+    void finishLspciProbe(const QByteArray& out);
+    void probeNvidiaCapability();
+    void tryNameSource(int index);
+    void finishNameSource(int index, QString name);
     void readGenericUsage();
     void startNvidiaUsage();
     void readGpuTemperature();
+    void resetReadings();
+
+    void runProcess(const QString& program, const QStringList& args, std::function<void(const QByteArray&)> callback);
 
     void setUserType(Type value);
     void setAutoType(Type value);
     void setName(QString value);
 
     [[nodiscard]] static Type parseType(const QString& s);
-    [[nodiscard]] static QString cleanName(QString s);
 
     Type m_userType = Auto;
     Type m_autoType = None;
@@ -70,9 +75,14 @@ private:
     qreal m_percentage = 0.0;
     qreal m_temperature = 0.0;
 
-    QProcess* m_typeProc = nullptr;
-    QProcess* m_nameProc = nullptr;
-    QProcess* m_nvidiaProc = nullptr;
+    QStringList m_busyFiles;
+
+    QString m_nvidiaPciPath;
+
+    int m_nvidiaFailures = 0;
+
+    bool m_detecting = false;
+    bool m_nvidiaQuerying = false;
 };
 
 } // namespace caelestia::services

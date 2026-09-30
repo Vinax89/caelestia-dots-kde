@@ -2,10 +2,10 @@
 #pragma once
 
 #include <QObject>
-#include <QVariantList>
-#include <QVariantMap>
 #include <QQmlEngine>
 #include <QTimer>
+#include <QVariantList>
+#include <QVariantMap>
 
 namespace caelestia::services {
 
@@ -34,16 +34,27 @@ public:
     explicit DinoGameBackend(QObject* parent = nullptr);
 
     bool isPlaying() const { return m_isPlaying; }
+
     bool isGameOver() const { return m_isGameOver; }
+
     bool isDucking() const { return m_isDucking; }
+
     bool isInverted() const { return m_isInverted; }
+
     qreal score() const { return m_score; }
+
     qreal highScore() const { return m_highScore; }
+
     qreal dinoY() const { return m_dinoY; }
+
     qreal groundX() const { return m_groundX; }
+
     int frameCount() const { return m_frameCount; }
+
     QVariantList obstacles() const { return m_obstacles; }
+
     QVariantList clouds() const { return m_clouds; }
+
     qreal width() const { return m_width; }
 
     void setIsDucking(bool val);

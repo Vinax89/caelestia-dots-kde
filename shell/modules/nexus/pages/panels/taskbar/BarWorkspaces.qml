@@ -3,11 +3,24 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Caelestia.Config
-import Caelestia.Services
+import qs.components.controls
 import qs.modules.nexus.common
 
 PageBase {
     id: root
+
+    readonly property list<MenuItem> displayTypeItems: [
+        MenuItem {
+            property int value: BarWorkspaceDisplay.Shapes
+
+            text: qsTr("Shape")
+        },
+        MenuItem {
+            property int value: BarWorkspaceDisplay.Text
+
+            text: qsTr("Text")
+        }
+    ]
 
     title: qsTr("Workspaces")
     isSubPage: true
@@ -19,10 +32,10 @@ PageBase {
         spacing: Tokens.spacing.extraSmall / 2
 
         Connections {
-            target: typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState : null
+            target: Kwin
 
             function onWorkspacesChanged() {
-                let len = KWinWorkspaceState.workspaces.length;
+                let len = Kwin.workspaces.length;
                 if (len > 0 && GlobalConfig.bar.workspaces.shown !== len) {
                     GlobalConfig.bar.workspaces.shown = len;
                 }
@@ -30,12 +43,11 @@ PageBase {
         }
 
         Component.onCompleted: {
-            if (typeof KWinWorkspaceState !== "undefined") {
-                let len = KWinWorkspaceState.workspaces.length;
-                if (len > 0 && GlobalConfig.bar.workspaces.shown !== len) {
-                    GlobalConfig.bar.workspaces.shown = len;
-                }
-            }
+let len = Kwin.workspaces.length;
+if (len > 0 && GlobalConfig.bar.workspaces.shown !== len) {
+    GlobalConfig.bar.workspaces.shown = len;
+}
+
         }
 
         StepperRow {
@@ -48,18 +60,17 @@ PageBase {
             stepSize: 1
             onMoved: v => {
                 GlobalConfig.bar.workspaces.shown = v;
-                if (typeof KWinWorkspaceState !== "undefined") {
-                    let d = KWinWorkspaceState.workspaces;
-                    let count = d.length;
-                    while (count < v) {
-                        KWinWorkspaceState.createWorkspace("Desktop " + (count + 1));
-                        count++;
-                    }
-                    while (count > v) {
-                        KWinWorkspaceState.removeWorkspace(d[count - 1].id);
-                        count--;
-                    }
-                }
+let d = Kwin.workspaces;
+let count = d.length;
+while (count < v) {
+    Kwin.createWorkspace("Desktop " + (count + 1));
+    count++;
+}
+while (count > v) {
+    Kwin.removeWorkspace(d[count - 1].id);
+    count--;
+}
+
             }
         }
 
@@ -81,11 +92,13 @@ PageBase {
             onToggled: GlobalConfig.bar.workspaces.occupiedBg = checked
         }
 
-        ToggleRow {
+        SelectRow {
             Layout.fillWidth: true
-            text: qsTr("Use material icons for indicators")
-            checked: Config.bar.workspaces.useIcon
-            onToggled: GlobalConfig.bar.workspaces.useIcon = checked
+            label: qsTr("Indicator style")
+            subtext: qsTr("Draw each workspace as a material shape or as its number")
+            active: Config.bar.workspaces.displayType === BarWorkspaceDisplay.Text ? root.displayTypeItems[1] : root.displayTypeItems[0]
+            menuItems: root.displayTypeItems
+            onSelected: item => GlobalConfig.bar.workspaces.displayType = item.value
         }
 
         ToggleRow {
@@ -94,6 +107,14 @@ PageBase {
             subtext: qsTr("Show icons of open windows on each workspace")
             checked: Config.bar.workspaces.showWindows
             onToggled: GlobalConfig.bar.workspaces.showWindows = checked
+        }
+
+        ToggleRow {
+            Layout.fillWidth: true
+            text: qsTr("Show unoccupied")
+            subtext: qsTr("Show workspaces that are inactive and empty")
+            checked: Config.bar.workspaces.showUnoccupied
+            onToggled: GlobalConfig.bar.workspaces.showUnoccupied = checked
         }
 
         ToggleRow {
@@ -115,10 +136,10 @@ PageBase {
 
         ToggleRow {
             last: true
-            text: qsTr("Per-monitor workspaces")
-            subtext: qsTr("Show each monitor's workspaces independently")
-            checked: GlobalConfig.bar.workspaces.perMonitorWorkspaces
-            onToggled: GlobalConfig.bar.workspaces.perMonitorWorkspaces = checked
+            text: qsTr("Per monitor")
+            subtext: qsTr("Hide workspaces not on the current monitor")
+            checked: Config.bar.workspaces.perMonitor
+            onToggled: GlobalConfig.bar.workspaces.perMonitor = checked
         }
     }
 }

@@ -71,7 +71,6 @@ PageBase {
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
-        // Main Toggle
         ToggleRow {
             Layout.fillWidth: true
             first: true
@@ -87,7 +86,7 @@ PageBase {
                         qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript "krohnkite" 2>/dev/null || true
                         if ! kpackagetool6 -t KWin/Script -s krohnkite >/dev/null 2>&1; then
                             if command -v kpackagetool6 >/dev/null 2>&1; then
-                                notify-send "Installing Krohnkite..." "Please stay connected to internet.."
+                                notify-send "Installing Krohnkite..." "Please stay connected to the internet..."
                                 tmpdir="$(mktemp -d)"
                                 kwinscript_url="https://codeberg.org/anametologin/Krohnkite/releases/download/0.9.9.2/krohnkite.kwinscript"
                                 kwinscript_sha256="42f7f66531d366c74b5fc860381da3517ccb4cdccd1f80c122fcab6e9a8fcf7e"
@@ -151,7 +150,7 @@ PageBase {
                 Layout.fillWidth: true
                 Layout.topMargin: 0
                 text: qsTr("Gaps")
-                first: true // avoid double top margin
+                first: true
             }
 
             IconButton {

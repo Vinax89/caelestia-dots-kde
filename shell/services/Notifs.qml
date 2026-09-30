@@ -15,18 +15,41 @@ Singleton {
     id: root
 
     property list<NotifData> list: []
-    // Incremental counters — updated by each NotifData's change handlers below.
-    // This avoids the full-list filter() that fires on every state change.
     property int openCount: 0
     property int popupCount: 0
+
+    readonly property int notifCap: Math.max(1, GlobalConfig.notifs.maxNotifs)
 
     property alias dnd: props.dnd
     property string lastSavedState: ""
 
+    property string activeTargetOutput: ""
     property bool loaded
 
+    function getCursorOutputName(): string {
+        const monitor = Kwin.monitors[Kwin.cursorOutputName()] || Kwin.focusedMonitor;
+        return monitor?.name || Kwin.cursorOutputName() || "";
+    }
+
+    function getTargetOutput(): string {
+        const cursorScreen = root.getCursorOutputName();
+        if (GlobalConfig.notifs.monitor === "focused") {
+            if (GlobalConfig.notifs.fullscreen === "off" && Kwin.hasFullscreenOn(cursorScreen)) {
+                const scrList = Screens.screens || [];
+                for (let i = 0; i < scrList.length; i++) {
+                    const candidate = scrList[i].name;
+                    if (candidate !== cursorScreen && !Kwin.hasFullscreenOn(candidate))
+                        return candidate;
+                }
+                return "";
+            }
+            return cursorScreen;
+        }
+        return cursorScreen;
+    }
+
     function hasFullscreen(): bool {
-        return Hypr.hasFullscreen();
+        return Kwin.hasFullscreen();
     }
 
     // Called only when an actual list of items is needed (serialisation, clear).
@@ -36,33 +59,57 @@ Singleton {
     function shouldShowPopup(): bool {
         if (props.dnd || [...Visibilities.screens.values()].some(v => v.sidebar))
             return false;
-        if (GlobalConfig.notifs.fullscreen === "off" && hasFullscreen())
+        if (GlobalConfig.notifs.fullscreen === "off") {
+            if (GlobalConfig.notifs.monitor === "focused") {
+                const targetName = root.activeTargetOutput || root.getTargetOutput();
+                if (targetName === "" || Kwin.hasFullscreenOn(targetName))
+                    return false;
+            } else {
+                const scrList = Screens.screens || [];
+                if (scrList.length > 0 && scrList.every(s => Kwin.hasFullscreenOn(s.name)))
+                    return false;
+                if (scrList.length === 0 && hasFullscreen())
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    function shouldPlaySound(notif: Notification): bool {
+        if (props.dnd)
             return false;
+        if (notif.appName === "caelestia-cli" || GlobalConfig.audio.sounds.disabledNotifApps.includes(notif.appName))
+            return false;
+        if (GlobalConfig.notifs.fullscreen === "off") {
+            if (GlobalConfig.notifs.monitor === "focused") {
+                const targetName = root.activeTargetOutput || root.getTargetOutput();
+                if (targetName === "" || Kwin.hasFullscreenOn(targetName))
+                    return false;
+            } else {
+                const scrList = Screens.screens || [];
+                if (scrList.length > 0 && scrList.every(s => Kwin.hasFullscreenOn(s.name)))
+                    return false;
+                if (scrList.length === 0 && hasFullscreen())
+                    return false;
+            }
+        }
         return true;
     }
 
     function clear(): void {
-        // Detach everything in one assignment before closing any of it.
-        //
-        // Closing a notification rebuilds this list (filter + reassign), and the
-        // reassignment re-runs every derived binding: the unread counters in the
-        // bar and the per-app filters in both notification docks — each of them a
-        // full pass over the list. Closing one at a time therefore costs O(n) work
-        // per notification plus a full view rebuild, so with a couple of thousand
-        // stored it hangs the shell outright.
-        //
-        // Emptying the list first drops those dependencies, so the views update
-        // once and each close() below is just a dismiss and a destroy.
         const toClose = root.list;
         root.list = [];
         root.openCount = 0;
         root.popupCount = 0;
         for (let i = 0; i < toClose.length; i++)
             toClose[i].close();
+        saveTimer.stop();
+        root.lastSavedState = "[]";
+        storage.setText("[]");
     }
 
     function serializeState(): string {
-        return JSON.stringify(root.notClosed().map(n => ({  // notClosed() called once, not a binding
+        return JSON.stringify(root.notClosed().map(n => ({
                         time: n.time,
                         id: n.id,
                         summary: n.summary,
@@ -96,8 +143,6 @@ Singleton {
     Timer {
         id: saveTimer
 
-        // Back off when the list is large to reduce serialisation pressure.
-        // At 500 items this is ~8 s; at 0 it is 3 s.
         interval: Math.min(10000, 3000 + root.list.length * 10)
         onTriggered: {
             const serialized = root.serializeState();
@@ -130,29 +175,27 @@ Singleton {
         onNotification: notif => {
             notif.tracked = true;
 
+            root.activeTargetOutput = root.getTargetOutput();
+
             const showPopup = root.shouldShowPopup();
             const comp = notifComp.createObject(root, {
                 popup: showPopup,
                 notification: notif
             });
 
-            // onClosedChanged / onPopupChanged only fire on *transitions*, not on
-            // initial construction. A fresh notification always starts closed=false,
-            // so we must increment the counters explicitly here.
             root.openCount++;
             if (showPopup)
                 root.popupCount++;
 
             const next = [comp, ...root.list];
-            const cap = GlobalConfig.notifs.maxNotifs;
+            const cap = root.notifCap;
             if (next.length > cap) {
-                // Evict oldest items (tail) before assigning — one list update total.
                 const evicted = next.splice(cap);
                 for (const old of evicted) old.close();
             }
             root.list = next;
 
-            if (!props.dnd && notif.appName !== "caelestia-cli" && !GlobalConfig.audio.sounds.disabledNotifApps.includes(notif.appName))
+            if (root.shouldPlaySound(notif))
                 Audio.playNotification();
         }
     }
@@ -171,7 +214,7 @@ Singleton {
                 root.loaded = true;
                 return;
             }
-            const cap = GlobalConfig.notifs.maxNotifs;
+            const cap = root.notifCap;
             for (const notif of data.slice(0, cap))
                 root.list.push(notifComp.createObject(root, notif));
             root.list.sort((a, b) => b.time - a.time);
@@ -193,7 +236,7 @@ Singleton {
     CustomShortcut {
         // qmllint enable unresolved-type
         name: "clearNotifs"
-        description: "Clear all notifications"
+        description: qsTr("Clear all notifications")
         onPressed: root.clear()
     }
 
@@ -226,11 +269,12 @@ Singleton {
 
         NotifData {
             onClosedChanged: {
-                // Maintain openCount incrementally instead of re-filtering the list.
                 root.openCount = closed ? Math.max(0, root.openCount - 1) : root.openCount + 1;
             }
             onPopupChanged: {
                 root.popupCount = popup ? root.popupCount + 1 : Math.max(0, root.popupCount - 1);
+                if (root.popupCount === 0)
+                    root.activeTargetOutput = "";
             }
         }
     }

@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Widgets
 import Caelestia
@@ -43,12 +42,6 @@ Item {
 
     HoverHandler { id: dockHover }
 
-    // Re-publishes the icon geometry below. A tile's rect on screen moves for
-    // reasons no single binding can watch — the bar sliding in and out, the
-    // dock list scrolling, a drag reordering tiles — and mapToItem() is a plain
-    // call that never re-runs on its own. Re-reading a handful of rects twice a
-    // second covers all of it, and MinimizeGeometry drops rects that have not
-    // actually changed, so a steady dock sends nothing over the wire.
     Timer {
         interval: 500
         repeat: true
@@ -58,18 +51,6 @@ Item {
 
     ListModel { id: dockModel }
 
-    // Tell KWin where each app's taskbar entry sits, so minimize/restore
-    // effects animate into the dock instead of guessing from the cursor.
-    //
-    // The rects are derived from the list's own geometry and the entry's index
-    // rather than from each delegate: a delegate reports position 0 here, so
-    // asking it gave every window the same rect — whichever tile published last
-    // won, and every app animated to that one spot.
-    //
-    // This component is also instantiated where it has no bar to sit on (with
-    // no window, or laid out to zero size). Those copies have no meaningful
-    // rect to offer and would otherwise overwrite the real dock's, so they are
-    // skipped rather than allowed to publish nonsense.
     function publishMinimizeGeometry(): void {
         const win = QsWindow.window;
         if (!win || listView.width <= 0 || listView.height <= 0)
@@ -87,12 +68,6 @@ Item {
             if (tops.length === 0)
                 continue;
 
-            // Where this entry sits along the list, accounting for scrolling,
-            // clamped to the strip the list actually occupies. A tile scrolled
-            // out of view has no rect of its own, and leaving the last one
-            // published would point the animation at wherever the dock used to
-            // be — stale across a scroll, and badly wrong across a bar move.
-            // The nearest edge is where it would scroll back in from.
             const offset = Math.max(0, Math.min(i * step - scrolled, span - size));
 
             let x = Math.round(horizontal ? origin.x + offset : origin.x);
@@ -136,8 +111,7 @@ Item {
             newArr.push(mData);
         }
 
-        // Only update if arrays are different length or different order
-        const currentFavs = GlobalConfig.launcher.favouriteApps || [];
+        const currentFavs = GlobalConfig.bar.dock.pinnedApps || [];
         let changed = currentFavs.length !== newFavs.length;
         if (!changed) {
             for (let i = 0; i < newFavs.length; i++) {
@@ -149,18 +123,79 @@ Item {
         }
 
         if (changed) {
-            GlobalConfig.launcher.favouriteApps = newFavs;
+            GlobalConfig.bar.dock.pinnedApps = newFavs;
         }
 
         root.modelDataArray = newArr;
+        const map = {};
+        for (const app of newArr) {
+            map[app.id] = app;
+        }
+        root.modelDataMap = map;
+    }
+
+    function handleWheel(angleDelta: point): void {
+        scrollByWheel(angleDelta, Qt.point(0, 0));
+    }
+
+    function scrollByWheel(angleDelta: point, pixelDelta: point): void {
+        if (root.isDragging) return;
+
+        const isH = bar.isHorizontal;
+        const fullSpan = Math.max(isH ? listView.contentWidth : listView.contentHeight, container.__computedContentWidth);
+        const viewSpan = isH ? listView.width : listView.height;
+        const maxScroll = Math.max(0, fullSpan - viewSpan);
+        if (maxScroll <= 0) return;
+
+        const rawDelta = isH
+            ? (Math.abs(angleDelta.x) > Math.abs(angleDelta.y) ? angleDelta.x : angleDelta.y)
+            : (Math.abs(angleDelta.y) > Math.abs(angleDelta.x) ? angleDelta.y : angleDelta.x);
+
+        const rawPixel = isH
+            ? (Math.abs(pixelDelta.x) > Math.abs(pixelDelta.y) ? pixelDelta.x : pixelDelta.y)
+            : (Math.abs(pixelDelta.y) > Math.abs(pixelDelta.x) ? pixelDelta.y : pixelDelta.x);
+
+        if (rawPixel !== 0) {
+            scrollAnim.stop();
+            const current = isH ? listView.contentX : listView.contentY;
+            const target = Math.max(0, Math.min(maxScroll, current - rawPixel));
+            if (isH) listView.contentX = target;
+            else listView.contentY = target;
+            root.publishMinimizeGeometry();
+            return;
+        }
+
+        if (rawDelta === 0) return;
+
+        const step = container.itemSize + root.spacing;
+        const scrollAmount = -(rawDelta / 120) * step;
+
+        const current = scrollAnim.running ? scrollAnim.to : (isH ? listView.contentX : listView.contentY);
+        const target = Math.max(0, Math.min(maxScroll, current + scrollAmount));
+
+        scrollAnim.stop();
+        scrollAnim.from = isH ? listView.contentX : listView.contentY;
+        scrollAnim.to = target;
+        scrollAnim.start();
+    }
+
+    function clampScroll(): void {
+        const isH = bar.isHorizontal;
+        const fullSpan = Math.max(isH ? listView.contentWidth : listView.contentHeight, container.__computedContentWidth);
+        const viewSpan = isH ? listView.width : listView.height;
+        const maxScroll = Math.max(0, fullSpan - viewSpan);
+        if (isH) {
+            if (listView.contentX > maxScroll)
+                listView.contentX = maxScroll;
+        } else {
+            if (listView.contentY > maxScroll)
+                listView.contentY = maxScroll;
+        }
     }
 
     StyledRect {
         id: container
 
-        // Fade alpha to 0 instead of switching to the literal "transparent"
-        // string, which would animate RGB through black via StyledRect's
-        // inherited Behavior on color.
         color: dockModel.count > 0 ? Colours.tPalette.m3surfaceContainer : Qt.alpha(Colours.tPalette.m3surfaceContainer, 0)
         radius: Tokens.rounding.full
 
@@ -181,7 +216,6 @@ Item {
             return "middle";
         }
 
-        // Actual space available from the dock's position to the next zone boundary
         property real availableSize: {
             if (!bar) return 9999;
 
@@ -248,9 +282,33 @@ Item {
         Item {
             id: layout
 
-            anchors.centerIn: parent
-            implicitWidth: container.__computedContentWidth
-            implicitHeight: container.__computedContentWidth
+            anchors.fill: parent
+
+            WheelHandler {
+                id: wheelHandler
+
+                target: null
+                orientation: Qt.Vertical | Qt.Horizontal
+
+                onWheel: event => {
+                    root.scrollByWheel(event.angleDelta, event.pixelDelta);
+                }
+            }
+
+            NumberAnimation {
+                id: scrollAnim
+
+                target: listView
+                property: bar.isHorizontal ? "contentX" : "contentY"
+                duration: 180
+                easing.type: Easing.OutCubic
+
+                onRunningChanged: {
+                    if (!running) {
+                        root.publishMinimizeGeometry();
+                    }
+                }
+            }
 
             ListView {
                 id: listView
@@ -262,6 +320,11 @@ Item {
                 spacing: root.spacing
                 interactive: bar.isHorizontal ? contentWidth > width + 1 : contentHeight > height + 1
                 clip: true
+
+                onContentWidthChanged: root.clampScroll()
+                onWidthChanged: root.clampScroll()
+                onContentHeightChanged: root.clampScroll()
+                onHeightChanged: root.clampScroll()
 
                 add: Transition {
                     NumberAnimation { property: "scale"; from: 0; to: 1; duration: 250; easing.type: Easing.OutBack }
@@ -290,7 +353,7 @@ Item {
                 orientation: Qt.Horizontal
                 size: listView.visibleArea.widthRatio
                 position: listView.visibleArea.xPosition
-                shouldBeActive: dockHover.hovered || listView.moving
+                shouldBeActive: dockHover.hovered || listView.moving || scrollAnim.running
                 anchors.left: listView.left
                 anchors.right: listView.right
                 anchors.bottom: listView.bottom
@@ -303,7 +366,7 @@ Item {
                 orientation: Qt.Vertical
                 size: listView.visibleArea.heightRatio
                 position: listView.visibleArea.yPosition
-                shouldBeActive: dockHover.hovered || listView.moving
+                shouldBeActive: dockHover.hovered || listView.moving || scrollAnim.running
                 anchors.top: listView.top
                 anchors.bottom: listView.bottom
                 anchors.right: listView.right
@@ -318,14 +381,15 @@ Item {
             Item {
                 id: delegateContainer
 
+                required property int index
+                required property string appId
+
                 width: container.itemSize
                 height: container.itemSize
                 implicitWidth: width
                 implicitHeight: height
 
-                property var modelData: root.modelDataArray[index]
-
-                required property int index
+                property var modelData: root.modelDataMap[appId] || root.modelDataArray[index]
 
                 DropArea {
                     anchors.fill: parent
@@ -356,15 +420,37 @@ Item {
                     Drag.source: delegateItem
                     Drag.hotSpot.x: width / 2
                     Drag.hotSpot.y: height / 2
+                    StyledRect {
+                        anchors.fill: parent
+                        radius: Tokens.rounding.medium
+                        color: Colours.palette.m3onSurface
+                        opacity: delegateItem.isActive ? 0.1 : 0
+
+                        Behavior on opacity {
+                            Anim {
+                                type: Anim.DefaultEffects
+                            }
+                        }
+                    }
+
+                    StyledRect {
+                        anchors.fill: parent
+                        radius: Tokens.rounding.medium
+                        color: Colours.palette.m3error
+                        opacity: (delegateItem.badge?.urgent ?? false) ? 0.35 : 0
+
+                        Behavior on opacity {
+                            Anim {
+                                type: Anim.DefaultEffects
+                            }
+                        }
+                    }
+
                     StateLayer {
                         id: stateLayer
 
                         anchors.fill: parent
                         radius: Tokens.rounding.medium
-
-                        color: delegateItem.isActive ? Colours.palette.m3onSurface : "transparent"
-                        opacity: delegateItem.isActive ? 0.1 : 0
-
                         acceptedButtons: Qt.NoButton
 
                         onEntered: {
@@ -403,72 +489,52 @@ Item {
                                     let activeIdx = -1;
                                     let activeAddr = "";
 
-                                    if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.activeWindow) {
-                                        activeAddr = KWinActiveWindowBridge.activeWindow.address ? String(KWinActiveWindowBridge.activeWindow.address) : "";
-                                        Logger.log("Dock debug: KWin activeWindow address is:", activeAddr);
+                                    if (Kwin.activeWindow) {
+                                        activeAddr = Kwin.activeWindow.address ? String(Kwin.activeWindow.address) : "";
                                     } else if (root.activeTop && root.activeTop.address) {
                                         activeAddr = String(root.activeTop.address);
-                                        Logger.log("Dock debug: Hyprland activeTop address is:", activeAddr);
-                                    } else {
-                                        Logger.log("Dock debug: No active window detected!");
                                     }
 
-                                    Logger.log("Dock debug: Checking", modelData.toplevels.length, "toplevels for app.");
                                     for (let i = 0; i < modelData.toplevels.length; i++) {
                                         let top = modelData.toplevels[i];
                                         let topAddr = String(top.address);
                                         let isMinimized = top.minimized || false;
-                                        Logger.log("Dock debug: Toplevel", i, "address:", topAddr, "focused:", top.focused, "minimized:", isMinimized);
                                         if (!isMinimized && (top.focused || (activeAddr !== "" && activeAddr === topAddr))) {
                                             activeIdx = i;
-                                            Logger.log("Dock debug: Match found at index", i);
                                             break;
                                         }
                                     }
 
-                                    Logger.log("Dock debug: Final activeIdx:", activeIdx);
-
-                                    const isKWin = (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.windowList);
+                                    const isKWin = (Kwin.windowList.length > 0);
 
                                     if (modelData.toplevels.length === 1) {
                                         let addr = String(modelData.toplevels[0].address);
                                         if (activeIdx === 0) {
-                                            Logger.log("Dock debug: Single window, currently focused. Minimizing.");
                                             if (isKWin) {
-                                                KWinActiveWindowBridge.minimizeWindow(addr);
+                                                Kwin.minimizeWindow(addr);
                                             }
                                         } else {
-                                            Logger.log("Dock debug: Single window, NOT focused. Focusing.");
                                             if (isKWin) {
-                                                KWinActiveWindowBridge.focusWindow(addr);
+                                                Kwin.focusWindow(addr);
                                             } else {
-                                                Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ window = "address:0x${addr}" })` : `focuswindow address:0x${addr}`);
+                                                Kwin.dispatch(Kwin.usingLua ? `hl.dsp.focus({ window = "address:0x${addr}" })` : `focuswindow address:0x${addr}`);
                                             }
                                         }
                                     } else {
                                         let nextIdx = activeIdx !== -1 ? (activeIdx + 1) % modelData.toplevels.length : 0;
                                         let addr = String(modelData.toplevels[nextIdx].address);
-                                        Logger.log("Dock debug: Multiple windows. Cycling to index", nextIdx);
                                         if (isKWin) {
-                                            KWinActiveWindowBridge.focusWindow(addr);
+                                            Kwin.focusWindow(addr);
                                         } else {
-                                            Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ window = "address:0x${addr}" })` : `focuswindow address:0x${addr}`);
+                                            Kwin.dispatch(Kwin.usingLua ? `hl.dsp.focus({ window = "address:0x${addr}" })` : `focuswindow address:0x${addr}`);
                                         }
                                     }
                                 } else if (modelData.entry) {
-                                    // Mark as launching
                                     let newLaunching = Object.assign({}, root.launchingApps);
                                     newLaunching[modelData.appClass || modelData.id] = true;
                                     root.launchingApps = newLaunching;
 
-                                    const subCmd = modelData.entry.runInTerminal
-                                        ? [...GlobalConfig.general.apps.terminal, `${Quickshell.shellDir}/assets/wrap_term_launch.sh`, ...modelData.entry.command]
-                                        : modelData.entry.command;
-                                    const finalCmd = GlobalConfig.services.useSystemd ? ["app2unit", "--", ...subCmd] : subCmd;
-                                    Quickshell.execDetached({
-                                        command: finalCmd,
-                                        workingDirectory: modelData.entry.workingDirectory
-                                    });
+                                    Launch.launchEntry(modelData.entry);
                                 }
                             } else if (mouse.button === Qt.RightButton) {
                                 bar.popouts.currentName = "dockcontext";
@@ -525,6 +591,13 @@ Item {
                         return modelData.toplevels.length > 0;
                     }
 
+                    readonly property var badge: {
+                        const dummy = LauncherEntry.revision;
+                        if (!modelData || !(Config.bar.dock.showBadges ?? true))
+                            return null;
+                        return LauncherEntry.forApp(modelData.id);
+                    }
+
 
 
                     IconImage {
@@ -558,6 +631,61 @@ Item {
                         sourceComponent: CircularIndicator {
                             running: true
                             strokeWidth: 2
+                        }
+                    }
+
+                    StyledRect {
+                        id: countBadge
+
+                        readonly property int badgeHeight: Math.max(12, Math.round((icon.implicitSize || 0) * 0.55))
+                        readonly property int dotSize: Math.max(6, Math.round(badgeHeight * 0.75))
+                        readonly property bool asDot: (delegateItem.badge?.count ?? 0) <= 0
+
+                        visible: delegateItem.badge?.countVisible ?? false
+                        color: Colours.palette.m3error
+                        radius: Tokens.rounding.full
+                        width: asDot ? dotSize : Math.max(badgeHeight, badgeLabel.implicitWidth + Tokens.padding.extraSmall)
+                        height: asDot ? dotSize : badgeHeight
+                        anchors.right: icon.right
+                        anchors.top: icon.top
+                        anchors.rightMargin: -Math.round(height * 0.25)
+                        anchors.topMargin: -Math.round(height * 0.25)
+
+                        Text {
+                            id: badgeLabel
+
+                            anchors.centerIn: parent
+                            visible: !countBadge.asDot
+                            text: {
+                                const count = delegateItem.badge?.count ?? 0;
+                                if (count > 9999)
+                                    return "9k+";
+                                if (count > 999)
+                                    return `${Math.floor(count / 1000)}k`;
+                                return `${count}`;
+                            }
+                            color: Colours.palette.m3onError
+                            font: Tokens.font.label.builders.small.size(Math.max(6, Math.round(countBadge.badgeHeight * 0.62))).weight(Font.DemiBold).build()
+                        }
+                    }
+
+                    StyledRect {
+                        id: progressBar
+
+                        visible: delegateItem.badge?.progressVisible ?? false
+                        anchors.top: icon.bottom
+                        anchors.topMargin: 1
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: icon.implicitSize
+                        height: 3
+                        radius: Tokens.rounding.full
+                        color: Qt.alpha(Colours.palette.m3onSurface, 0.15)
+
+                        StyledRect {
+                            width: Math.round(parent.width * (delegateItem.badge?.progress ?? 0))
+                            height: parent.height
+                            radius: parent.radius
+                            color: Colours.palette.m3primary
                         }
                     }
 
@@ -620,24 +748,28 @@ Item {
     }
 
     function handleHover(relPos: real, isHorizontal: bool): void {
-        // Don't close dock context menu
         if (bar.popouts.hasCurrent && bar.popouts.currentName === "dockcontext") return;
 
         const itemSize = container.itemSize;
         const itemWidthWithSpacing = itemSize + spacing;
         const adjustedPos = isHorizontal ? relPos - container.x - padding : relPos - container.y - padding;
+        const scrolled = isHorizontal ? listView.contentX : listView.contentY;
+        const visibleSpan = isHorizontal ? listView.width : listView.height;
 
-        // Only close if cursor is completely outside dock bounds
-        if (adjustedPos < 0 || adjustedPos >= modelDataArray.length * itemWidthWithSpacing) {
+        if (adjustedPos < 0 || adjustedPos > visibleSpan) {
             bar.popouts.hasCurrent = false;
             return;
         }
 
-        const index = Math.floor(adjustedPos / itemWidthWithSpacing);
+        const index = Math.floor((adjustedPos + scrolled) / itemWidthWithSpacing);
 
         if (index >= 0 && index < modelDataArray.length) {
             bar.popouts.currentName = "dockhover";
-            const centerOffset = index * itemWidthWithSpacing + itemSize / 2;
+            const centerOffset = index * itemWidthWithSpacing + itemSize / 2 - scrolled;
+            if (centerOffset < 0 || centerOffset > visibleSpan) {
+                bar.popouts.hasCurrent = false;
+                return;
+            }
             const absoluteCenter = isHorizontal
                 ? container.mapToItem(null, padding + centerOffset, 0).x
                 : container.mapToItem(null, 0, padding + centerOffset).y;
@@ -650,15 +782,17 @@ Item {
 
     property var modelDataArray: []
 
+    property var modelDataMap: ({})
+
     property var currentOrder: []
 
     onModelDataArrayChanged: currentOrder = [...modelDataArray]
 
     function rebuildModel(): void {
         if (root.isDragging) return;
-        const apps = [];
+        let apps = [];
 
-        const pinnedIds = GlobalConfig.launcher.favouriteApps || [];
+        const pinnedIds = GlobalConfig.bar.dock.pinnedApps || [];
 
         for (const pid of pinnedIds) {
             for (const entry of DesktopEntries.applications.values) {
@@ -734,9 +868,6 @@ Item {
                         iconName = appClass.toLowerCase().split(/[^a-z0-9]/)[0] || appClass;
                 }
 
-                // No desktop entry — pull the icon straight from the window
-                // (_NET_WM_ICON), keyed on the pid: appClass is not unique for
-                // these (every unmapped Proton title is "steam_app_default").
                 const pid = ipc.pid || 0;
                 if (!entry)
                     WinIcons.request(appClass, ipc.title || "", pid, ipc.address ? String(ipc.address) : "");
@@ -771,6 +902,31 @@ Item {
 
         if (launchingChanged) {
             root.launchingApps = newLaunching;
+        }
+
+        const existingOrder = (root.currentOrder && root.currentOrder.length > 0) ? root.currentOrder : root.modelDataArray;
+        const existingPinnedOrder = existingOrder.filter(a => a && a.isPinned).map(a => a.id);
+        const pinnedOrderMatches = existingPinnedOrder.length === pinnedIds.length &&
+            existingPinnedOrder.every((id, idx) => id === pinnedIds[idx]);
+
+        if (existingOrder.length > 0 && pinnedOrderMatches) {
+            const orderedApps = [];
+            const remainingApps = [...apps];
+
+            for (let i = 0; i < existingOrder.length; i++) {
+                const prevItem = existingOrder[i];
+                if (!prevItem) continue;
+                const idx = remainingApps.findIndex(a => a.id === prevItem.id);
+                if (idx !== -1) {
+                    orderedApps.push(remainingApps.splice(idx, 1)[0]);
+                }
+            }
+
+            for (let i = 0; i < remainingApps.length; i++) {
+                orderedApps.push(remainingApps[i]);
+            }
+
+            apps = orderedApps;
         }
 
         let changed = false;
@@ -820,16 +976,18 @@ Item {
             }
         }
 
+        const map = {};
+        for (const app of apps) {
+            map[app.id] = app;
+        }
+        root.modelDataMap = map;
         root.modelDataArray = apps;
         root.modelUpdateTrigger += 1;
     }
 
-    property var _toplevels: {
-        if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.windowList && KWinActiveWindowBridge.windowList.length > 0) {
-            return KWinActiveWindowBridge.windowList;
-        }
-        return HyprlandData.windowList;
-    }
+    property var _toplevels: Config.bar.dock.currentDesktopOnly
+        ? Kwin.filterWindows(Kwin.windowList, Kwin.activeWorkspaceFor(bar?.screen?.name), bar?.screen?.name, true)
+        : (Kwin.windowList || [])
 
     on_ToplevelsChanged: {
         root.rebuildModel()
@@ -844,12 +1002,7 @@ Item {
         onTriggered: root.rebuildModel()
     }
 
-    property var activeTop: {
-        if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.activeWindow && KWinActiveWindowBridge.activeWindow.address) {
-            return KWinActiveWindowBridge.activeWindow;
-        }
-        return Hyprland.activeToplevel || HyprlandData.activeWindow;
-    }
+    property var activeTop: (Kwin.activeWindow && Kwin.activeWindow.address) ? Kwin.activeWindow : null
 
     onActiveTopChanged: {
         root.rebuildModel()
@@ -857,9 +1010,39 @@ Item {
     }
 
     Connections {
-        target: GlobalConfig.launcher
+        target: GlobalConfig.bar.dock
 
-        function onFavouriteAppsChanged(): void {
+        function onPinnedAppsChanged(): void {
+            root.rebuildModel();
+        }
+    }
+
+    Connections {
+        target: bar
+
+        function onIsHorizontalChanged(): void {
+            scrollAnim.stop();
+        }
+    }
+
+    Connections {
+        target: Kwin
+
+        function onActiveWsIdChanged(): void {
+            if (Config.bar.dock.currentDesktopOnly)
+                root.rebuildModel();
+        }
+
+        function onActiveByOutputChanged(): void {
+            if (Config.bar.dock.currentDesktopOnly)
+                root.rebuildModel();
+        }
+    }
+
+    Connections {
+        target: Config.bar.dock
+
+        function onCurrentDesktopOnlyChanged(): void {
             root.rebuildModel();
         }
     }

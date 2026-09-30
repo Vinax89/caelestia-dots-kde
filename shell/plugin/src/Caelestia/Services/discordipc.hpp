@@ -1,12 +1,11 @@
 #pragma once
 
-#include <QObject>
-#include <QLocalSocket>
-#include <QQmlEngine>
-#include <QTimer>
-#include <QStringList>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocalSocket>
+#include <QObject>
+#include <QQmlEngine>
+#include <QTimer>
 
 namespace caelestia {
 
@@ -38,6 +37,7 @@ private slots:
     void onReadyRead();
     void onError(QLocalSocket::LocalSocketError socketError);
     void checkReconnect();
+    void tryNextPath();
 
 private:
     void sendFrame(int opcode, const QJsonObject& payload);
@@ -46,11 +46,10 @@ private:
     QLocalSocket* m_socket;
     QTimer* m_reconnectTimer;
     QTimer* m_connectTimeout;
-    QStringList m_socketPaths;
-    int m_socketIndex = 0;
     QString m_clientId;
     bool m_connected;
     QByteArray m_buffer;
-
+    QStringList m_pendingPaths;
 };
+
 } // namespace caelestia

@@ -7,4 +7,4 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/caelestia-check-updates
+ExecStart=/bin/sh -c 'exec "${CAELESTIA_BIN_DIR:-/usr/bin}/caelestia-check-updates"'

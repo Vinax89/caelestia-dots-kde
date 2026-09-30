@@ -1,11 +1,11 @@
-import org.kde.pipewire as Pipewire
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Widgets
 import Caelestia
 import Caelestia.Config
 import Caelestia.Models
-import Caelestia.Services
 import qs.components
 import qs.components.controls
 import qs.components.images
@@ -19,10 +19,8 @@ Item {
     required property var modelData
     required property var list
 
-    property bool _skipOpenAnim: true
-
     function clicked(): void {
-        KWinActiveWindowBridge.focusWindow(root.modelData.address);
+        Kwin.focusWindow(root.modelData.address);
         root.list.visibilities.launcher = false;
     }
 
@@ -35,23 +33,14 @@ Item {
     width: list.itemWidth
     implicitWidth: previewBox.maxW + Tokens.padding.largeIncreased * 2
     implicitHeight: previewBox.maxH + label.height + Tokens.spacing.small / 2 + Tokens.padding.large + Tokens.padding.medium
-    scale: 0.5
-    opacity: 0
+    scale: ListView.isCurrentItem ? 1 : 0.8
+    opacity: 1
     z: ListView.isCurrentItem ? 1 : 0
 
     Component.onCompleted: {
-        scale = Qt.binding(() => ListView.isCurrentItem ? 1 : 0.8);
-        opacity = 1;
-
         if (root.modelData) {
             WinIcons.request(root.modelData.class, root.modelData.title, root.modelData.pid ?? 0, root.modelData.address ? String(root.modelData.address) : "");
         }
-
-        Qt.callLater(() => {
-            if (root.list && root.list.visibilities) {
-                root.list.visibilities.skipLauncherAnim = false;
-            }
-        });
     }
 
     HoverHandler {
@@ -70,7 +59,6 @@ Item {
 
         anchors.fill: previewBox
         radius: previewBox.radius
-        //color: Colours.layer(Colours.palette.m3surfaceContainerHighest, root.ListView.isCurrentItem ? 1 : 0)
         color: "transparent"
         opacity: root.ListView.isCurrentItem ? 1 : 0
 
@@ -93,8 +81,6 @@ Item {
         }
         readonly property real maxW: Tokens.sizes.launcher.windowSwitcherWidth
         readonly property real maxH: maxW / 16 * 9
-        property var streamRequest: null
-        readonly property int serial: streamRequest ? (streamRequest.objectSerial || streamRequest.nodeId) : 0
 
         anchors.horizontalCenter: parent.horizontalCenter
         y: Tokens.padding.large
@@ -111,49 +97,13 @@ Item {
         color: "transparent"
         radius: Tokens.rounding.medium
 
-        Component.onDestruction: {
-            if (previewBox.streamRequest && root.modelData && root.modelData.address) {
-                ScreencastManager.releaseStream(root.modelData.address);
-            }
+        WindowPreview {
+            anchors.fill: parent
+            address: root.modelData?.address ?? ""
+            fallbackIcon: root.modelData ? WinIcons.sourceForClient(root.modelData) : ""
+            sourceAspect: previewBox.windowAspect
         }
 
-        Timer {
-            id: debounceTimer
-
-            interval: 20
-            running: true
-            repeat: false
-            onTriggered: {
-                if (root.modelData && root.modelData.address) {
-                    previewBox.streamRequest = ScreencastManager.requestStream(root.modelData.address);
-                }
-            }
-        }
-
-        IconImage {
-            anchors.centerIn: parent
-            implicitSize: previewBox.height * 0.5
-            asynchronous: true
-            visible: previewBox.serial === 0
-            source: root.modelData ? WinIcons.sourceFor(null, root.modelData.class, root.modelData.iconName, root.modelData.pid ?? 0) : ""
-        }
-
-        Pipewire.PipeWireSourceItem {
-            anchors.centerIn: parent
-            width: Math.min(parent.width, parent.height * previewBox.windowAspect)
-            height: Math.min(parent.height, parent.width / previewBox.windowAspect)
-            visible: previewBox.serial !== 0
-            Component.onCompleted: {
-                if ("objectSerial" in this) {
-                    this.objectSerial = Qt.binding(() => previewBox.streamRequest ? previewBox.streamRequest.objectSerial : 0)
-                } else if ("nodeId" in this) {
-                    this.nodeId = Qt.binding(() => previewBox.streamRequest ? previewBox.streamRequest.nodeId : 0)
-                }
-            }
-        }
-
-        // Close button — only revealed while hovering this tile, same convention as
-        // the taskbar's own preview popup (DockHover.qml).
         StyledRect {
             anchors.top: parent.top
             anchors.right: parent.right
@@ -194,33 +144,15 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
         renderType: Text.QtRendering
-        text: root.modelData?.title ?? ""
+        text: {
+            const title = root.modelData?.title || "";
+            if (root.modelData?.minimized) return `(${title})`;
+            return title;
+        }
         font: Tokens.font.body.medium
     }
 
-    Connections {
-        function onSelectedIndexChanged() {
-            root._skipOpenAnim = false;
-        }
-
-        target: Windows
-    }
-
-    Timer {
-        interval: 400
-        running: true
-        onTriggered: root._skipOpenAnim = false
-    }
-
     Behavior on scale {
-        enabled: !root._skipOpenAnim
-
         Anim { type: Anim.FastSpatial }
-    }
-
-    Behavior on opacity {
-        enabled: !root._skipOpenAnim
-
-        Anim { type: Anim.FastEffects }
     }
 }
