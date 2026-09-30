@@ -1,4 +1,5 @@
 #include "fontbuilder.hpp"
+
 #include <qloggingcategory.h>
 
 namespace caelestia::config {
@@ -74,15 +75,15 @@ QFont FontBuilder::build() const {
 }
 
 FontBuilder FontBuilder::fill(float value) {
-    return vaxis("FILL", value);
+    return vaxis(QStringLiteral("FILL"), value);
 }
 
 FontBuilder FontBuilder::grade(float value) {
-    return vaxis("GRAD", value);
+    return vaxis(QStringLiteral("GRAD"), value);
 }
 
 FontBuilder FontBuilder::width(float value) {
-    return vaxis("wdth", value);
+    return vaxis(QStringLiteral("wdth"), value);
 }
 
 FontBuilder FontBuilder::scale(qreal factor) {

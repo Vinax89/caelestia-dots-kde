@@ -1,7 +1,8 @@
 #include "qalculator.hpp"
 
-#include <libqalculate/qalculate.h>
 #include <qtconcurrentrun.h>
+
+#include <libqalculate/qalculate.h>
 
 namespace caelestia {
 
@@ -51,7 +52,7 @@ QString Qalculator::eval(const QString& expr, bool printExpr) const {
     }
 
     if (printExpr) {
-        return QString("%1 = %2").arg(parsed).arg(result);
+        return QStringLiteral("%1 = %2").arg(parsed).arg(result);
     }
 
     return QString::fromStdString(result);
@@ -110,7 +111,7 @@ void Qalculator::evalAsync(const QString& expr) {
         }
 
         const QString rawStr = QString::fromStdString(result);
-        return { QString("%1 = %2").arg(parsed).arg(result), rawStr };
+        return { QStringLiteral("%1 = %2").arg(parsed).arg(result), rawStr };
     }).then(this, [this, gen](QPair<QString, QString> result) {
         if (gen != m_generation) {
             return;

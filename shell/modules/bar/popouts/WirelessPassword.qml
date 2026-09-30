@@ -13,14 +13,19 @@ ColumnLayout {
     id: root
 
     required property PopoutState popouts
-    required property var network
+    property var network: NetworkConnection.passwordNetwork
+    property string connectingSsid: ""
     property bool isClosing: false
-    property bool hadSavedProfile: false
+    property bool hadSavedProfile: true
     property string initialConnectionUuid: ""
     property int attemptToken: 0
+
     readonly property bool shouldBeVisible: root.popouts.currentName === "wirelesspassword"
 
-    property bool _isSidebarOpen: popouts.sidebarOpen && popouts.isHorizontal
+    property bool _isSidebarOpen: false
+
+    property real scaleOffset: 1.0
+    property real fontScale: 1.0
 
     function forgetNewConnection(): void {
         if (root.hadSavedProfile || !root.network || !root.network.ssid)
@@ -33,41 +38,45 @@ ColumnLayout {
                 Nmcli.deleteConnectionUuid(uuid);
         });
     }
-    function checkConnectionStatus(): void {
-        if (!root.shouldBeVisible || !connectButton.connecting) {
-            return;
-        }
-
-        // Check if we're connected to the target network (case-insensitive SSID comparison)
-        const isConnected = root.network && Nmcli.active && Nmcli.active.ssid && Nmcli.active.ssid.toLowerCase().trim() === root.network.ssid.toLowerCase().trim();
-
-        if (isConnected) {
-            // Successfully connected - give it a moment for network list to update
-            // Use Timer for actual delay
-            connectionSuccessTimer.start();
-            return;
-        }
-
-        // Check for connection failures - if pending connection was cleared but we're not connected
-        if (Nmcli.pendingConnection === null && connectButton.connecting) {
-            // Wait a bit more before giving up (allow time for connection to establish)
-            if (connectionMonitor.repeatCount > 10) {
-                connectionMonitor.stop();
-                connectButton.connecting = false;
-                connectButton.hasError = true;
-                connectButton.text = qsTr("Connect");
-                passwordContainer.passwordBuffer = "";
-                // Delete the failed connection
-                root.forgetNewConnection();
-            }
-        }
-    }
-
     function invalidateConnectionAttempt(): void {
         root.attemptToken++;
         root.initialConnectionUuid = "";
         connectionMonitor.stop();
         connectionSuccessTimer.stop();
+    }
+
+    function checkConnectionStatus(): void {
+        if (!root.shouldBeVisible || !connectButton.connecting) {
+            return;
+        }
+
+        const target = (root.connectingSsid || (root.network ? root.network.ssid : "")).toLowerCase().trim();
+        if (!target) {
+            return;
+        }
+
+        const isConnected = Nmcli.active && Nmcli.active.ssid && Nmcli.active.ssid.toLowerCase().trim() === target;
+
+        if (isConnected) {
+            if (!connectionSuccessTimer.running) {
+                connectionSuccessTimer.start();
+            }
+            return;
+        }
+
+        if (Nmcli.pendingConnection === null && connectButton.connecting) {
+            if (connectionMonitor.repeatCount > 10) {
+                connectionMonitor.stop();
+                connectButton.connecting = false;
+                connectButton.hasError = true;
+                connectButton.enabled = true;
+                connectButton.text = qsTr("Connect");
+                passwordContainer.passwordBuffer = "";
+                if (target) {
+                    root.forgetNewConnection();
+                }
+            }
+        }
     }
 
     function closeDialog(): void {
@@ -77,28 +86,20 @@ ColumnLayout {
 
         root.invalidateConnectionAttempt();
         isClosing = true;
+        root.connectingSsid = "";
+        connectionSuccessTimer.stop();
+        resetPopoutTimer.stop();
         passwordContainer.passwordBuffer = "";
         connectButton.connecting = false;
         connectButton.hasError = false;
         connectButton.text = qsTr("Connect");
+        connectionMonitor.stop();
+        NetworkConnection.passwordNetwork = null;
 
-        // Return to network popout
         if (root.popouts.currentName === "wirelesspassword") {
             root.popouts.currentName = "network";
         }
     }
-
-    readonly property real masterScale: !isNaN(GlobalConfig.bar.previewScale) ? GlobalConfig.bar.previewScale : 1.0
-
-    readonly property real elementOffset: GlobalConfig.bar.perElementPreviewScale ? (!isNaN(GlobalConfig.bar.previewScales.network) ? GlobalConfig.bar.previewScales.network : 0.0) : 0.0
-
-    readonly property real barScaleOffset: GlobalConfig.bar.previewScaleWithBar ? (!isNaN(GlobalConfig.bar.scale) ? GlobalConfig.bar.scale : 1.0) : 1.0
-
-    readonly property real scaleOffset: Math.max(0.1, (masterScale + elementOffset) * barScaleOffset)
-
-    readonly property real elementFontOffset: GlobalConfig.bar.perElementFontScale ? (!isNaN(GlobalConfig.bar.previewFontScales.network) ? GlobalConfig.bar.previewFontScales.network : 0.0) : 0.0
-
-    readonly property real fontScale: Math.max(0.1, scaleOffset + (!isNaN(GlobalConfig.bar.fontScaleOffset) ? GlobalConfig.bar.fontScaleOffset : 0.0) + elementFontOffset)
 
     spacing: Tokens.spacing.medium * scaleOffset
     implicitWidth: Math.max(400 * scaleOffset, _isSidebarOpen ? (Tokens.sizes.sidebar.width * scaleOffset) - Tokens.padding.extraLargeIncreased : 0)
@@ -109,48 +110,51 @@ ColumnLayout {
 
     Component.onCompleted: {
         if (shouldBeVisible) {
-            // Use Timer for actual delay to ensure dialog is fully rendered
             focusTimer.start();
         }
-    }
-    onNetworkChanged: {
-        root.invalidateConnectionAttempt();
-        connectButton.connecting = false;
-        connectButton.hasError = false;
-        connectButton.text = qsTr("Connect");
     }
 
     onShouldBeVisibleChanged: {
         if (shouldBeVisible) {
-            // Use Timer for actual delay to ensure dialog is fully rendered
+            if (NetworkConnection.passwordNetwork) {
+                root.network = {
+                    ssid: NetworkConnection.passwordNetwork.ssid,
+                    bssid: NetworkConnection.passwordNetwork.bssid || "",
+                    isSecure: NetworkConnection.passwordNetwork.isSecure ?? true,
+                    strength: NetworkConnection.passwordNetwork.strength ?? 0
+                };
+            }
             focusTimer.start();
         } else {
             root.invalidateConnectionAttempt();
-            connectButton.connecting = false;
-            connectButton.hasError = false;
-            connectButton.text = qsTr("Connect");
+            root.connectingSsid = "";
         }
     }
 
     Keys.onEscapePressed: closeDialog()
 
     Connections {
+        function onHasCurrentChanged() {
+            if (!root.popouts.hasCurrent && root.popouts.currentName === "wirelesspassword") {
+                root.connectingSsid = "";
+                connectionMonitor.stop();
+                connectionSuccessTimer.stop();
+                resetPopoutTimer.stop();
+                connectButton.connecting = false;
+                connectButton.hasError = false;
+                passwordContainer.passwordBuffer = "";
+                NetworkConnection.passwordNetwork = null;
+                root.popouts.currentName = "network";
+            }
+        }
+
         function onCurrentNameChanged() {
             if (root.popouts.currentName === "wirelesspassword") {
-                // Update network when popout becomes active
-                Qt.callLater(() => {
-                    // Try to get network from parent Content's networkPopout
-                    const content = root.parent?.parent?.parent;
-                    if (content) {
-                        const networkPopout = content.children.find(c => c.name === "network");
-                        if (networkPopout && networkPopout.item) {
-                            root.network = networkPopout.item.passwordNetwork;
-                        }
-                    }
-                    // Force focus to password container when popout becomes active
-                    // Use Timer for actual delay to ensure dialog is fully rendered
-                    focusTimer.start();
-                });
+                focusTimer.start();
+            } else {
+                root.connectingSsid = "";
+                connectionSuccessTimer.stop();
+                resetPopoutTimer.stop();
             }
         }
 
@@ -168,6 +172,8 @@ ColumnLayout {
     }
 
     StyledRect {
+        id: card
+
         Layout.fillWidth: true
         Layout.preferredWidth: 400 * root.scaleOffset
         implicitHeight: content.implicitHeight + Tokens.padding.extraLargeIncreased * root.scaleOffset
@@ -198,12 +204,12 @@ ColumnLayout {
 
             Anim {
                 type: Anim.DefaultEffects
-                target: parent
+                target: card
                 property: "opacity"
                 to: 0
             }
             Anim {
-                target: parent
+                target: card
                 property: "scale"
                 to: 0.7
             }
@@ -243,7 +249,7 @@ ColumnLayout {
                             return qsTr("Network: %1").arg(ssid);
                         }
                     }
-                    return qsTr("Network: Unknown");
+                    return qsTr("Unknown network");
                 }
                 color: Colours.palette.m3outline
                 font.pointSize: Tokens.font.body.small.pointSize * root.fontScale
@@ -253,19 +259,19 @@ ColumnLayout {
                 property int attempts: 0
 
                 interval: 50
-                running: root.shouldBeVisible && (!root.network || !root.network.ssid)
+                running: root.shouldBeVisible && !connectButton.connecting && (!root.network || !root.network.ssid)
                 repeat: true
                 onTriggered: {
                     attempts++;
-                    // Keep trying to get network from Network component
-                    const content = root.parent?.parent?.parent;
-                    if (content) {
-                        const networkPopout = content.children.find(c => c.name === "network");
-                        if (networkPopout && networkPopout.item && networkPopout.item.passwordNetwork) {
-                            root.network = networkPopout.item.passwordNetwork;
-                        }
+                    // Fallback in case property binding was delayed
+                    if (NetworkConnection.passwordNetwork) {
+                        root.network = {
+                            ssid: NetworkConnection.passwordNetwork.ssid,
+                            bssid: NetworkConnection.passwordNetwork.bssid || "",
+                            isSecure: NetworkConnection.passwordNetwork.isSecure ?? true,
+                            strength: NetworkConnection.passwordNetwork.strength ?? 0
+                        };
                     }
-                    // Stop if we got it or after 20 attempts (1 second)
                     if ((root.network && root.network.ssid) || attempts >= 20) {
                         stop();
                         attempts = 0;
@@ -314,13 +320,11 @@ ColumnLayout {
 
                 Component.onCompleted: {
                     if (root.shouldBeVisible) {
-                        // Use Timer for actual delay to ensure focus works correctly
                         passwordFocusTimer.start();
                     }
                 }
 
                 Keys.onPressed: event => {
-                    // Ensure we have focus when receiving keyboard input
                     if (!activeFocus) {
                         forceActiveFocus();
                     }
@@ -330,7 +334,6 @@ ColumnLayout {
                         closeDialog();
                     }
 
-                    // Clear error when user starts typing
                     if (connectButton.hasError && event.text && event.text.length > 0) {
                         connectButton.hasError = false;
                     }
@@ -360,7 +363,6 @@ ColumnLayout {
                 Connections {
                     function onShouldBeVisibleChanged(): void {
                         if (root.shouldBeVisible) {
-                            // Use Timer for actual delay to ensure focus works correctly
                             passwordFocusTimer.start();
                             passwordContainer.passwordBuffer = "";
                             connectButton.hasError = false;
@@ -391,8 +393,6 @@ ColumnLayout {
                         if (passwordContainer.activeFocus) {
                             return Colours.palette.m3primary;
                         }
-                        // Fade alpha to 0 instead of the literal "transparent" string,
-                        // which would animate RGB through black via Behavior on border.color.
                         return root.shouldBeVisible ? Colours.palette.m3outline : Qt.alpha(Colours.palette.m3outline, 0);
                     }
 
@@ -401,7 +401,9 @@ ColumnLayout {
                     }
 
                     Behavior on border.width {
-                        CAnim {}
+                        Anim {
+                            type: Anim.FastSpatial
+                        }
                     }
 
                     Behavior on color {
@@ -421,7 +423,7 @@ ColumnLayout {
 
                     anchors.centerIn: parent
                     text: qsTr("Password")
-                    color: Colours.palette.m3onSurfaceVariant
+                    color: Colours.palette.m3outline
                     font.pointSize: Tokens.font.mono.medium.pointSize * root.fontScale
                     opacity: passwordContainer.passwordBuffer ? 0 : 1
 
@@ -553,48 +555,52 @@ ColumnLayout {
                             return;
                         }
 
-                        // Mark the attempt busy before any asynchronous lookup.
-                        const attempt = ++root.attemptToken;
-                        const attemptSsid = root.network.ssid;
-                        connectButton.connecting = true;
-                        connectButton.text = qsTr("Connecting...");
+                        hasError = false;
 
+                        connecting = true;
+                        root.connectingSsid = root.network ? root.network.ssid : "";
+                        enabled = false;
+                        text = qsTr("Connecting...");
+
+                        const attempt = ++root.attemptToken;
+                        const attemptSsid = root.connectingSsid;
+                        root.hadSavedProfile = true;
                         Nmcli.findConnectionUuid(attemptSsid, uuid => {
                             if (attempt !== root.attemptToken || !root.shouldBeVisible
-                                || !root.network || root.network.ssid !== attemptSsid) {
+                                    || !root.network || root.network.ssid !== attemptSsid)
                                 return;
-                            }
-
                             root.initialConnectionUuid = uuid;
                             root.hadSavedProfile = uuid !== "";
-
-                            NetworkConnection.connectWithPassword(root.network, password, result => {
-                                if (attempt !== root.attemptToken || !root.shouldBeVisible
-                                    || !root.network || root.network.ssid !== attemptSsid) {
-                                    return;
-                                }
-                                if (result && result.success) {
-                                    // Connection successful, monitor will handle the rest.
-                                } else if (result && result.needsPassword) {
-                                    // Shouldn't happen since we provided a password.
-                                    connectionMonitor.stop();
-                                    connectButton.connecting = false;
-                                    connectButton.hasError = true;
-                                    connectButton.text = qsTr("Connect");
-                                    passwordContainer.passwordBuffer = "";
-                                    root.forgetNewConnection();
-                                } else {
-                                    // Connection failed immediately - show error.
-                                    connectionMonitor.stop();
-                                    connectButton.connecting = false;
-                                    connectButton.hasError = true;
-                                    connectButton.text = qsTr("Connect");
-                                    passwordContainer.passwordBuffer = "";
+                        NetworkConnection.connectWithPassword(root.network, password, result => {
+                            if (attempt !== root.attemptToken || !root.shouldBeVisible
+                                    || !root.network || root.network.ssid !== attemptSsid)
+                                return;
+                            if (result && result.success) {
+                                root.checkConnectionStatus();
+                            } else if (result && result.needsPassword) {
+                                connectionMonitor.stop();
+                                connecting = false;
+                                hasError = true;
+                                enabled = true;
+                                text = qsTr("Connect");
+                                passwordContainer.passwordBuffer = "";
+                                if (root.network && root.network.ssid) {
                                     root.forgetNewConnection();
                                 }
-                            });
+                            } else {
+                                connectionMonitor.stop();
+                                connecting = false;
+                                hasError = true;
+                                enabled = true;
+                                text = qsTr("Connect");
+                                passwordContainer.passwordBuffer = "";
+                                if (root.network && root.network.ssid) {
+                                    root.forgetNewConnection();
+                                }
+                            }
+                        });
 
-                            connectionMonitor.start();
+                        connectionMonitor.start();
                         });
                     }
                 }
@@ -626,21 +632,33 @@ ColumnLayout {
     Timer {
         id: connectionSuccessTimer
 
-        interval: 500
+        interval: 300
         onTriggered: {
-            // Double-check connection is still active
+            const target = (root.connectingSsid || (root.network ? root.network.ssid : "")).toLowerCase().trim();
             if (root.shouldBeVisible && Nmcli.active && Nmcli.active.ssid) {
-                const stillConnected = Nmcli.active.ssid.toLowerCase().trim() === root.network.ssid.toLowerCase().trim();
+                const stillConnected = Nmcli.active.ssid.toLowerCase().trim() === target;
                 if (stillConnected) {
                     connectionMonitor.stop();
                     connectButton.connecting = false;
+                    connectButton.hasError = false;
                     connectButton.text = qsTr("Connect");
-                    // Return to network popout on successful connection
-                    if (root.popouts.currentName === "wirelesspassword") {
-                        root.popouts.currentName = "network";
-                    }
-                    closeDialog();
+                    passwordContainer.passwordBuffer = "";
+                    root.connectingSsid = "";
+                    NetworkConnection.passwordNetwork = null;
+                    root.popouts.hasCurrent = false;
+                    resetPopoutTimer.start();
                 }
+            }
+        }
+    }
+
+    Timer {
+        id: resetPopoutTimer
+
+        interval: 350
+        onTriggered: {
+            if (root.popouts.currentName === "wirelesspassword") {
+                root.popouts.currentName = "network";
             }
         }
     }
@@ -652,13 +670,24 @@ ColumnLayout {
             }
         }
 
+        function onConnectionSuccessful(ssid: string) {
+            const target = (root.connectingSsid || (root.network ? root.network.ssid : "")).toLowerCase().trim();
+            if (root.shouldBeVisible && target && target === ssid.toLowerCase().trim()) {
+                root.checkConnectionStatus();
+            }
+        }
+
         function onConnectionFailed(ssid: string) {
-            if (root.shouldBeVisible && root.network && root.network.ssid === ssid && connectButton.connecting) {
+            const target = (root.connectingSsid || (root.network ? root.network.ssid : "")).toLowerCase().trim();
+            if (root.shouldBeVisible && target && target === ssid.toLowerCase().trim() && connectButton.connecting) {
                 connectionMonitor.stop();
+                connectionSuccessTimer.stop();
                 connectButton.connecting = false;
                 connectButton.hasError = true;
+                connectButton.enabled = true;
                 connectButton.text = qsTr("Connect");
                 passwordContainer.passwordBuffer = "";
+                root.connectingSsid = "";
                 root.forgetNewConnection();
             }
         }

@@ -10,6 +10,7 @@
 #include <qnetworkcookiejar.h>
 #include <qnetworkreply.h>
 #include <qnetworkrequest.h>
+
 #include <QSet>
 
 Q_LOGGING_CATEGORY(lcRequests, "caelestia.requests", QtInfoMsg)
@@ -25,8 +26,7 @@ static bool isSafeUrl(const QUrl& url) {
     // plain HTTPS URL so it cannot be pointed at local services or used to
     // exfiltrate over plaintext. (Local AI endpoints use XMLHttpRequest in
     // the AI assistant, not this class.)
-    if (url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) != 0
-        || url.host().isEmpty()) {
+    if (url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) != 0 || url.host().isEmpty()) {
         qCWarning(lcRequests) << "refusing non-HTTPS or hostless URL" << url.toString();
         return false;
     }
@@ -69,8 +69,6 @@ static QNetworkRequest buildRequest(const QUrl& url, const QJSValue& headers) {
     return request;
 }
 
-// ── Requests ──────────────────────────────────────────────────────
-
 Requests::Requests(QObject* parent)
     : QObject(parent)
     , m_manager(new QNetworkAccessManager(this)) {}
@@ -78,7 +76,6 @@ Requests::Requests(QObject* parent)
 // ── internal wiring ───────────────────────────────────────────────
 
 int Requests::nextRequestId() {
-    // Wrap-around safety: skip 0 and any ID still in-flight.
     int id = m_nextRequestId;
     for (int attempts = 0; attempts < 100000; ++attempts) {
         if (id == 0) {
@@ -122,7 +119,6 @@ int Requests::registerReply(QNetworkReply* reply, QJSValue callback, QJSValue on
     ar.onComplete = callback;
     ar.onError = onError;
 
-    // ── timeout ───────────────────────────────────────────────
     if (timeoutMs > 0) {
         auto* timer = new QTimer(this);
         timer->setSingleShot(true);
@@ -133,7 +129,6 @@ int Requests::registerReply(QNetworkReply* reply, QJSValue callback, QJSValue on
         timer->start(timeoutMs);
     }
 
-    // ── finished ──────────────────────────────────────────────
     QObject::connect(reply, &QNetworkReply::finished, this, [this, reqId, reply]() {
         auto it = m_activeRequests.find(reqId);
         if (it == m_activeRequests.end()) {
@@ -144,12 +139,9 @@ int Requests::registerReply(QNetworkReply* reply, QJSValue callback, QJSValue on
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const bool httpError = status > 0 && (status < 200 || status >= 300);
         const bool isError = reply->error() != QNetworkReply::NoError || httpError;
-        const QString error = httpError
-            ? QStringLiteral("HTTP status %1").arg(status)
-            : reply->errorString();
+        const QString error = httpError ? QStringLiteral("HTTP status %1").arg(status) : reply->errorString();
 
         if (isError && !it->isDownload) {
-            // Standard GET/POST error path
             if (it->onError.isCallable()) {
                 it->onError.call({ error, status });
             } else {
@@ -160,13 +152,12 @@ int Requests::registerReply(QNetworkReply* reply, QJSValue callback, QJSValue on
         }
 
         if (it->isDownload) {
-            // Download path — close file and report
             if (it->destFile) {
                 if (it->destFile->isOpen()) {
                     it->destFile->close();
                 }
                 if (isError) {
-                    it->destFile->remove(); // discard partial file on error
+                    it->destFile->remove();
                 }
             }
 
@@ -184,9 +175,8 @@ int Requests::registerReply(QNetworkReply* reply, QJSValue callback, QJSValue on
             return;
         }
 
-        // Success path for GET/POST
         if (it->onComplete.isCallable()) {
-            it->onComplete.call({ QString(reply->readAll()), status });
+            it->onComplete.call({ QString::fromUtf8(reply->readAll()), status });
         }
 
         cleanupRequest(reqId);
@@ -255,8 +245,6 @@ void Requests::abortAndFail(int requestId, const QString& errorMessage, bool rem
     }
 }
 
-// ── public API ────────────────────────────────────────────────────
-
 int Requests::get(const QUrl& url, QJSValue callback, QJSValue onError, QJSValue headers, int timeoutMs) {
     if (!callback.isCallable()) {
         qCWarning(lcRequests) << "get: callback is not callable";
@@ -264,7 +252,7 @@ int Requests::get(const QUrl& url, QJSValue callback, QJSValue onError, QJSValue
     }
     if (!isSafeUrl(url)) {
         if (onError.isCallable()) {
-            onError.call({QStringLiteral("only HTTPS URLs are allowed"), 0});
+            onError.call({ QStringLiteral("only HTTPS URLs are allowed"), 0 });
         }
         return -1;
     }
@@ -273,15 +261,15 @@ int Requests::get(const QUrl& url, QJSValue callback, QJSValue onError, QJSValue
     return registerReply(reply, callback, onError, timeoutMs);
 }
 
-int Requests::post(const QUrl& url, const QByteArray& body, const QString& contentType,
-                   QJSValue callback, QJSValue onError, QJSValue headers, int timeoutMs) {
+int Requests::post(const QUrl& url, const QByteArray& body, const QString& contentType, QJSValue callback,
+    QJSValue onError, QJSValue headers, int timeoutMs) {
     if (!callback.isCallable()) {
         qCWarning(lcRequests) << "post: callback is not callable";
         return -1;
     }
     if (!isSafeUrl(url)) {
         if (onError.isCallable()) {
-            onError.call({QStringLiteral("only HTTPS URLs are allowed"), 0});
+            onError.call({ QStringLiteral("only HTTPS URLs are allowed"), 0 });
         }
         return -1;
     }
@@ -292,15 +280,15 @@ int Requests::post(const QUrl& url, const QByteArray& body, const QString& conte
     return registerReply(reply, callback, onError, timeoutMs);
 }
 
-int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComplete,
-                       QJSValue onProgress, QJSValue onError, QJSValue headers, int timeoutMs) {
+int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComplete, QJSValue onProgress,
+    QJSValue onError, QJSValue headers, int timeoutMs) {
     if (!onComplete.isCallable()) {
         qCWarning(lcRequests) << "download: onComplete callback is not callable";
         return -1;
     }
     if (!isSafeUrl(url)) {
         if (onError.isCallable()) {
-            onError.call({QStringLiteral("only HTTPS URLs are allowed"), 0});
+            onError.call({ QStringLiteral("only HTTPS URLs are allowed"), 0 });
         }
         return -1;
     }
@@ -315,17 +303,15 @@ int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComp
 
     const QFileInfo destination(destPath);
     if (!QDir().mkpath(destination.absolutePath())) {
-        const QString error = QStringLiteral("Cannot create destination directory: ")
-            + destination.absolutePath();
+        const QString error = QStringLiteral("Cannot create destination directory: ") + destination.absolutePath();
         reply->abort();
         reply->deleteLater();
         if (onError.isCallable()) {
-            onError.call({error, 0});
+            onError.call({ error, 0 });
         }
         return -1;
     }
 
-    // Open destination file
     auto* file = new QFile(destPath);
     if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         const QString fileError = file->errorString();
@@ -348,7 +334,6 @@ int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComp
     ar.onComplete = onComplete;
     ar.onError = onError;
 
-    // ── timeout ───────────────────────────────────────────────
     if (timeoutMs > 0) {
         auto* timer = new QTimer(this);
         timer->setSingleShot(true);
@@ -359,7 +344,6 @@ int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComp
         timer->start(timeoutMs);
     }
 
-    // ── stream data to file ───────────────────────────────────
     QObject::connect(reply, &QNetworkReply::readyRead, this, [this, reqId, reply]() {
         auto it = m_activeRequests.find(reqId);
         if (it == m_activeRequests.end() || !it->destFile) {
@@ -373,8 +357,6 @@ int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComp
         }
     });
 
-
-    // ── progress ──────────────────────────────────────────────
     QObject::connect(reply, &QNetworkReply::downloadProgress, this, [this, reqId](qint64 received, qint64 total) {
         emit downloadProgress(reqId, received, total);
 
@@ -384,7 +366,6 @@ int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComp
         }
     });
 
-    // ── finished (via registerReply-style wiring duplicated for download) ──
     QObject::connect(reply, &QNetworkReply::finished, this, [this, reqId, reply]() {
         auto it = m_activeRequests.find(reqId);
         if (it == m_activeRequests.end()) {
@@ -395,11 +376,8 @@ int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComp
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const bool httpError = status > 0 && (status < 200 || status >= 300);
         bool isError = reply->error() != QNetworkReply::NoError || httpError;
-        QString error = httpError
-            ? QStringLiteral("HTTP status %1").arg(status)
-            : reply->errorString();
+        QString error = httpError ? QStringLiteral("HTTP status %1").arg(status) : reply->errorString();
 
-        // Flush any remaining bytes not yet delivered via readyRead.
         if (it->destFile && it->destFile->isOpen()) {
             const QByteArray data = reply->readAll();
             if (!isError && it->destFile->write(data) != data.size()) {
@@ -429,10 +407,6 @@ int Requests::download(const QUrl& url, const QString& destPath, QJSValue onComp
 }
 
 void Requests::cancel(int requestId) {
-    // Discard the partial file on cancel too — otherwise a truncated download
-    // is left at the requested final path, which callers can mistake for a
-    // completed one. abortAndFail() also fixes the same synchronous-abort
-    // reentrancy hazard described above for the timeout paths.
     if (!m_activeRequests.contains(requestId)) {
         return;
     }
@@ -476,10 +450,6 @@ QString Requests::toJson(const QJSValue& value) const {
     if (!engine) {
         return {};
     }
-    // QJsonDocument::fromVariant() only represents top-level objects/arrays,
-    // so primitives (strings, numbers, booleans) would serialise to an empty
-    // string. Go through the engine's own JSON.stringify instead, which
-    // handles any JS value the same way JavaScript itself would.
     QJSValue json = engine->globalObject().property(QStringLiteral("JSON"));
     QJSValue stringify = json.property(QStringLiteral("stringify"));
     QJSValue result = stringify.callWithInstance(json, { value });

@@ -1,6 +1,7 @@
 #include "toaster.hpp"
 
 #include <qlogging.h>
+#include <qqmlengine.h>
 #include <qtimer.h>
 
 namespace caelestia {
@@ -13,6 +14,23 @@ Toast::Toast(const QString& title, const QString& message, const QString& icon, 
     , m_icon(icon)
     , m_type(type)
     , m_timeout(timeout) {
+    if (m_icon.isEmpty()) {
+        switch (m_type) {
+        case Type::Success:
+            m_icon = QStringLiteral("radio_button_checked_unread");
+            break;
+        case Type::Warning:
+            m_icon = QStringLiteral("warning");
+            break;
+        case Type::Error:
+            m_icon = QStringLiteral("error");
+            break;
+        default:
+            m_icon = QStringLiteral("info");
+            break;
+        }
+    }
+
     if (timeout <= 0) {
         switch (m_type) {
         case Type::Warning:
@@ -26,24 +44,8 @@ Toast::Toast(const QString& title, const QString& message, const QString& icon, 
             break;
         }
     }
-    QTimer::singleShot(m_timeout, this, &Toast::close);
-    if (m_icon.isEmpty()) {
-        switch (m_type) {
-        case Type::Success:
-            m_icon = "radio_button_checked_unread";
-            break;
-        case Type::Warning:
-            m_icon = "warning";
-            break;
-        case Type::Error:
-            m_icon = "error";
-            break;
-        default:
-            m_icon = "info";
-            break;
-        }
-    }
 
+    QTimer::singleShot(m_timeout, this, &Toast::close);
 }
 
 bool Toast::closed() const {
@@ -90,6 +92,16 @@ void Toast::unlock(QObject* sender) {
     if (m_locks.remove(sender) && m_closed) {
         close();
     }
+}
+
+Toaster* Toaster::instance() {
+    static Toaster toaster;
+    return &toaster;
+}
+
+Toaster* Toaster::create(QQmlEngine*, QJSEngine*) {
+    QQmlEngine::setObjectOwnership(instance(), QQmlEngine::CppOwnership);
+    return instance();
 }
 
 Toaster::Toaster(QObject* parent)

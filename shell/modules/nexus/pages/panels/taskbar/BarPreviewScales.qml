@@ -38,7 +38,6 @@ PageBase {
             visible: GlobalConfig.bar.perElementPreviewScale || GlobalConfig.bar.perElementFontScale
             spacing: Tokens.spacing.extraSmall / 2
 
-            // Table Header
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Tokens.padding.medium
@@ -53,7 +52,7 @@ PageBase {
                     ToolTip.text: qsTr("Reset all to 0")
                     ToolTip.visible: hovered
                     onClicked: {
-                        const keys = ["activeWindow", "audio", "battery", "bluetooth", "dock", "github", "lockStatus", "network", "notifications", "peripheralBattery", "trayMenu", "wirelessPassword"];
+                        const keys = ["greeter", "audio", "battery", "bluetooth", "clock", "dock", "github", "lockStatus", "network", "notifications", "peripheralBattery", "trayMenu", "wirelessPassword"];
                         for (let k of keys) {
                             GlobalConfig.bar.previewScales[k] = 0.0;
                             GlobalConfig.bar.previewFontScales[k] = 0.0;
@@ -61,19 +60,19 @@ PageBase {
                     }
                 }
 
-                Item { Layout.fillWidth: true } // Spacer to push headers to the right
+                Item { Layout.fillWidth: true }
 
                 StyledText {
                     text: qsTr("Scale")
                     font: Tokens.font.label.large
-                    Layout.preferredWidth: 156 // Matches CustomSpinBox width
+                    Layout.preferredWidth: 156
                     horizontalAlignment: Text.AlignHCenter
                 }
 
                 StyledText {
                     text: qsTr("Font")
                     font: Tokens.font.label.large
-                    Layout.preferredWidth: 156 // Matches CustomSpinBox width
+                    Layout.preferredWidth: 156
                     horizontalAlignment: Text.AlignHCenter
                 }
             }
@@ -81,15 +80,15 @@ PageBase {
             DoubleStepperRow {
                 first: true
                 last: false
-                label: qsTr("Active window")
+                label: qsTr("Greeter")
 
-                scaleValue: GlobalConfig.bar.previewScales.activeWindow
+                scaleValue: GlobalConfig.bar.previewScales.greeter
                 scaleFrom: -1.0; scaleTo: 1.0; scaleStepSize: 0.05
-                onScaleMoved: v => GlobalConfig.bar.previewScales.activeWindow = v
+                onScaleMoved: v => GlobalConfig.bar.previewScales.greeter = v
 
-                fontValue: GlobalConfig.bar.previewFontScales.activeWindow
+                fontValue: GlobalConfig.bar.previewFontScales.greeter
                 fontFrom: -1.0; fontTo: 1.0; fontStepSize: 0.05
-                onFontMoved: v => GlobalConfig.bar.previewFontScales.activeWindow = v
+                onFontMoved: v => GlobalConfig.bar.previewFontScales.greeter = v
             }
             DoubleStepperRow {
                 first: false
@@ -129,6 +128,19 @@ PageBase {
                 fontValue: GlobalConfig.bar.previewFontScales.bluetooth
                 fontFrom: -1.0; fontTo: 1.0; fontStepSize: 0.05
                 onFontMoved: v => GlobalConfig.bar.previewFontScales.bluetooth = v
+            }
+            DoubleStepperRow {
+                first: false
+                last: false
+                label: qsTr("Clock")
+
+                scaleValue: GlobalConfig.bar.previewScales.clock
+                scaleFrom: -1.0; scaleTo: 1.0; scaleStepSize: 0.05
+                onScaleMoved: v => GlobalConfig.bar.previewScales.clock = v
+
+                fontValue: GlobalConfig.bar.previewFontScales.clock
+                fontFrom: -1.0; fontTo: 1.0; fontStepSize: 0.05
+                onFontMoved: v => GlobalConfig.bar.previewFontScales.clock = v
             }
             DoubleStepperRow {
                 first: false

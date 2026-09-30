@@ -17,6 +17,7 @@ Item {
 
     required property DrawerVisibilities visibilities
     required property var panels
+    required property real maxWidth
     required property real maxHeight
 
     readonly property int padding: Tokens.padding.large
@@ -34,9 +35,10 @@ Item {
             Quickshell.execDetached(command);
     }
 
-    Connections {
-        target: Clipboard
+    implicitWidth: listWrapper.width + padding * 2
+    implicitHeight: listWrapper.height + sessionFooter.height + searchWrapper.height + listWrapper.anchors.bottomMargin + sessionFooter.anchors.bottomMargin + searchWrapper.anchors.bottomMargin
 
+    Connections {
         function onClearHistoryFinished(success: bool): void {
             if (success) {
                 if (GlobalConfig.utilities.toasts.clipboardChanged)
@@ -45,11 +47,9 @@ Item {
                 Toaster.toast(qsTr("Failed to clear clipboard history"), "", "error");
             }
         }
+
+        target: Clipboard
     }
-
-    implicitWidth: listWrapper.width + padding * 2
-
-    implicitHeight: listWrapper.height + sessionFooter.height + searchWrapper.height + listWrapper.anchors.bottomMargin + sessionFooter.anchors.bottomMargin + searchWrapper.anchors.bottomMargin
 
     Item {
         id: listWrapper
@@ -67,6 +67,7 @@ Item {
             content: root
             visibilities: root.visibilities
             panels: root.panels
+            maxWidth: root.maxWidth - root.padding * 2
             maxHeight: root.maxHeight - searchWrapper.implicitHeight - sessionFooter.implicitHeight - root.padding * 2 - (sessionFooter.visible ? root.footerSpacing * 2 : root.footerSpacing)
             search: search
             padding: root.padding
@@ -160,7 +161,7 @@ Item {
         anchors.margins: root.padding
         anchors.bottomMargin: CUtils.clamp(root.padding - Config.border.thickness, 0, root.padding)
 
-        implicitHeight: Math.max(searchIcon.implicitHeight, search.implicitHeight, clearClipboardIcon.implicitHeight, clearIcon.implicitHeight)
+        implicitHeight: Math.max(searchIcon.implicitHeight, search.implicitHeight, clearClipboardIcon.implicitHeight, clearIcon.implicitHeight, commandsBtn.implicitHeight)
 
         MaterialIcon {
             id: searchIcon
@@ -187,6 +188,11 @@ Item {
             placeholderText: qsTr("Type \"%1\" for commands").arg(GlobalConfig.launcher.actionPrefix)
 
             onAccepted: {
+                if (list.showAppsBrowser) {
+                    list.currentList?.activateCurrent();
+                    return;
+                }
+
                 const currentItem = list.currentList?.currentItem;
                 if (currentItem) {
                     if (list.showWallpapers) {
@@ -208,20 +214,96 @@ Item {
                 }
             }
 
-            Keys.onUpPressed: list.currentList?.decrementCurrentIndex()
-            Keys.onDownPressed: list.currentList?.incrementCurrentIndex()
+            Keys.onUpPressed: {
+                if (!list.showWallpapers)
+                    list.currentList?.decrementCurrentIndex();
+            }
+            Keys.onDownPressed: {
+                if (!list.showWallpapers)
+                    list.currentList?.incrementCurrentIndex();
+            }
+            Keys.onLeftPressed: event => {
+                if (list.showWallpapers || list.showWindowSwitcher) {
+                    list.currentList?.decrementCurrentIndex();
+                    event.accepted = true;
+                } else if (list.showAppsBrowser) {
+                    list.currentList?.moveLeft();
+                    event.accepted = true;
+                } else {
+                    event.accepted = false;
+                }
+            }
+            Keys.onRightPressed: event => {
+                if (list.showWallpapers || list.showWindowSwitcher) {
+                    list.currentList?.incrementCurrentIndex();
+                    event.accepted = true;
+                } else if (list.showAppsBrowser) {
+                    list.currentList?.moveRight();
+                    event.accepted = true;
+                } else {
+                    event.accepted = false;
+                }
+            }
 
-            Keys.onEscapePressed: root.visibilities.launcher = false
+            Keys.onEscapePressed: {
+                Windows.isSwitching = false;
+                Kwin.clearHighlight();
+                root.visibilities.launcher = false;
+            }
 
             Keys.onReleased: event => {
-                if (event.key === Qt.Key_Alt && text.startsWith(`${GlobalConfig.launcher.actionPrefix}windows `)) {
-                    Windows.focusSelectedWindow();
-                    root.visibilities.launcher = false;
-                    event.accepted = true;
+                if (Windows.isSwitching && text.startsWith(`${GlobalConfig.launcher.actionPrefix}windows `)) {
+                    const switcherKey = (typeof KeybindsModel !== "undefined" && KeybindsModel.getKey("windowSwitcher")) || "Alt+Tab";
+                    if (!CUtils.isShortcutModifierPressed(switcherKey)) {
+                        Windows.focusSelectedWindow();
+                        root.visibilities.launcher = false;
+                        event.accepted = true;
+                    }
                 }
             }
 
             Keys.onPressed: event => {
+                if (Windows.isSwitching && text.startsWith(`${GlobalConfig.launcher.actionPrefix}windows `)) {
+                    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                        if (event.modifiers & Qt.ShiftModifier || event.key === Qt.Key_Backtab) {
+                            Windows.triggerCyclePrev();
+                        } else {
+                            Windows.triggerCycleNext();
+                        }
+                        event.accepted = true;
+                        return;
+                    }
+                    if (event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
+                        Windows.triggerCyclePrev();
+                        event.accepted = true;
+                        return;
+                    }
+                    if (event.key === Qt.Key_Right || event.key === Qt.Key_Down) {
+                        Windows.triggerCycleNext();
+                        event.accepted = true;
+                        return;
+                    }
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        Windows.focusSelectedWindow();
+                        root.visibilities.launcher = false;
+                        event.accepted = true;
+                        return;
+                    }
+                    if (event.key === Qt.Key_Escape) {
+                        Windows.isSwitching = false;
+                        Kwin.clearHighlight();
+                        root.visibilities.launcher = false;
+                        event.accepted = true;
+                        return;
+                    }
+                }
+
+                if (list.showAppsBrowser && event.key === Qt.Key_Tab) {
+                    list.currentList?.toggleFocus();
+                    event.accepted = true;
+                    return;
+                }
+
                 if (!GlobalConfig.launcher.vimKeybinds)
                     return;
 
@@ -242,6 +324,13 @@ Item {
                 }
             }
 
+            onTextChanged: {
+                if (!text.startsWith(`${GlobalConfig.launcher.actionPrefix}windows `)) {
+                    Windows.isSwitching = false;
+                    Kwin.clearHighlight();
+                }
+            }
+
             Component.onCompleted: {
                 if (Visibilities.launcherInitialSearch) {
                     text = Visibilities.launcherInitialSearch;
@@ -257,12 +346,10 @@ Item {
                             search.text = Visibilities.launcherInitialSearch;
                             Visibilities.launcherInitialSearch = "";
                         }
-                        // Re-opening reuses an already-built Content, which does not
-                        // run Component.onCompleted again — without this the search
-                        // field never regains focus, and since the Alt release that
-                        // commits the window switcher is delivered to this field,
-                        // the switcher would stay open and stop cycling.
                         search.forceActiveFocus();
+                    } else {
+                        Windows.isSwitching = false;
+                        Kwin.clearHighlight();
                     }
                 }
 
@@ -273,6 +360,20 @@ Item {
 
                 target: root.visibilities
             }
+
+            Connections {
+                function onModifierReleased(): void {
+                    if (Windows.isSwitching && root.visibilities.launcher && search.text.startsWith(`${GlobalConfig.launcher.actionPrefix}windows `)) {
+                        const switcherKey = (typeof KeybindsModel !== "undefined" && KeybindsModel.getKey("windowSwitcher")) || "Alt+Tab";
+                        if (!CUtils.isShortcutModifierPressed(switcherKey)) {
+                            Windows.focusSelectedWindow();
+                            root.visibilities.launcher = false;
+                        }
+                    }
+                }
+
+                target: CUtils
+            }
         }
 
         MaterialIcon {
@@ -280,21 +381,13 @@ Item {
 
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: clearIcon.left
-            anchors.rightMargin: Tokens.spacing.small
+            anchors.rightMargin: (root.isClipboardMode && Clipboard.items.length > 0) ? Tokens.spacing.small : 0
 
-            width: (root.isClipboardMode && Clipboard.items.length > 0) ? implicitWidth : implicitWidth / 2
-            opacity: {
-                if (!root.isClipboardMode || Clipboard.items.length === 0)
-                    return 0;
-                if (clipboardMouse.pressed)
-                    return 0.7;
-                if (clipboardMouse.containsMouse)
-                    return 0.8;
-                return 1;
-            }
+            width: (root.isClipboardMode && Clipboard.items.length > 0) ? implicitWidth : 0
+            opacity: (root.isClipboardMode && Clipboard.items.length > 0) ? 1 : 0
 
             text: "delete"
-            color: Colours.palette.m3onSurfaceVariant
+            color: clipboardMouse.containsMouse ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
 
             MouseArea {
                 id: clipboardMouse
@@ -314,6 +407,10 @@ Item {
                 }
             }
 
+            Behavior on color {
+                CAnim {}
+            }
+
             Behavior on width {
                 Anim {
                     type: Anim.StandardSmall
@@ -331,22 +428,14 @@ Item {
             id: clearIcon
 
             anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            anchors.rightMargin: root.padding
+            anchors.right: commandsBtn.left
+            anchors.rightMargin: search.text ? Tokens.spacing.small : 0
 
-            width: search.text ? implicitWidth : implicitWidth / 2
-            opacity: {
-                if (!search.text)
-                    return 0;
-                if (mouse.pressed)
-                    return 0.7;
-                if (mouse.containsMouse)
-                    return 0.8;
-                return 1;
-            }
+            width: search.text ? implicitWidth : 0
+            opacity: search.text ? 1 : 0
 
             text: "close"
-            color: Colours.palette.m3onSurfaceVariant
+            color: mouse.containsMouse ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
 
             MouseArea {
                 id: mouse
@@ -356,6 +445,10 @@ Item {
                 cursorShape: search.text ? Qt.PointingHandCursor : undefined
 
                 onClicked: search.text = ""
+            }
+
+            Behavior on color {
+                CAnim {}
             }
 
             Behavior on width {
@@ -368,6 +461,33 @@ Item {
                 Anim {
                     type: Anim.StandardSmall
                 }
+            }
+        }
+
+        IconButton {
+            id: commandsBtn
+
+            isToggle: true
+            type: IconButton.Text
+            implicitWidth: 32
+            implicitHeight: 32
+            radius: Tokens.rounding.full
+            radiusMorph: false
+            icon: "menu"
+
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: root.padding
+            checked: search.text.startsWith(GlobalConfig.launcher.actionPrefix)
+
+            onClicked: {
+                if (search.text.startsWith(GlobalConfig.launcher.actionPrefix)) {
+                    search.text = "";
+                } else {
+                    search.text = GlobalConfig.launcher.actionPrefix;
+                }
+                search.forceActiveFocus();
+                search.cursorPosition = search.text.length;
             }
         }
     }

@@ -72,6 +72,10 @@ StyledListView {
         }
     }
 
+    function openContextMenu(app: DesktopEntry, targetItem: Item): void {
+        contextMenu.openFor(app, targetItem);
+    }
+
     model: ScriptModel {
         values: root.resultsForText(root.displayText)
         onValuesChanged: root.currentIndex = 0
@@ -347,6 +351,7 @@ StyledListView {
         id: appItem
 
         AppItem {
+            list: root
             visibilities: root.visibilities
         }
     }
@@ -405,6 +410,13 @@ StyledListView {
         WindowSwitcherItem {
             list: root
         }
+    }
+
+    AppContextMenu {
+        id: contextMenu
+
+        attachTo: root
+        visibilities: root.visibilities
     }
 
     Connections {

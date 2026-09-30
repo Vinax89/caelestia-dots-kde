@@ -5,6 +5,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Caelestia
+import Caelestia.Images
 import Caelestia.Config
 import Caelestia.Services
 import qs.services
@@ -17,9 +18,13 @@ Singleton {
     property string scheme: "dynamic"
     property string flavour: "default"
     property string variant: "default"
+    property real intensity: 1.0
+    readonly property real maxIntensity: 2.0
+    readonly property real intensityFraction: intensity / maxIntensity
     property string previewScheme: ""
     property string previewFlavour: ""
     property string previewVariant: ""
+    readonly property list<string> smartArg: GlobalConfig.services.smartScheme ? [] : ["--no-smart"]
     readonly property bool light: showPreview ? previewLight : currentLight
     property bool currentLight
     property bool previewLight
@@ -31,7 +36,6 @@ Singleton {
     readonly property alias wallLuminance: analyser.luminance
 
     function updatePaletteManager(): void {
-        // Collect all palette colors into a map for C++ processing
         const p = root.palette;
         PaletteManager.update(
             {
@@ -200,6 +204,14 @@ Singleton {
             root.flavour = (scheme.flavour || "").trim();
             root.variant = (scheme.variant || "").trim();
             root.currentLight = scheme.mode === "light";
+
+            root.showPreview = false;
+
+            // Absent, null, and a value the range does not take all mean the same thing here:
+            // what is in effect is the palette the engine produced. 0 is a real setting (a grey
+            // palette), so this cannot lean on falsiness either.
+            const intensity = Number(scheme.intensity ?? NaN);
+            root.intensity = Number.isFinite(intensity) ? Math.min(root.maxIntensity, Math.max(0, intensity)) : 1.0;
         } else {
             root.previewScheme = (scheme.name || "").trim();
             root.previewFlavour = (scheme.flavour || "").trim();
@@ -207,16 +219,11 @@ Singleton {
             root.previewLight = scheme.mode === "light";
         }
 
-        for (const [name, colour] of Object.entries(scheme.colours)) {
-            const propName = name.startsWith("term") ? name : `m3${name}`;
-            if (colours.hasOwnProperty(propName))
-                colours[propName] = `#${colour}`;
-        }
+        applyColours(colours, scheme.colours);
 
         if (!isPreview) {
             root.schemeLoaded = true;
             root.schemeRetryCount = 0;
-            Qt.callLater(root.syncKMYC);
         }
     }
 
@@ -229,44 +236,56 @@ Singleton {
             schemeRetryTimer.start();
     }
 
-    function setMode(mode: string): void {
-        Quickshell.execDetached(["caelestia", "scheme", "set", "--notify", "-m", mode]);
+    /// Fold a scheme's `colours` into a palette. A file leaves the leading `#` off and names a
+    /// terminal role plainly, so the role a palette holds is not the key the file uses.
+    function applyColours(palette: M3Palette, colours: var): void {
+        for (const [role, colour] of Object.entries(colours)) {
+            const propName = role.startsWith("term") ? role : `m3${role}`;
+            if (palette.hasOwnProperty(propName))
+                palette[propName] = colour.startsWith("#") ? colour : `#${colour}`;
+        }
     }
 
-    function syncKMYC(): void {
-        const variantMap = {
-            "content": 0,
-            "expressive": 1,
-            "fidelity": 2,
-            "monochrome": 3,
-            "neutral": 4,
-            "tonal-spot": 5,
-            "vibrant": 6,
-            "rainbow": 7,
-            "fruit-salad": 8
-        };
-        const varNum = variantMap[root.variant] ?? 5;
-        const color = String(root.palette.m3primary_paletteKeyColor);
-        const lightMode = root.currentLight ? "True" : "False";
+    function previewNamed(name: string, flavour: string, colours: var, light: bool): void {
+        if (!colours)
+            return;
+        root.previewScheme = name;
+        root.previewFlavour = flavour;
+        root.previewVariant = root.variant;
+        root.previewLight = light;
+        applyColours(root.preview, colours);
+        root.showPreview = true;
+    }
 
-        const scriptPath = Quickshell.shellPath("scripts/sync-kmyc.sh");
-        Quickshell.execDetached(["bash", scriptPath, color, varNum, lightMode]);
+    function clearPreview(): void {
+        root.showPreview = false;
+    }
+
+    function setMode(mode: string): void {
+        Quickshell.execDetached(["caelestia", "scheme", "set", "--notify", "-m", mode, ...root.smartArg]);
+    }
+
+    function setIntensity(fraction: real): void {
+        Quickshell.execDetached(["caelestia", "scheme", "set", "-i", (fraction * maxIntensity).toFixed(2), ...root.smartArg]);
+    }
+
+    function reseedScheme(): void {
+        Quickshell.execDetached(["bash", Quickshell.shellPath("scripts/reseed-scheme.sh"), ...root.smartArg]);
     }
 
     function reloadHyprRules(): void {
         // Layer rules are Hyprland-only; KWin handles blur via effects.
-        if (typeof KWinActiveWindowBridge !== "undefined")
-            return;
+                    return;
 
         let rule, trEnabled;
-        if (Hypr.usingLua) {
+        if (Kwin.usingLua) {
             rule = `eval hl.layer_rule({ match = { namespace = "caelestia-drawers" }, %1 = %2 })`;
             trEnabled = transparency.enabled;
         } else {
             rule = "keyword layerrule %1 %2, match:namespace caelestia-drawers";
             trEnabled = transparency.enabled ? 1 : 0;
         }
-        Hypr.extras.batchMessage([rule.arg("blur").arg(trEnabled), rule.arg("ignore_alpha").arg(Math.max(0, transparency.base - 0.03))]);
+        Kwin.extras.batchMessage([rule.arg("blur").arg(trEnabled), rule.arg("ignore_alpha").arg(Math.max(0, transparency.base - 0.03))]);
     }
 
     function requestReloadHyprRules(): void {
@@ -283,6 +302,7 @@ Singleton {
         Qt.callLater(updatePaletteManager)
         scheduleSchemeReload()
         startupSchemePollTimer.start()
+        reseedTimer.start()
     }
 
     Connections {
@@ -290,7 +310,7 @@ Singleton {
             root.reloadHyprRules();
         }
 
-        target: Hypr
+        target: Kwin
     }
 
 
@@ -302,6 +322,22 @@ Singleton {
         watchChanges: true
         onFileChanged: reload()
         onLoaded: root.load(text(), false)
+    }
+
+    Connections {
+        target: SchemeLoader
+
+        function onCurrentSchemeChanged(): void {
+            schemeFile.reload();
+        }
+    }
+
+    Timer {
+        id: reseedTimer
+
+        interval: 2500
+        repeat: false
+        onTriggered: root.reseedScheme()
     }
 
     Timer {
@@ -347,7 +383,6 @@ Singleton {
         onLuminanceChanged: Qt.callLater(root.updatePaletteManager)
     }
 
-    // Trigger PaletteManager update when palette, light mode, or transparency changes
     Connections {
         target: root.palette
 
@@ -403,8 +438,6 @@ Singleton {
     }
 
     component M3TPalette: QtObject {
-        // Reads from C++ PaletteManager.tPalette (QVariantMap) — one C++ update() per theme change
-        // instead of 44 individual JS property binding re-evaluations.
         readonly property color m3primary_paletteKeyColor:         PaletteManager.tPalette["m3primary_paletteKeyColor"] ?? root.palette.m3primary_paletteKeyColor
         readonly property color m3secondary_paletteKeyColor:       PaletteManager.tPalette["m3secondary_paletteKeyColor"] ?? root.palette.m3secondary_paletteKeyColor
         readonly property color m3tertiary_paletteKeyColor:        PaletteManager.tPalette["m3tertiary_paletteKeyColor"] ?? root.palette.m3tertiary_paletteKeyColor

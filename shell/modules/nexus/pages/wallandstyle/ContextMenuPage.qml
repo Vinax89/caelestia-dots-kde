@@ -14,10 +14,6 @@ import qs.modules.nexus.common
 PageBase {
     id: root
 
-    title: qsTr("Right Click Menu")
-    isSubPage: true
-    scrollable: true
-
     property bool isGlobalDragging: false
 
     property string globalDragSourceList: ""
@@ -51,10 +47,6 @@ PageBase {
         return null;
     }
 
-    function cloneEntries(entries) {
-        return JSON.parse(JSON.stringify(entries));
-    }
-
     function collectEntries() {
         let newEntries = [];
         for (let i = 0; i < activeModel.count; i++) {
@@ -75,7 +67,7 @@ PageBase {
     }
 
     function applyEntries(entries) {
-        let json = (!entries || entries.length === 0) ? cloneEntries(ContextMenuStore.defaultEntries()) : cloneEntries(entries);
+        let json = (!entries || entries.length === 0) ? ContextMenuStore.cloneEntries(ContextMenuStore.defaultEntries()) : ContextMenuStore.cloneEntries(entries);
 
         activeModel.clear();
         libraryModel.clear();
@@ -99,7 +91,7 @@ PageBase {
         const saveStartedAt = root.perfSaveStartedAt > 0 ? root.perfSaveStartedAt : Date.now();
         const payload = root.pendingSaveEntries.length > 0 ? root.pendingSaveEntries : collectEntries();
         ContextMenuStore.save(payload);
-        root.componentMeta = root.componentMeta; // force update
+        root.componentMeta = root.componentMeta;
 
         const saveMs = Date.now() - saveStartedAt;
         console.log("[perf][ContextMenuPage] save queued ms=" + saveMs + " entries=" + payload.length);
@@ -124,6 +116,10 @@ PageBase {
             root.perfLoadStartedAt = 0;
         }
     }
+
+    title: qsTr("Right Click Menu")
+    isSubPage: true
+    scrollable: true
 
     Component.onCompleted: load(true)
 
@@ -237,8 +233,8 @@ PageBase {
                     model: activeModel
                     clip: true
 
-                    move: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                    moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    move: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
+                    moveDisplaced: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
                     delegate: root.panelDelegate
                 }
             }
@@ -332,8 +328,8 @@ PageBase {
                     model: libraryModel
                     clip: true
 
-                    move: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
-                    moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 200; easing.type: Easing.OutCubic } }
+                    move: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
+                    moveDisplaced: Transition { Anim { properties: "y"; type: Anim.FastSpatial } }
 
                     delegate: root.panelDelegate
                 }
@@ -356,7 +352,7 @@ PageBase {
             height: (root.isGlobalDragging && root.globalDragSourceList === sourceList && root.globalDragSourceIndex === index && root.globalDragHoveredList !== sourceList) ? 0 : 50
             visible: height > 0
 
-            Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+            Behavior on height { Anim { type: Anim.FastSpatial } }
 
             property bool isDraggingThis: activeDragArea.drag.active
 
@@ -459,7 +455,7 @@ PageBase {
                     color: Colours.palette.m3onSurface
                     opacity: activeDragArea.containsMouse && !isPlaceholder && !isDraggingThis ? 0.08 : 0
 
-                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                    Behavior on opacity { Anim { type: Anim.FastEffects } }
                 }
 
                 RowLayout {

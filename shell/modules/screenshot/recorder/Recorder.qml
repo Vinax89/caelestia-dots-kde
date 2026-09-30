@@ -42,7 +42,7 @@ Variants {
 
         color: "transparent"
 
-        mask: Region {} // Capture all clicks outside
+        mask: Region {}
 
         anchors {
             top: true
@@ -68,7 +68,9 @@ Variants {
             }
 
             Behavior on opacity {
-                CAnim {}
+                Anim {
+                    type: Anim.DefaultEffects
+                }
             }
         }
 
@@ -86,10 +88,15 @@ Variants {
             implicitHeight: layout.implicitHeight + Tokens.padding.extraLarge * 2
 
             Behavior on opacity {
-                CAnim {}
+                Anim {
+                    type: Anim.DefaultEffects
+                }
             }
+
             Behavior on scale {
-                CAnim {}
+                Anim {
+                    type: Anim.FastSpatial
+                }
             }
 
             ColumnLayout {
@@ -107,7 +114,7 @@ Variants {
                         name: qsTr("Screenshot region")
                         onClicked: {
                             Visibilities.getForActive().screenshot = false;
-                            Quickshell.execDetached(["qs", "-p", Quickshell.shellPath(""), "ipc", "call", "region", "screenshot"]);
+                            Launch.exec(["qs", "-p", Quickshell.shellPath(""), "ipc", "call", "region", "screenshot"]);
                         }
                     }
 
@@ -116,7 +123,7 @@ Variants {
                         name: qsTr("Screenshot")
                         onClicked: {
                             Visibilities.getForActive().screenshot = false;
-                            Quickshell.execDetached(["bash", "-c", "spectacle -b -n -f -c 2>/dev/null || " +
+                            Launch.exec(["bash", "-c", "spectacle -b -n -f -c 2>/dev/null || " +
                                 "import -window root " + Paths.runtimeTemp("fullshot.png") + " && wl-copy < " + Paths.runtimeTemp("fullshot.png")]);
                         }
                     }
@@ -126,7 +133,7 @@ Variants {
                         name: qsTr("Record region")
                         onClicked: {
                             Visibilities.getForActive().screenshot = false;
-                            Quickshell.execDetached(["spectacle", "-R", "r"]);
+                            Launch.exec(["spectacle", "-R", "r"]);
                         }
                     }
 
@@ -135,7 +142,7 @@ Variants {
                         name: qsTr("Record screen")
                         onClicked: {
                             Visibilities.getForActive().screenshot = false;
-                            Quickshell.execDetached(["spectacle", "-R", "s"]);
+                            Launch.exec(["spectacle", "-R", "s"]);
                         }
                     }
                 }

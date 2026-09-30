@@ -20,16 +20,17 @@ caelestia_snapshot_packages() {
 
     case "$distro" in
         arch)
-            pacman -Qq 2>/dev/null | sort -u > "$out" || : > "$out"
+            pacman -Qq 2>/dev/null | sort -u > "$out" || { rm -f -- "$out"; return 1; }
             ;;
         fedora)
-            dnf repoquery --installed --qf '%{name}' 2>/dev/null | sort -u > "$out" || : > "$out"
+            dnf repoquery --installed --qf '%{name}' 2>/dev/null | sort -u > "$out" || { rm -f -- "$out"; return 1; }
             ;;
         debian)
-            dpkg-query -W -f='${binary:Package}\n' 2>/dev/null | sort -u > "$out" || : > "$out"
+            dpkg-query -W -f='${binary:Package}\n' 2>/dev/null | sort -u > "$out" || { rm -f -- "$out"; return 1; }
             ;;
         *)
-            : > "$out"
+            rm -f -- "$out"
+            return 1
             ;;
     esac
 }

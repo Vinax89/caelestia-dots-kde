@@ -12,18 +12,14 @@ ColumnLayout {
 
     required property PopoutState popouts
 
-    readonly property real masterScale: !isNaN(GlobalConfig.bar.previewScale) ? GlobalConfig.bar.previewScale : 1.0
+    property real scaleOffset: 1.0
+    property real fontScale: 1.0
+    property bool _isSidebarOpen: false
 
-    readonly property real barScaleOffset: GlobalConfig.bar.previewScaleWithBar ? (!isNaN(GlobalConfig.bar.scale) ? GlobalConfig.bar.scale : 1.0) : 1.0
-
-    readonly property real scaleOffset: Math.max(0.1, masterScale * barScaleOffset)
-
-    readonly property real fontScale: Math.max(0.1, scaleOffset + (!isNaN(GlobalConfig.bar.fontScaleOffset) ? GlobalConfig.bar.fontScaleOffset : 0.0))
-
-    // Index of the Nexus "Updates" page, resolved dynamically so this menu
+    // Index of the Nexus "Updates" page, resolved by page key so this menu
     // can't drift out of sync if the page registry is reordered.
     readonly property int updatesPageIdx: {
-        const idx = PageRegistry.pages.findIndex(page => page.icon === "update");
+        const idx = PageRegistry.indexForKey("updates");
         return idx >= 0 ? idx : 0;
     }
 
@@ -153,7 +149,6 @@ ColumnLayout {
         }
     }
 
-    // Actions card, mirroring the CachyOS updater menu.
     StyledRect {
         Layout.fillWidth: true
         implicitHeight: actionsLayout.implicitHeight + Tokens.padding.medium * 2 * root.scaleOffset
@@ -170,7 +165,6 @@ ColumnLayout {
             anchors.margins: Tokens.padding.medium * root.scaleOffset
             spacing: Tokens.spacing.small * root.scaleOffset
 
-            // Check for updates
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: checkRow.implicitHeight
@@ -209,7 +203,6 @@ ColumnLayout {
                 }
             }
 
-            // Open the updates page
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: openRow.implicitHeight
@@ -250,7 +243,6 @@ ColumnLayout {
                 }
             }
 
-            // CachyOS "Exit" equivalent: hide the indicator from the bar
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: hideRow.implicitHeight

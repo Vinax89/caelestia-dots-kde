@@ -47,23 +47,12 @@ IMPORT_RE = re.compile(r'^\s*import\s+(?:"([^"]+)"|([\w.]+))(?:\s+[\d.]+)?(?:\s+
 LINE_COMMENT_RE = re.compile(r"^[ \t]*//.*$", re.MULTILINE)
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
-# Component instantiation: `TypeName {` at the start of a line.
 TYPE_INSTANTIATION_RE = re.compile(r"^[ \t]*([A-Z]\w*)\s*\{", re.MULTILINE)
-# Alias-qualified instantiation: `Alias.TypeName {` (e.g. `import X as T` then `T.Button {}`).
 QUALIFIED_INSTANTIATION_RE = re.compile(r"^[ \t]*(\w+)\.([A-Z]\w*)\s*\{", re.MULTILINE)
-# `property TypeName name`, `readonly property TypeName name`.
 PROPERTY_TYPE_RE = re.compile(r"\bproperty\s+([A-Z]\w*)\s+\w+")
 PROPERTY_LIST_RE = re.compile(r"\bproperty\s+list<([A-Z]\w*)>")
-# Any qualified member/enum/attached-property/singleton access, e.g. `Colours.palette`,
-# `Layout.fillWidth`, `Text.AlignHCenter`.
 DOT_ACCESS_RE = re.compile(r"\b([A-Z]\w*)\.\w+")
 
-# QML language builtins and JS globals that never require a project import.
-# Also includes fundamental QtQml-module types (Connections, Timer, Binding)
-# that are transitively available through *any* Qt/Quickshell module import
-# (every Qt/Quickshell QML module depends on QtQml internally, so QML type
-# resolution exposes these without a file ever writing "import QtQml" itself
-# - this is standard, well-established Qt behaviour, not a project quirk).
 ALWAYS_OK = {
     "Component", "QtObject", "Qt", "Math", "JSON", "Date", "Number", "String",
     "Array", "Object", "Boolean", "RegExp", "Symbol", "Map", "Set", "Promise",
@@ -74,11 +63,6 @@ ALWAYS_OK = {
 CAELESTIA_CLASS_RE = re.compile(r"class\s+(\w+)\s*(?:final\s*)?(?::[^{;]*)?\{")
 CAELESTIA_NAMED_ELEMENT_RE = re.compile(r'QML_NAMED_ELEMENT\(\s*"(\w+)"\s*\)')
 
-# Real QML module names are always capitalized (Qt*, Quickshell*, Caelestia*,
-# M3Shapes) except the "qs" pseudo-namespace. A bareword import that doesn't
-# match either is not a real QML module - it's a false match from embedded
-# script text (e.g. a Python `import os` inside a `Process { command: [...] }`
-# string), so it must never be tallied as a module or a candidate provider.
 VALID_BAREWORD_MODULE_RE = re.compile(r"^(qs(\.[\w.]+)?|[A-Z][\w.]*)$")
 
 
@@ -87,8 +71,6 @@ def strip_comments(text: str) -> str:
 
 
 def strip_imports(text: str) -> str:
-    # Otherwise `import Caelestia.Services` itself gets picked up by
-    # DOT_ACCESS_RE as a "usage" of the bare `Caelestia` type.
     return IMPORT_RE.sub("", text)
 
 
@@ -188,12 +170,17 @@ def main() -> int:
     local_registry = build_local_registry(shell_root)
     caelestia_registry = build_caelestia_registry(plugin_src_root)
 
-    # Pass 1: parse every file, and collect all qs.* modules ever imported so
-    # the qs registry only has to stat the directories actually referenced.
     parsed: list[tuple[Path, set[str], list[str], set[str], set[str]]] = []
     all_qs_modules: set[str] = set()
+    unreadable: list[str] = []
     for qml_file in qml_files:
-        raw = qml_file.read_text(encoding="utf-8")
+        try:
+            raw = qml_file.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            # Report it as a failure of the file, not of the checker: an unhandled
+            # UnicodeDecodeError ends this gate in a traceback that names no file.
+            unreadable.append(f"{qml_file.relative_to(shell_root)}: not valid UTF-8 ({exc})")
+            continue
         code = strip_imports(strip_comments(raw))
         named_imports, relative_imports = parse_imports(raw)
         modules = {module for module, _alias in named_imports}
@@ -204,21 +191,6 @@ def main() -> int:
 
     qs_registry = build_qs_registry(shell_root, all_qs_modules)
 
-    # Pass 2: build the correlation registry for everything else (standard Qt
-    # / Quickshell / M3Shapes modules). Blind frequency-based correlation
-    # (majority vote, or greedy set-cover by rarity) both fail here: a type's
-    # true provider is often imported alongside other unrelated-but-common
-    # modules, so any purely statistical approach ends up crediting whichever
-    # module happens to co-occur most/least, not the module that actually
-    # defines the type - e.g. QtQuick.Loader never gets credited because rarer
-    # coincidentally-co-imported modules "explain away" its usages first.
-    #
-    # Instead, only trust UNAMBIGUOUS evidence: a file whose only standard
-    # (non qs.*/Caelestia.*) import is a single module M proves, with
-    # certainty, that every uppercase type it uses and doesn't get from
-    # local/qs/Caelestia/relative imports is provided by M. Require at least
-    # 2 independent single-module files per type to filter out one-off typos
-    # or accidental unused imports from becoming "evidence".
     per_file_unresolved: list[tuple[Path, set[str], set[str], set[str]]] = []
     type_module_evidence: dict[str, Counter[str]] = defaultdict(Counter)
     for qml_file, modules, relative_imports, alias_names, used_types in parsed:
@@ -254,7 +226,6 @@ def main() -> int:
                 continue
             missing_failures.append(f"{rel}: uses '{t}' but none of its known-providing modules ({', '.join(sorted(candidates))}) are imported")
 
-    # Unused-import pass: qs.*/Caelestia.* only (exact registries -> low false-positive rate).
     for qml_file, modules, _unresolved, used_here in per_file_unresolved:
         rel = qml_file.relative_to(shell_root)
         for module in sorted(m for m in modules if is_qs_module(m) or is_caelestia_module(m)):
@@ -269,6 +240,12 @@ def main() -> int:
         for w in unused_warnings:
             print(f"- {w}", file=sys.stderr)
         print("::endgroup::", file=sys.stderr)
+
+    if unreadable:
+        print(f"QML import validation failed ({len(unreadable)} unreadable file(s)):", file=sys.stderr)
+        for f in unreadable:
+            print(f"- {f}", file=sys.stderr)
+        return 1
 
     if missing_failures:
         print(f"QML import validation failed ({len(missing_failures)} missing import(s)):", file=sys.stderr)

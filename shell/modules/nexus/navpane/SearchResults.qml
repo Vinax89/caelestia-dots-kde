@@ -21,7 +21,6 @@ VerticalFadeFlickable {
     bottomMargin: Tokens.padding.large
     contentHeight: content.implicitHeight
 
-    // So it can receive focus
     focus: true
 
     onNormalizedQueryChanged: selectedIndex = 0
@@ -39,12 +38,7 @@ VerticalFadeFlickable {
     function executeSelected() {
         if (list.count > 0 && selectedIndex >= 0 && selectedIndex < list.count) {
             const entry = root.filteredEntries[selectedIndex];
-            root.nState.currentPageIdx = entry.pageIdx;
-            if (entry.subPageIdx >= 0) {
-                Qt.callLater(() => {
-                    root.nState.openSubPage(entry.subPageIdx);
-                });
-            }
+            root.nState.goToSubPage(entry.pageIdx, entry.subPageIdx);
             root.nState.searchQuery = "";
         }
     }
@@ -106,12 +100,7 @@ VerticalFadeFlickable {
 
                     onClicked: {
                         root.selectedIndex = item.index;
-                        root.nState.currentPageIdx = item.pageIdx;
-                        if (item.subPageIdx >= 0) {
-                            Qt.callLater(() => {
-                                root.nState.openSubPage(item.subPageIdx);
-                            });
-                        }
+                        root.nState.goToSubPage(item.pageIdx, item.subPageIdx);
                         root.nState.searchQuery = "";
                     }
                 }

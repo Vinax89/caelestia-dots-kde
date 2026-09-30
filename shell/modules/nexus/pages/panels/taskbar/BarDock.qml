@@ -66,11 +66,35 @@ PageBase {
 
         ToggleRow {
             Layout.fillWidth: true
-            last: true
-            text: Strings.localizeEnglishSpelling(qsTr("Recolour icons"))
-            subtext: Strings.localizeEnglishSpelling(qsTr("Recolour application icons using the system theme"))
+            text: qsTr("Recolor icons")
+            subtext: qsTr("Recolor application icons using the system theme")
             checked: Config.bar.dock.recolourIcons
             onToggled: GlobalConfig.bar.dock.recolourIcons = checked
+        }
+
+        ToggleRow {
+            Layout.fillWidth: true
+            text: qsTr("Show app badges")
+            subtext: qsTr("Show the count, progress and urgency an app publishes for its dock icon")
+            checked: Config.bar.dock.showBadges
+            onToggled: GlobalConfig.bar.dock.showBadges = checked
+        }
+
+        ToggleRow {
+            Layout.fillWidth: true
+            text: qsTr("Filter by current desktop")
+            subtext: qsTr("Only show applications and windows belonging to the active virtual desktop")
+            checked: Config.bar.dock.currentDesktopOnly
+            onToggled: GlobalConfig.bar.dock.currentDesktopOnly = checked
+        }
+
+        ToggleRow {
+            Layout.fillWidth: true
+            last: true
+            text: qsTr("Preview window on desktop")
+            subtext: qsTr("Highlight and show the window itself on the workspace while hovering over dock previews")
+            checked: Config.bar.dock.previewOnDesktop
+            onToggled: GlobalConfig.bar.dock.previewOnDesktop = checked
         }
     }
 }

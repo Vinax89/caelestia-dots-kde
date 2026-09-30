@@ -12,7 +12,8 @@ LazyLoader {
     property list<string> cwd: ["Home"]
     property string filterLabel: "All files"
     property list<string> filters: ["*"]
-    property string title: qsTr("Select a file")
+    property bool selectFolder: false
+    property string title: selectFolder ? qsTr("Select a folder") : qsTr("Select a file")
 
     signal accepted(path: string)
     signal rejected
@@ -31,13 +32,15 @@ LazyLoader {
     FloatingWindow {
         id: root
 
+        property bool selectFolder: loader.selectFolder
         property list<string> cwd: loader.cwd
         property string filterLabel: loader.filterLabel
         property list<string> filters: loader.filters
 
         readonly property bool selectionValid: {
+            if (loader.selectFolder) return true;
             const file = folderContents.currentItem?.modelData;
-            return (file && !file.isDir && (filters.includes("*") || filters.includes(file.suffix))) ?? false;
+            return (file && !file.isDir && (filters.includes("*") || filters.some(f => f.toLowerCase() === file.suffix.toLowerCase()))) ?? false;
         }
 
         function accepted(path: string): void {

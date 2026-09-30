@@ -11,6 +11,7 @@ import qs.modules.nexus.pages.apps
 import qs.modules.nexus.pages.audio
 import qs.modules.nexus.pages.bluetooth
 import qs.modules.nexus.pages.desktop
+import qs.modules.nexus.pages.network
 import qs.modules.nexus.pages.panels
 import qs.modules.nexus.pages.services
 import qs.modules.nexus.pages.utilities
@@ -24,9 +25,7 @@ QtObject {
         PlaceholderComp {}
     }
     readonly property list<Component> pageComps: [
-        // Personalization
         Component {
-            // Appearance
             StackPage {
                 Component {
                     WallpaperAndStyle {}
@@ -56,12 +55,14 @@ QtObject {
                     AppearancePage {}
                 }
                 Component {
-                    KMYCSettings {}
+                    LockScreenPage {}
+                }
+                Component {
+                    AdvancedColorsPage {}
                 }
             }
         },
         Component {
-            // Desktop
             StackPage {
                 Component {
                     DesktopPage {}
@@ -78,7 +79,6 @@ QtObject {
             }
         },
         Component {
-            // Panels
             StackPage {
                 Component {
                     PanelsPage {}
@@ -98,7 +98,6 @@ QtObject {
                 Component {
                     UtilitiesPanel {}
                 }
-                // Taskbar component sub-pages
                 Component {
                     BarComponents {}
                 }
@@ -106,7 +105,7 @@ QtObject {
                     BarWorkspaces {}
                 }
                 Component {
-                    BarActiveWindow {}
+                    BarGreeter {}
                 }
                 Component {
                     BarTray {}
@@ -135,19 +134,37 @@ QtObject {
                 Component {
                     BarUpdates {}
                 }
-            }
-        },
-        // Connectivity
-        Component {
-            // Network
-            StackPage {
                 Component {
-                    NetworkPage {}
+                    TabSwitcherPanel {}
                 }
             }
         },
         Component {
-            // Bluetooth
+            StackPage {
+                Component {
+                    NetworkPage {}
+                }
+                Component {
+                    EthernetDetailPage {}
+                }
+                Component {
+                    AddNetworkPage {}
+                }
+                Component {
+                    NetworkDetailPage {}
+                }
+                Component {
+                    AddVpnPage {}
+                }
+                Component {
+                    AllNetworksPage {}
+                }
+                Component {
+                    SavedNetworksPage {}
+                }
+            }
+        },
+        Component {
             StackPage {
                 Component {
                     BluetoothPage {}
@@ -161,7 +178,6 @@ QtObject {
             }
         },
         Component {
-            // Audio
             StackPage {
                 Component {
                     AudioPage {}
@@ -177,9 +193,7 @@ QtObject {
                 }
             }
         },
-        // Controls
         Component {
-            // Notifications
             StackPage {
                 Component {
                     NotificationsPage {}
@@ -196,7 +210,6 @@ QtObject {
             }
         },
         Component {
-            // Utilities
             StackPage {
                 Component {
                     UtilitiesPage {}
@@ -222,24 +235,20 @@ QtObject {
             }
         },
         Component {
-            // Power
             StackPage {
                 Component {
-                    PowerPage {}
+                    SessionPage {}
                 }
             }
         },
         Component {
-            // Shortcuts
             StackPage {
                 Component {
                     ShortcutManagerPage {}
                 }
             }
         },
-        // Shell
         Component {
-            // Apps
             StackPage {
                 Component {
                     AppsPage {}
@@ -253,7 +262,6 @@ QtObject {
             }
         },
         Component {
-            // Services
             StackPage {
                 Component {
                     ServicesPage {}
@@ -264,16 +272,13 @@ QtObject {
             }
         },
         Component {
-            // Language & region
             StackPage {
                 Component {
                     LanguageAndRegion {}
                 }
             }
         },
-        // System
         Component {
-            // Updates
             StackPage {
                 Component {
                     UpdatesPage {}
@@ -281,7 +286,6 @@ QtObject {
             }
         },
         Component {
-            // Plugins
             StackPage {
                 Component {
                     PluginsPage {}
@@ -305,7 +309,7 @@ QtObject {
     ]
 
     component PlaceholderComp: Item {
-        property NexusState nState // To avoid the warning from non-existent property
+        property NexusState nState
 
         ColumnLayout {
             anchors.centerIn: parent
@@ -313,19 +317,19 @@ QtObject {
 
             MaterialIcon {
                 text: "handyman"
-                color: Colours.palette.m3onSurfaceVariant
+                color: Colours.palette.m3outlineVariant
                 fontStyle: Tokens.font.icon.extraLarge
                 Layout.alignment: Qt.AlignHCenter
             }
             StyledText {
                 text: qsTr("Page under construction")
-                color: Colours.palette.m3onSurfaceVariant
+                color: Colours.palette.m3outlineVariant
                 font: Tokens.font.title.large
                 Layout.alignment: Qt.AlignHCenter
             }
             StyledText {
                 text: qsTr("This page will be available in a future update.")
-                color: Colours.palette.m3onSurfaceVariant
+                color: Colours.palette.m3outlineVariant
                 font: Tokens.font.body.large
                 Layout.alignment: Qt.AlignHCenter
             }

@@ -1,76 +1,46 @@
 #!/usr/bin/env bash
-# 10-system-tweaks.sh  Apply live system configuration tweaks to the running KDE session.
-#
-# This script ONLY writes config values and reloads KDE daemons.
-# It does NOT copy any files. It is designed to be:
-#   - Run standalone at any time: bash scripts/10-system-tweaks.sh
-#   - Called by the main installer (after deploying files)
-#   - Easily extended: add new tweak_* functions below, then call them in main()
-#
-# Usage:
-#   bash scripts/10-system-tweaks.sh           # Apply all tweaks
-#   bash scripts/10-system-tweaks.sh --list    # List available tweaks
 
 set -euo pipefail
-RED="\033[0;31m"
-CYAN="\033[0;36m"; GREEN="\033[0;32m"; RST="\033[0m"
-info() { echo -e "${CYAN}[INFO]  $*${RST}"; }
-ok()   { echo -e "${GREEN}[OK]    $*${RST}"; }
-warn() { echo -e "${RED}[WARN]  $*${RST}"; }
-
-# Never open an interactive sudo prompt from this script. The installer has
-# already primed sudo's timestamp cache through its private wrapper.
-run_sudo_non_interactive() {
-    sudo -n "$@"
-}
+source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
 
 echo
 echo ""
-echo "  caelestia KDE  Live System Tweaks"
+echo "  Caelestia  Live System Tweaks"
 echo ""
 
-#
-# TWEAK: Disable KDE OSD popups (volume, brightness notifications)
-#
 tweak_disable_kde_osd() {
     info "Disabling KDE OSD popups (volume/brightness)..."
 
-    # Plasma OSD daemon
     kwriteconfig6 --file plasmarc --group "OSD" --key "Enabled" "false" 2>/dev/null || true
     kwriteconfig6 --file plasmarc --group "OSD" --key "ShowOnActiveScreen" "false" 2>/dev/null || true
 
-    # kdeglobals fallback key
     kwriteconfig6 --file kdeglobals --group "KDE" --key "OSDEnabled" "false" 2>/dev/null || true
 
-    # plasma-volume OSD via notify
     kwriteconfig6 --file plasmanotifyrc --group "Notifications" \
         --key "LoudnessChangedOSD" "false" 2>/dev/null || true
 
-    # powerdevil brightness OSD
     kwriteconfig6 --file powerdevilrc --group "BrightnessControl" \
         --key "showOSD" "false" 2>/dev/null || true
     kwriteconfig6 --file powerdevilrc --group "AC" \
         --key "brightnessosd" "false" 2>/dev/null || true
 
-    # kmix OSD
-    mkdir -p "$HOME/.config"
-    if [[ -f "$HOME/.config/kmixrc" ]]; then
-        sed -i 's/^ShowOSD=.*/ShowOSD=false/' "$HOME/.config/kmixrc" 2>/dev/null || true
-        grep -q "^ShowOSD=" "$HOME/.config/kmixrc" || echo -e "\n[Global]\nShowOSD=false" >> "$HOME/.config/kmixrc"
-    else
-        cat > "$HOME/.config/kmixrc" <<'EOF'
-[Global]
-ShowOSD=false
-EOF
-    fi
+    kwriteconfig6 --file kmixrc --group "Global" --key "ShowOSD" "false" 2>/dev/null || true
 
     ok "KDE OSD popups disabled."
 }
 
-#
-# TWEAK: Create 5 virtual desktops
-#
+first_install() {
+    local existing
+    existing="$(kreadconfig6 --file kwinrc --group "Desktops" --key "Number" 2>/dev/null || true)"
+    [[ -z "$existing" ]]
+}
+
 tweak_five_desktops() {
+    if ! first_install; then
+        skip "Existing virtual desktop configuration found - leaving it untouched."
+        return 0
+    fi
     info "Configuring 5 virtual desktops..."
 
     kwriteconfig6 --file kwinrc --group "Desktops" --key "Number" "5"
@@ -82,9 +52,80 @@ tweak_five_desktops() {
     ok "5 virtual desktops configured."
 }
 
-#
-# TWEAK: Reload KWin and KGlobalAccel to pick up config changes
-#
+tweak_remove_panels() {
+    if ! first_install; then
+        skip "Not a first install - leaving Plasma panels alone."
+        return 0
+    fi
+    info "Removing KDE Plasma panels..."
+
+    if qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+        "var p = panels(); for (var i = 0; i < p.length; i++) { p[i].remove(); }" \
+        2>/dev/null; then
+        ok "KDE panels removed."
+        return 0
+    fi
+
+    python3 - <<'EOF' || warn "Failed to remove KDE panels from config."
+import os
+import re
+
+path = os.path.expanduser("~/.config/plasma-org.kde.plasma.desktop-appletsrc")
+if not os.path.exists(path):
+    raise SystemExit(0)
+
+lines = open(path, "r", encoding="utf-8").read().splitlines()
+
+panel_ids = set()
+current = None
+for line in lines:
+    s = line.strip()
+    m = re.match(r"^\[Containments\]\[(\d+)\]$", s)
+    if m:
+        current = m.group(1)
+    elif s.startswith("[Containments][") and not re.match(r"^\[Containments\]\[\d+\]$", s):
+        continue
+    elif s.startswith("[") and s.endswith("]"):
+        current = None
+    elif current is not None and re.match(r"^(formfactor\s*=\s*[23]|plugin\s*=\s*org\.kde\.plasma\.panel)\s*$", s, re.IGNORECASE):
+        panel_ids.add(current)
+
+if not panel_ids:
+    raise SystemExit(0)
+
+out = []
+skip = False
+for line in lines:
+    s = line.strip()
+    m = re.match(r"^\[Containments\]\[(\d+)\]$", s)
+    if m:
+        skip = m.group(1) in panel_ids
+        if skip:
+            continue
+    elif s.startswith("[Containments][") and not m:
+        pass
+    elif s.startswith("[") and s.endswith("]"):
+        skip = False
+    if skip:
+        continue
+    out.append(line)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write("\n".join(out) + "\n")
+print(f"Removed {len(panel_ids)} KDE panel(s)")
+EOF
+
+    ok "KDE panels removed."
+}
+
+tweak_no_splash_screen() {
+    info "Turning off the Plasma startup splash..."
+
+    kwriteconfig6 --file ksplashrc --group KSplash --key Engine "none" 2>/dev/null || true
+
+    ok "Plasma splash screen disabled."
+}
+
 tweak_reload_kde() {
     info "Reloading KWin and plasma-kglobalaccel..."
     qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
@@ -92,21 +133,30 @@ tweak_reload_kde() {
     ok "KDE daemons reloaded."
 }
 
-#
-# TWEAK: Set default Caelestia shell scheme
-#
 tweak_default_scheme() {
     info "Setting default Caelestia color scheme..."
     if command -v caelestia >/dev/null 2>&1; then
+        STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/caelestia"
+        CURRENT=""
+        if [[ -s "$STATE_DIR/scheme.json" ]] && command -v python3 >/dev/null 2>&1; then
+            CURRENT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name", ""))' "$STATE_DIR/scheme.json" 2>/dev/null || true)"
+        fi
+        if [[ -n "$CURRENT" && "$CURRENT" != "dynamic" ]]; then
+            info "Keeping user-selected Caelestia color scheme ($CURRENT)."
+            ok "Default Caelestia color scheme kept."
+            return
+        fi
+
+        WALLPAPER="$(cat "$STATE_DIR/wallpaper/path.txt" 2>/dev/null || true)"
+        if [[ -n "$WALLPAPER" && -f "$WALLPAPER" ]]; then
+            timeout 10s caelestia wallpaper -f "$WALLPAPER" >/dev/null 2>&1 || true
+        fi
         timeout 10s caelestia scheme set -n dynamic >/dev/null 2>&1 || true
     fi
     ok "Default Caelestia color scheme set."
 }
 
 
-#
-# TWEAK: Set default shell to Fish
-#
 tweak_default_shell() {
     local target_shell="${DEFAULT_SHELL:-fish}"
     info "Setting default shell to $target_shell..."
@@ -115,9 +165,8 @@ tweak_default_shell() {
         local shell_path
         shell_path="$(command -v "$target_shell")"
 
-        # Compare with current login shell
         local current_shell
-        current_shell="$(getent passwd "$USER" | cut -d: -f7)"
+        current_shell="$(getent passwd "$(id -un)" | cut -d: -f7)"
         if [[ -z "$current_shell" ]]; then
             current_shell="$SHELL"
         fi
@@ -125,13 +174,12 @@ tweak_default_shell() {
         if [[ "$current_shell" == "$shell_path" ]]; then
             info "Shell is already set to $shell_path. Skipping chsh."
         else
-            run_sudo_non_interactive chsh -s "$shell_path" "$USER" 2>/dev/null || warn "Failed to change shell for $USER without prompting. You may need to run 'sudo chsh -s $shell_path $USER' manually."
+            caelestia_sudo_quiet chsh -s "$shell_path" "$(id -un)" 2>/dev/null || warn "Failed to change shell without prompting. You may need to run 'sudo chsh -s $shell_path $(id -un)' manually."
         fi
 
         local konsole_profile_dir="$HOME/.local/share/konsole"
         mkdir -p "$konsole_profile_dir"
 
-        # Inject target shell into all existing Konsole profiles
         local profiles_found=0
         for profile in "$konsole_profile_dir"/*.profile; do
             if [[ -f "$profile" ]]; then
@@ -140,7 +188,6 @@ tweak_default_shell() {
             fi
         done
 
-        # If no profiles existed, create the standard fallback one so the shell works
         if [[ $profiles_found -eq 0 ]]; then
             kwriteconfig6 --file "$konsole_profile_dir/Profile 1.profile" --group "General" --key "Name" "Profile 1"
             kwriteconfig6 --file "$konsole_profile_dir/Profile 1.profile" --group "General" --key "Command" "$shell_path"
@@ -153,85 +200,29 @@ tweak_default_shell() {
     ok "Shell configuration applied."
 }
 
-#
-# TWEAK: Patch caelestia-cli to prevent terminal sequence bleeding
-#
-tweak_patch_caelestia_cli() {
-    info "Patching caelestia CLI to fix terminal sequence bleeding..."
+tweak_user_avatar_symlinks() {
+    if [[ -e "$HOME/.face.icon" || -L "$HOME/.face.icon" ]]; then
+        # shellcheck disable=SC2088
+        info "~/.face.icon already exists. Skipping avatar setup."
+        return 0
+    fi
 
-    local theme_file
-    theme_file=$(python3 -c "import importlib.util; spec = importlib.util.find_spec('caelestia.utils.theme'); print(spec.origin) if spec and spec.origin else print('')" 2>/dev/null)
+    info "Setting up user profile picture symlinks..."
 
-    if [[ -n "$theme_file" && -f "$theme_file" ]]; then
-        local python_code="
-import sys, pathlib, subprocess, re
-p = pathlib.Path(sys.argv[1])
-text = p.read_text()
-old = '''    for pt in pts_path.iterdir():
-        if pt.name.isdigit():
-            try:
-                # Use non-blocking write with timeout to prevent hangs'''
-new = '''    for pt in pts_path.iterdir():
-        if pt.name.isdigit():
-            try:
-                res = subprocess.run([\"ps\", \"-t\", pt.name, \"-o\", \"comm=\"], capture_output=True, text=True)
-                processes = [p.strip() for p in res.stdout.splitlines() if p.strip()]
-                if not any(re.match(r\"^(bash|zsh|fish|sh|dash|mksh|tcsh|csh|ksh)$\", p) for p in processes):
-                    continue
-            except Exception:
-                pass
-            try:
-                # Use non-blocking write with timeout to prevent hangs'''
-if new in text:
-    sys.exit(2)          # already patched: nothing to do, and not a failure
-if old not in text:
-    sys.exit(3)          # the anchor is gone -- upstream changed under us
-p.write_text(text.replace(old, new))
-"
-        # Exit codes: 0 patched, 2 already patched, 3 anchor missing,
-        # anything else a real error (usually EACCES, which the sudo retry fixes).
-        _patch_rc=0
-        python3 -c "$python_code" "$theme_file" 2>/dev/null || _patch_rc=$?
-        if [[ $_patch_rc -ne 0 && $_patch_rc -ne 2 && $_patch_rc -ne 3 ]]; then
-            _patch_rc=0
-            run_sudo_non_interactive python3 -c "$python_code" "$theme_file" 2>/dev/null || _patch_rc=$?
-        fi
+    local user_name="${USER:-$(id -un)}"
+    local account_icon="/var/lib/AccountsService/icons/$user_name"
 
-        case "$_patch_rc" in
-            0)
-                ok "caelestia CLI patched."
-                ;;
-            2)
-                ok "caelestia CLI already patched."
-                ;;
-            3)
-                # Reporting success here regardless of what happened meant the
-                # terminal-sequence bug this patch exists to fix could silently
-                # come back after an upstream release, with nothing to notice it.
-                warn "caelestia CLI patch no longer applies - upstream changed $theme_file."
-                warn "The terminal sequence fix is NOT active; please report this."
-                echo "Caelestia CLI Theme Sequence Patch (anchor missing)" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_patches.txt"
-                ;;
-            *)
-                warn "Failed to patch $theme_file (exit $_patch_rc; requires sudo)"
-                echo "Caelestia CLI Theme Sequence Patch" >> "${XDG_CACHE_HOME:-$HOME/.cache}/caelestia-kde/failed_patches.txt"
-                ;;
-        esac
+    if [[ -f "$account_icon" ]]; then
+        ln -sf "$account_icon" "$HOME/.face"
+        ln -sf "$account_icon" "$HOME/.face.icon"
+        info "Linked $account_icon -> $HOME/.face"
+        info "Linked $account_icon -> $HOME/.face.icon"
+        ok "User profile picture symlinks configured."
     else
-        warn "caelestia CLI not found, skipping patch."
+        info "No AccountsService avatar found at $account_icon. Skipping."
     fi
 }
 
-#
-#  ADD NEW TWEAKS ABOVE THIS LINE
-# To add a new tweak:
-#   1. Define a function: tweak_<name>() { ... }
-#   2. Call it in the main() section below
-#
-
-#
-# Main  apply all tweaks in order
-#
 if [[ "${1:-}" == "--list" ]]; then
     echo
     echo "Available tweaks:"
@@ -242,13 +233,13 @@ fi
 
 tweak_disable_kde_osd
 tweak_five_desktops
+tweak_remove_panels
+tweak_no_splash_screen
 tweak_default_shell
 tweak_default_scheme
-tweak_patch_caelestia_cli
+tweak_user_avatar_symlinks
 tweak_reload_kde
 
 echo
-echo -e "${GREEN}${RST}"
-echo -e "${GREEN}  All system tweaks applied successfully.${RST}"
-echo -e "${GREEN}${RST}"
+ok "All system tweaks applied."
 echo

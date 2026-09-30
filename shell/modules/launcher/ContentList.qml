@@ -9,6 +9,7 @@ import qs.components
 import qs.components.controls
 import qs.services
 import qs.utils
+import qs.modules.launcher.services
 
 Item {
     id: root
@@ -16,6 +17,7 @@ Item {
     required property var content
     required property DrawerVisibilities visibilities
     required property var panels
+    required property real maxWidth
     required property real maxHeight
     required property StyledTextField search
     required property int padding
@@ -27,7 +29,8 @@ Item {
     readonly property bool showWindowSwitcher: search.text.startsWith(`${GlobalConfig.launcher.actionPrefix}windows `)
     readonly property bool showKeybinds: search.text.startsWith(`${GlobalConfig.launcher.actionPrefix}keybinds `)
     readonly property bool showAnimations: search.text.startsWith(`${GlobalConfig.launcher.actionPrefix}animations `)
-    readonly property var currentList: showWallpapers ? wallpaperList.item : (showWindowSwitcher ? windowSwitcherList.item : (showAnimations ? animationsList.item : (showKeybinds ? keybindsList.item : appList.item)))
+    readonly property bool showAppsBrowser: root.state === "apps" && !search.text && Config.launcher.showBrowseOnEmpty
+    readonly property var currentList: showWallpapers ? wallpaperList.item : (showWindowSwitcher ? windowSwitcherList.item : (showAnimations ? animationsList.item : (showKeybinds ? keybindsList.item : (showAppsBrowser ? browser.item : appList.item))))
 
     readonly property var wallpaperTabs: {
         const res = [];
@@ -46,14 +49,24 @@ Item {
     clip: true
     state: showAnimations ? "animations" : (showWindowSwitcher ? "windowSwitcher" : (showKeybinds ? "keybinds" : (showWallpapers ? "wallpapers" : "apps")))
 
+    onShowWindowSwitcherChanged: {
+        if (!showWindowSwitcher) {
+            Windows.isSwitching = false;
+            Kwin.clearHighlight();
+        } else if (!Windows.isSwitching) {
+            Windows.selectedIndex = 0;
+            Windows.updateItems();
+        }
+    }
+
     states: [
         State {
             name: "apps"
 
             PropertyChanges {
                 target: root
-                implicitWidth: root.Tokens.sizes.launcher.itemWidth
-                implicitHeight: Math.min(root.maxHeight, appList.implicitHeight > 0 ? appList.implicitHeight : empty.implicitHeight)
+                implicitWidth: root.showAppsBrowser ? browser.implicitWidth : root.Tokens.sizes.launcher.itemWidth
+                implicitHeight: root.showAppsBrowser ? Math.min(root.maxHeight, Math.max(root.Tokens.sizes.launcher.browseMinHeight, Math.min(browser.implicitHeight, root.Tokens.sizes.launcher.browseHeight))) : Math.min(root.maxHeight, appList.implicitHeight > 0 ? appList.implicitHeight : empty.implicitHeight)
             }
         },
         State {
@@ -115,7 +128,7 @@ Item {
     }
 
     Behavior on state {
-        enabled: !root.visibilities.skipLauncherAnim
+        enabled: root.visibilities.launcher && !root.visibilities.skipLauncherAnim && root.opacity === 1 && !Visibilities.launcherInitialSearch
 
         SequentialAnimation {
             Anim {
@@ -155,24 +168,39 @@ Item {
         }
     }
 
-    // Each list owns its own `active`, derived from the state it belongs to.
-    // It used to be set from two places at once — `PropertyChanges` in the states
-    // and an imperative onStateChanged handler — which broke state restoration:
-    // entering a state captured the value the imperative write had just set, so
-    // leaving it "restored" active back to true and the old list stayed loaded,
-    // drawing on top of the new one. Binding to root.state (rather than the
-    // show* flags) keeps the existing cross-fade timing, since the state change
-    // itself is deferred by the Behavior below.
     Loader {
         id: appList
 
-        active: root.state === "apps"
+        active: root.state === "apps" && !root.showAppsBrowser
 
         anchors.fill: parent
 
         sourceComponent: AppList {
             search: root.search
             visibilities: root.visibilities
+        }
+    }
+
+    Loader {
+        id: browser
+
+        active: root.state === "apps"
+        visible: root.showAppsBrowser
+        opacity: root.showAppsBrowser ? 1 : 0
+
+        anchors.fill: parent
+
+        sourceComponent: AppBrowser {
+            visibilities: root.visibilities
+            maxWidth: root.maxWidth
+        }
+
+        Behavior on opacity {
+            enabled: root.visibilities.launcher && !root.visibilities.skipLauncherAnim
+
+            Anim {
+                type: Anim.DefaultEffects
+            }
         }
     }
 
@@ -362,7 +390,6 @@ Item {
     Loader {
         id: windowSwitcherList
 
-        asynchronous: true
         active: root.state === "windowSwitcher"
 
         anchors.top: parent.top
@@ -406,12 +433,10 @@ Item {
     Row {
         id: empty
 
-        /// The clipboard list is a mode of the app list rather than a state of
-        /// its own, so ask the list itself.
         readonly property bool cliphistMissing: root.currentList?.state === "clipboard" && !Clipboard.available
 
-        opacity: root.currentList?.count === 0 ? 1 : 0
-        scale: root.currentList?.count === 0 ? 1 : 0.5
+        opacity: (!root.showAppsBrowser && root.currentList?.count === 0) ? 1 : 0
+        scale: (!root.showAppsBrowser && root.currentList?.count === 0) ? 1 : 0.5
 
         spacing: Tokens.spacing.medium
         padding: Tokens.padding.large

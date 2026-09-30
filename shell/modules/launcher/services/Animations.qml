@@ -23,17 +23,15 @@ Searcher {
     Process {
         id: getAnimationsProc
 
-        running: typeof KWinActiveWindowBridge === "undefined"
-        command: ["find", Paths.absolutePath("~/.config/caelestia/animations"), "-maxdepth", "1", "-type", "f", "-name", "*.lua", "-print"]
+        running: false
+        command: ["sh", "-c", "ls -1 ~/.config/caelestia/animations/*.lua || true"]
         stdout: StdioCollector {
             onStreamFinished: {
                 let lines = text.trim().split("\n").filter(l => l.length > 0);
 
-                // Construct the model data
                 const result = [];
 
                 if (lines.length > 0) {
-                    // Add the default item that removes the dofile
                     result.push({
                         name: "Default (None)",
                         path: "default"
@@ -45,7 +43,6 @@ Searcher {
                     let filename = parts[parts.length - 1];
                     let name = filename.replace(".lua", "");
 
-                    // Capitalize first letter
                     name = name.charAt(0).toUpperCase() + name.slice(1);
 
                     result.push({
@@ -53,7 +50,6 @@ Searcher {
                         path: file
                     });
                 }
-                // Assign the result to Variants model
                 anims.model = result;
                 root.loaded();
             }
@@ -76,24 +72,7 @@ Searcher {
                     list.visibilities.launcher = false;
                 }
 
-                // Animation switching is Hyprland-only; no-op on KDE.
-                if (typeof KWinActiveWindowBridge !== "undefined") {
-                    console.log("Animations: animation switching is not supported on KDE");
-                    return;
-                }
-
-                // Remove existing dofile from hypr-user.lua
-                let script = "sed -i '/dofile(\".*\\/animations\\/.*\\.lua\")/d' ~/.config/caelestia/hypr-user.lua\n";
-
-                // Add new dofile if not default
-                if (path !== "default") {
-                    script += `echo "dofile(\\"${path}\\")" >> ~/.config/caelestia/hypr-user.lua\n`;
-                }
-
-                // Reload hyprland
-                script += "hyprctl reload\n";
-
-                Quickshell.execDetached(["sh", "-c", script]);
+                console.warn("Animations: animation switching is not supported on KDE");
             }
         }
     }

@@ -117,6 +117,16 @@ StyledRect {
                         }
                     },
                     MenuItem {
+                        visible: Config.utilities.showGifRecorder
+                        icon: "animated_images"
+                        text: qsTr("Record GIF")
+                        activeText: qsTr("Start")
+                        onClicked: {
+                            root.visibilities.utilities = false;
+                            Recorder.startGif();
+                        }
+                    },
+                    MenuItem {
                         icon: "screenshot_region"
                         text: qsTr("Use Spectacle")
                         activeText: qsTr("Spectacle")
@@ -243,21 +253,7 @@ StyledRect {
 
             StyledText {
                 Layout.fillWidth: true
-                text: {
-                    const elapsed = Recorder.elapsed;
-
-                    const hours = Math.floor(elapsed / 3600);
-                    const mins = Math.floor((elapsed % 3600) / 60);
-                    const secs = Math.floor(elapsed % 60).toString().padStart(2, "0");
-
-                    let time;
-                    if (hours > 0)
-                        time = `${hours}:${mins.toString().padStart(2, "0")}:${secs}`;
-                    else
-                        time = `${mins}:${secs}`;
-
-                    return qsTr("Recording %1").arg(time);
-                }
+                text: qsTr("Recording %1").arg(Units.formatDuration(Recorder.elapsed))
                 font: Tokens.font.body.medium
                 elide: Text.ElideMiddle
             }
@@ -280,7 +276,6 @@ StyledRect {
                     }
 
                     implicitWidth: {
-                        // Ensure even size so icon is centered properly
                         const h = label.implicitHeight + Tokens.padding.large * 2;
                         if (h % 2 !== 0)
                             return h + 1;
@@ -298,7 +293,6 @@ StyledRect {
                     onClicked: Recorder.stop()
 
                     implicitWidth: {
-                        // Ensure even size so icon is centered properly
                         const h = label.implicitHeight + Tokens.padding.large * 2;
                         if (h % 2 !== 0)
                             return h + 1;

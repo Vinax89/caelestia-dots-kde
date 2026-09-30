@@ -14,8 +14,7 @@ Searcher {
     id: root
 
     readonly property string currentNamePath: `${Paths.state}/wallpaper/path.txt`
-    readonly property list<string> smartArg: GlobalConfig.services.smartScheme ? [] : ["--no-smart"]
-    readonly property string fallback: Quickshell.shellPath("assets/wallpapers/Minimal-Paper.png")
+    readonly property string fallback: Quickshell.shellPath("assets/wallpaper.webp")
 
     property bool showPreview: false
     readonly property string current: showPreview ? previewPath : actualCurrent
@@ -82,9 +81,6 @@ Searcher {
     }
 
     function setRandom(): void {
-        // caelestia-cli's wallpaper command has no random ("-r") support for
-        // live/video wallpapers, so pick randomly ourselves and set it via the
-        // same path (setWallpaper) used for a specific wallpaper, which does.
         if (!root.list || root.list.length === 0) return;
         let idx = Math.floor(Math.random() * root.list.length);
         if (root.list.length > 1 && root.list[idx].path === actualCurrent)
@@ -118,15 +114,14 @@ Searcher {
         if (Images.isVideo(path)) {
             const thumb = thumbFor(path);
             if (thumb !== "") {
-                const script = 'caelestia wallpaper -f "$1" ' + root.smartArg.join(" ") + '; printf "%s" "$2" > "$3"';
+                const script = 'caelestia wallpaper -f "$1" ' + Colours.smartArg.join(" ") + '; printf "%s" "$2" > "$3"';
                 Quickshell.execDetached(["sh", "-c", script, "--", thumb, path, root.currentNamePath]);
                 syncPlasmaWallpaper(thumb);
             } else {
-                Quickshell.execDetached(["sh", "-c", 'printf "%s" "$1" > "$2"', "--", path, root.currentNamePath]);
-                // Still frame not ready yet — onVideoThumb() syncs Plasma once it is.
+                Quickshell.execDetached(["sh", "-c", 'printf "%s" > "$1"', "--", path, root.currentNamePath]);
             }
         } else {
-            Quickshell.execDetached(["caelestia", "wallpaper", "-f", path, ...smartArg]);
+            Quickshell.execDetached(["caelestia", "wallpaper", "-f", path, ...Colours.smartArg]);
             syncPlasmaWallpaper(path);
         }
     }
@@ -145,6 +140,9 @@ Searcher {
             '    d.writeConfig("Image", "file://" + ' + JSON.stringify(imagePath) + ');' +
             '}';
         Quickshell.execDetached(["qdbus6", "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script]);
+
+        if (GlobalConfig.lock.syncWallpaper)
+            Quickshell.execDetached(["kwriteconfig6", "--file", "kscreenlockerrc", "--group", "Greeter", "--group", "Wallpaper", "--group", "org.kde.image", "--group", "General", "--key", "Image", "file://" + imagePath]);
     }
 
     function preview(path: string): void {
@@ -170,13 +168,6 @@ Searcher {
         return path;
     }
 
-    // Video wallpapers have no still to show, so the pickers had nothing to draw
-    // and sat on a loading spinner forever. Extract a frame once and cache it
-    // beside the wallpaper caches, keyed the same way getThumbnailPath already
-    // described — that path was being computed but never produced by anything.
-    // What a picker should actually display for a wallpaper: the image itself, or
-    // a video's extracted frame once there is one. Returns "" for a video whose
-    // frame is still being made, so callers can show a placeholder meanwhile.
     function thumbFor(path: string): string {
         const p = String(path || "").replace(/^file:\/\//, "");
         if (p === "" || !Images.isVideo(p))
@@ -217,9 +208,9 @@ Searcher {
         if (out !== "") {
             const m = root.videoThumbs;
             m[path] = out;
-            root.videoThumbs = Object.assign({}, m);   // a copy, so bindings re-run
+            root.videoThumbs = Object.assign({}, m);
             if (path === root.actualCurrent) {
-                const script = 'caelestia wallpaper -f "$1" ' + root.smartArg.join(" ") + '; printf "%s" "$2" > "$3"';
+                const script = 'caelestia wallpaper -f "$1" ' + Colours.smartArg.join(" ") + '; printf "%s" "$2" > "$3"';
                 Quickshell.execDetached(["sh", "-c", script, "--", out, path, root.currentNamePath]);
                 syncPlasmaWallpaper(out);
             }
@@ -268,18 +259,21 @@ Searcher {
             let wall = text().trim();
             if (!wall) {
                 wall = root.fallback;
-                Quickshell.execDetached(["caelestia", "wallpaper", "-f", root.fallback, ...root.smartArg]);
+                Quickshell.execDetached(["caelestia", "wallpaper", "-f", root.fallback, ...Colours.smartArg]);
             }
             if (Images.isVideo(root.actualCurrent) && wall === root.getThumbnailPath(root.actualCurrent)) {
                 return;
             }
             root.actualCurrent = wall;
             root.previewColourLock = false;
+            if (!Images.isVideo(wall))
+                syncPlasmaWallpaper(wall);
         }
         onLoadFailed: {
             root.actualCurrent = root.fallback;
             root.previewColourLock = false;
-            Quickshell.execDetached(["caelestia", "wallpaper", "-f", root.fallback, ...root.smartArg]);
+            Quickshell.execDetached(["caelestia", "wallpaper", "-f", root.fallback, ...Colours.smartArg]);
+            syncPlasmaWallpaper(root.fallback);
         }
     }
 
@@ -295,7 +289,7 @@ Searcher {
     Process {
         id: getPreviewColoursProc
 
-        command: ["caelestia", "wallpaper", "-p", root.previewPath, ...root.smartArg]
+        command: ["caelestia", "wallpaper", "-p", root.previewPath, ...Colours.smartArg]
         stdout: StdioCollector {
             onStreamFinished: {
                 Colours.load(text, true);

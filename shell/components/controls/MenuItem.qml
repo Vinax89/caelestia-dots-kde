@@ -7,6 +7,7 @@ QtObject {
     property string activeIcon: icon
     property string activeText: text
     property bool visible: true
+    property var value
 
     signal clicked
 }

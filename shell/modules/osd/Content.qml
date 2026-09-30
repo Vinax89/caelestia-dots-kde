@@ -30,7 +30,6 @@ Item {
         anchors.centerIn: parent
         spacing: Tokens.spacing.medium
 
-        // Speaker volume
         WrappedLoader {
             Layout.alignment: Qt.AlignHCenter
             shouldBeActive: Config.osd.enableVolume !== false
@@ -59,7 +58,6 @@ Item {
             }
         }
 
-        // Microphone volume
         WrappedLoader {
             Layout.alignment: Qt.AlignHCenter
             shouldBeActive: Config.osd.enableMicrophone && (!Config.osd.enableBrightness || !root.visibilities.session)
@@ -88,7 +86,6 @@ Item {
             }
         }
 
-        // Brightness
         WrappedLoader {
             Layout.alignment: Qt.AlignHCenter
             shouldBeActive: Config.osd.enableBrightness
@@ -112,11 +109,9 @@ Item {
                 FilledSlider {
                     anchors.fill: parent
 
-                    icon: HyprSunset.active ? "bedtime" : `brightness_${(Math.round(value * 6) + 1)}`
+                    icon: `brightness_${(Math.round(value * 6) + 1)}`
                     value: root.brightness
                     onMoved: root.monitor?.setBrightness(value)
-                    enableIconTap: true
-                    onIconTapped: HyprSunset.toggle(5000)
                 }
             }
         }

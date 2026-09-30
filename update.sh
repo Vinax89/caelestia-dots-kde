@@ -1,52 +1,13 @@
 #!/usr/bin/env bash
-# ==============================================================
-#   Caelestia KDE Port - Unified Updater
-# ==============================================================
+export PATH="$HOME/.local/bin:$PATH"
 
 set -uo pipefail
-# shell-quality: allow-no-errexit -- every fallible step here is explicitly
-# routed through `|| die` (must stop) or `|| warn` (may continue), so errexit
-# would silently reclassify the `warn` cases as fatal and abandon a partially
-# applied update.
+# shell-quality: allow-no-errexit -- each update stage reports failure and preserves recovery.
 
-# Read the whole script before running any of it.
-#
-# This script replaces its own file: `git checkout` below rewrites update.sh in
-# place, and bash reads a script incrementally from a file offset, so a
-# length-changing update can make the remainder execute from the *new* bytes.
-# Wrapping the body in a compound command forces bash to parse the entire file
-# up front, which is the same guard install.sh uses. The closing brace is at the
-# end of the file.
-{
-
-# NOTE: ~/.local/bin is deliberately NOT prepended to PATH here. Update
-# verification resolves git, gpg and curl through PATH, and a user-writable
-# directory ahead of the system ones would let a dropped shim answer for them.
-# The export happens after verification, below.
-
-die()  { echo "[FATAL] $*" >&2; exit 1; }
-info() { echo "[INFO]  $*"; }
-ok()   { echo "[OK]    $*"; }
-warn() { echo "[WARN]  $*"; }
-
-# Verify a ref against the repository's pinned release signer.
-#
-# This delegates to scripts/verify-update-source.sh rather than reimplementing
-# the check. That script supports a pinned maintainer release-signing key and
-# falls back to GitHub's web-flow key; the copy that used to live here only ever
-# accepted web-flow, which attests that a commit was made through github.com but
-# identifies no signer at all -- so the weaker of two implementations was the one
-# actually gating updates.
-#
-# The anchor is read from the *current* (already-trusted) checkout, before the
-# new commit is checked out over it.
-verify_update_ref() {
-    local ref="$1"
-    local verifier="$BUNDLE_DIR/scripts/verify-update-source.sh"
-
-    [[ -r "$verifier" ]] || die "Missing update verifier: $verifier"
-    bash "$verifier" "$BUNDLE_DIR" "$ref" || die "Update ref $ref is not trusted"
-}
+source "$(dirname "${BASH_SOURCE[0]}")/scripts/lib/log.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/scripts/lib/privileges.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/scripts/lib/install-fs.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/scripts/lib/submodules.sh"
 
 section() {
     local title="$1"
@@ -56,30 +17,9 @@ section() {
     echo "-------------------------------------------------------------"
 }
 
-BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export BUNDLE_DIR
-EXPECTED_COMMIT="${CAELESTIA_UPDATE_COMMIT:-}"
-if [[ -z "$EXPECTED_COMMIT" && "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
-    cat >&2 <<'USAGE'
-[FATAL] Refusing mutable update: set CAELESTIA_UPDATE_COMMIT to a reviewed commit.
-
-This script updates an existing git checkout to one specific, reviewed commit.
-It deliberately will not follow a moving branch head.
-
-  For normal updates, use the release-tracking updater instead:
-      caelestia-update main
-
-  To pin this checkout to a commit you have reviewed:
-      CAELESTIA_UPDATE_COMMIT=<40-char-sha> ./update.sh
-
-  To list candidate commits:
-      git fetch origin && git log --oneline -20 origin/main
-USAGE
-    exit 1
-fi
+export BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$BUNDLE_DIR" || die "Could not enter $BUNDLE_DIR"
 
-# Prevent concurrent update runs in a private directory.
 LOCK_DIR="${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/caelestia"
 mkdir -p "$LOCK_DIR"
 chmod 700 "$LOCK_DIR"
@@ -100,7 +40,6 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
     git -C "$BUNDLE_DIR" fetch origin || warn "Failed to fetch from origin. Network issue?"
 
     STASHED=0
-    # Safely stash uncommitted changes to avoid merge conflicts
     if ! git -C "$BUNDLE_DIR" diff-index --quiet HEAD --; then
         warn "You have uncommitted changes in the repository."
         info "Stashing your local changes..."
@@ -108,33 +47,19 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
         STASHED=1
     fi
 
-    # Branch selection only matters on the unverified/mutable path. When
-    # CAELESTIA_UPDATE_COMMIT is set -- which the guard at the top of this
-    # script makes the normal case -- the commit fully determines what is
-    # checked out, and asking the user to pick a branch first was dead UI.
-    if [[ -n "$EXPECTED_COMMIT" ]]; then
-        [[ "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || die "CAELESTIA_UPDATE_COMMIT must be a full 40-character commit hash"
-        info "Fetching reviewed commit $EXPECTED_COMMIT..."
-        git -C "$BUNDLE_DIR" fetch --depth=1 origin "$EXPECTED_COMMIT" || die "Failed to fetch requested update commit"
-
-        # Verify the fetched object before it becomes the working tree. Checking
-        # out first put unverified files on disk and left the verification as an
-        # after-the-fact audit rather than a gate.
-        if [[ "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
-            info "Verifying signature on $EXPECTED_COMMIT..."
-            verify_update_ref "$EXPECTED_COMMIT"
+    if [ -n "${1:-}" ]; then
+        BRANCH="$1"
+        if [[ "$BRANCH" != "main" && "$BRANCH" != "dev" ]]; then
+            warn "Branch '$BRANCH' is not allowed. Falling back to main."
+            BRANCH="main"
         fi
-
-        info "Checking out reviewed commit $EXPECTED_COMMIT..."
-        git -C "$BUNDLE_DIR" checkout --detach "$EXPECTED_COMMIT" || die "Failed to checkout requested update commit"
+        info "Using provided branch: $BRANCH"
     else
-        if [ -n "${1:-}" ]; then
-            BRANCH="$1"
-            info "Using provided branch: $BRANCH"
-        elif [ -t 1 ]; then
+        if [ -t 1 ]; then
+            BRANCHES="main dev"
             echo
             info "Available remote branches (default: main):"
-            select BRANCH in main dev; do
+            select BRANCH in $BRANCHES; do
                 if [ -z "$REPLY" ]; then
                     BRANCH="main"
                     info "Defaulted to branch: $BRANCH"
@@ -153,31 +78,41 @@ if [ -d "$BUNDLE_DIR/.git" ]; then
             fi
             info "Auto-detected branch: $BRANCH (GUI Mode)"
         fi
+    fi
 
-        if [[ "$BRANCH" != "main" && "$BRANCH" != "dev" ]]; then
-            warn "Branch '$BRANCH' is not allowed. Falling back to main."
-            BRANCH="main"
-        elif ! git -C "$BUNDLE_DIR" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            warn "Remote branch '$BRANCH' not found. Falling back to main."
-            BRANCH="main"
-        fi
+    if [[ "$BRANCH" != "main" && "$BRANCH" != "dev" ]]; then
+        warn "Branch '$BRANCH' is not allowed. Falling back to main."
+        BRANCH="main"
+    elif ! git -C "$BUNDLE_DIR" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+        warn "Remote branch '$BRANCH' not found. Falling back to main."
+        BRANCH="main"
+    fi
 
-        info "Checking out $BRANCH..."
+    EXPECTED_COMMIT="${CAELESTIA_UPDATE_COMMIT:-}"
+    if [[ -n "$EXPECTED_COMMIT" ]]; then
+        [[ "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || die "Expected a full commit hash"
+        git -C "$BUNDLE_DIR" fetch origin "$EXPECTED_COMMIT" || die "Failed to fetch reviewed update"
+        UPDATE_REF="$EXPECTED_COMMIT"
+    else
+        UPDATE_REF="origin/$BRANCH"
+    fi
+    if [[ "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-0}" != "1" && "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
+        bash "$BUNDLE_DIR/scripts/verify-update-source.sh" "$BUNDLE_DIR" "$UPDATE_REF" || die "Update signature verification failed"
+    fi
+    info "Checking out $BRANCH..."
+    if [[ -n "$EXPECTED_COMMIT" ]]; then
+        git -C "$BUNDLE_DIR" checkout --detach "$UPDATE_REF" || die "Failed to checkout reviewed update"
+    else
         git -C "$BUNDLE_DIR" checkout "$BRANCH" || die "Failed to checkout $BRANCH"
-        info "Pulling latest changes for $BRANCH..."
-        git -C "$BUNDLE_DIR" pull --ff-only origin "$BRANCH" || die "Refusing non-fast-forward update for origin/$BRANCH"
     fi
 
-    # The pinned-commit path above already verified before checking out. The
-    # mutable-branch path can only verify after the fact, which is one of the
-    # reasons it requires CAELESTIA_ALLOW_UNVERIFIED_UPDATE to be reachable.
-    if [[ -z "$EXPECTED_COMMIT" && "${CAELESTIA_ALLOW_UNVERIFIED_UPDATE:-}" != "true" ]]; then
-        verify_update_ref HEAD
-    fi
+    info "Pulling latest changes for $BRANCH..."
+    git -C "$BUNDLE_DIR" merge --ff-only "$UPDATE_REF" || die "Update is not a fast-forward"
 
     if [[ -f "$BUNDLE_DIR/.gitmodules" ]]; then
-        info "Syncing and updating submodules..."
-        git -C "$BUNDLE_DIR" submodule sync --recursive || die "Failed to sync submodules"
+        info "Syncing submodules..."
+        prune_removed_submodules "$BUNDLE_DIR"
+        git -C "$BUNDLE_DIR" submodule sync --recursive >/dev/null 2>&1 || true
         git -C "$BUNDLE_DIR" submodule update --init --recursive || \
             die "Failed to initialize submodules"
     fi
@@ -191,72 +126,30 @@ else
     warn "Not a git repository. Skipping source code update."
 fi
 
-# Safe now that the tree has been verified: the shell's own helpers live here.
-export PATH="$HOME/.local/bin:$PATH"
-
 section "Step 2 - Core Updates"
 
 if [ ! -f "$BUNDLE_DIR/scripts/03-deploy-configs.sh" ] || [ ! -f "$BUNDLE_DIR/scripts/08-build-shell.sh" ]; then
     die "Critical internal scripts are missing from $BUNDLE_DIR/scripts/"
 fi
 
-# Cache sudo credentials once now so sub-scripts don't each re-prompt.
-# The keepalive loop refreshes the timestamp with -nv (non-interactive
-# extend) so it never expires, even during long CMake builds.
-#
-# When running without a terminal (e.g. launched from the shell UI), we
-# use ksshaskpass or pkexec for the initial prompt and export
-# SUDO_ASKPASS for every child process.
-
-if [ "$EUID" -ne 0 ]; then
-    # Determine the best interactive helper for the initial prompt. Root is
-    # optional for the update itself (the only root-requiring step, the
-    # workspace-tracker effect install, warns and continues), so a failed
-    # priming must not abort the whole update — e.g. when pkexec rejects the
-    # environment's SHELL or no polkit agent is reachable.
-    if [ -t 1 ]; then
-        sudo -v || warn "Could not prime sudo; continuing without root (system-level steps will be skipped)."
-    elif command -v ksshaskpass &> /dev/null; then
-        SUDO_ASKPASS="$(command -v ksshaskpass)"
-        export SUDO_ASKPASS
-        sudo -A -v || warn "Could not prime sudo; continuing without root (system-level steps will be skipped)."
-    elif command -v pkexec &> /dev/null; then
-        info "Requesting administrator privileges via pkexec..."
-        pkexec true || warn "Could not prime administrator privileges; continuing without root (system-level steps will be skipped)."
-    else
-        warn "No privilege helper available (terminal, ksshaskpass, pkexec); continuing without root — system-level steps will be skipped."
-    fi
-
-    # Background keepalive: refresh the sudo timestamp every 30 seconds.
-    # Using -nv instead of -v means it quietly extends the timestamp
-    # without ever re-prompting.
-    (
-        while kill -0 "$$" 2>/dev/null; do
-            sleep 30
-            sudo -nv 2>/dev/null || true
-        done
-    ) &
-    SUDO_KEEPER_PID=$!
-    trap 'kill "$SUDO_KEEPER_PID" 2>/dev/null || true' EXIT
+if [ -f "$HOME/.config/caelestia-kde/install.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$HOME/.config/caelestia-kde/install.env"
+    set +a
 fi
 
-# Apply config updates and rebuild the shell UI.  The native C++ plugin
-# backend talks directly to KWin/Wayland — no Python daemon or mock
-# hyprctl binary is involved.
+trap 'caelestia_stop_sudo_keepalive' EXIT
+
 bash "$BUNDLE_DIR/scripts/03-deploy-configs.sh" || die "Config deployment failed."
 
-info "Building Caelestia Shell UI..."
+info "Building the Caelestia shell UI..."
 bash "$BUNDLE_DIR/scripts/08-build-shell.sh" || die "Shell build failed."
 
-# Re-apply idempotent system tweaks (KDE settings, CLI patches, etc.)
-# so they survive package upgrades that may have overwritten patches.
 info "Re-applying system tweaks..."
 bash "$BUNDLE_DIR/scripts/09-system-tweaks.sh" || warn "System tweaks step reported errors (non-fatal)."
 
-# Kill the keepalive background process now that sudo is no longer needed
-if [ -n "${SUDO_KEEPER_PID:-}" ] && kill -0 "$SUDO_KEEPER_PID" 2>/dev/null; then
-    kill "$SUDO_KEEPER_PID" 2>/dev/null || true
-fi
+caelestia_stop_sudo_keepalive
 
 section "Update Completed Successfully"
 echo
@@ -277,14 +170,11 @@ else
     CAELESTIA_BIN="caelestia"
 fi
 
-# Resolve a reliable way to talk to the running shell instance.
-# Prefer the (now-patched) CLI; fall back to the path-based IPC wrapper.
 SHELL_IPC=""
 if [[ -x "$HOME/.local/bin/caelestia-shell-ipc" ]]; then
     SHELL_IPC="$HOME/.local/bin/caelestia-shell-ipc"
 fi
 
-# Kill the running shell – try CLI first, then the IPC wrapper, then pkill.
 if "$CAELESTIA_BIN" shell -k 2>/dev/null; then
     : # CLI succeeded
 elif [[ -n "$SHELL_IPC" ]] && "$SHELL_IPC" quit 2>/dev/null; then
@@ -295,32 +185,42 @@ fi
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/caelestia"
 SCHEME_FILE="$STATE_DIR/scheme.json"
-i=0
-while [[ $i -lt 15 && ! -s "$SCHEME_FILE" ]]; do
-    sleep 1
-    i=$((i + 1))
-done
 
-# Start the shell – the CLI was patched for path-based resolution during build.
-# Fall back to the IPC wrapper or direct quickshell if the CLI is unavailable.
-if command -v "$CAELESTIA_BIN" >/dev/null 2>&1; then
-    "$CAELESTIA_BIN" shell -d >/dev/null 2>&1 &
+QUICKSHELL_PATH="$(command -v quickshell 2>/dev/null || command -v qs 2>/dev/null || echo quickshell)"
+RESTART_SCRIPT="$BUNDLE_DIR/shell/scripts/restart_shell.sh"
+
+if [[ -x "$RESTART_SCRIPT" ]] && bash "$RESTART_SCRIPT" 2>/dev/null; then
+    : # Restarted via the KDE-managed autostart unit — env identical to login startup
 elif [[ -n "$SHELL_IPC" ]]; then
     "$SHELL_IPC" start 2>/dev/null &
+elif command -v systemd-run >/dev/null 2>&1; then
+    systemd-run --user --quiet --collect --unit=caelestia-shell \
+        --description="Caelestia Shell" \
+        --setenv=QML2_IMPORT_PATH="$HOME/.local/lib/qt6/qml:$HOME/.config/quickshell/caelestia" \
+        --setenv=CAELESTIA_LIB_DIR="$HOME/.local/lib/caelestia" \
+        --setenv=QS_NO_RELOAD_POPUP=1 \
+        --setenv=QS_DROP_EXPENSIVE_FONTS=1 \
+        --setenv=QS_DISABLE_CRASH_HANDLER=1 \
+        --setenv=QSG_RENDER_LOOP=threaded \
+        --setenv=QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000 \
+        -- "$QUICKSHELL_PATH" -n -p "$HOME/.config/quickshell/caelestia/shell.qml" &
 else
-    QUICKSHELL_PATH="$(command -v quickshell 2>/dev/null || command -v qs 2>/dev/null || echo quickshell)"
-    export QML2_IMPORT_PATH="$HOME/.local/lib/qt6/qml"
+    export QML2_IMPORT_PATH="$HOME/.local/lib/qt6/qml:$HOME/.config/quickshell/caelestia"
     export CAELESTIA_LIB_DIR="$HOME/.local/lib/caelestia"
-    stdbuf -oL -eL "$QUICKSHELL_PATH" -d -n -p "$HOME/.config/quickshell/caelestia/shell.qml" >/dev/null 2>&1 &
+    export QS_NO_RELOAD_POPUP=1
+    export QS_DROP_EXPENSIVE_FONTS=1
+    export QS_DISABLE_CRASH_HANDLER=1
+    export QSG_RENDER_LOOP=threaded
+    export QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
+    stdbuf -oL -eL "$QUICKSHELL_PATH" -n -p "$HOME/.config/quickshell/caelestia/shell.qml" >/dev/null 2>&1 &
 fi
 
-sleep 1
-if ! pgrep -x quickshell >/dev/null 2>&1 && ! pgrep -x qs >/dev/null 2>&1; then
-    echo "Shell restart failed: no quickshell process is running." >&2
-    exit 1
+if ! wait_for_nonempty_file "$SCHEME_FILE" 15; then
+    warn "The restarted shell has not written $SCHEME_FILE yet; the lock screen may fall back to its default colors."
 fi
+
 echo "Shell restarted successfully!"
 echo
-echo "If the shell doesn't start, please restart it manually by running: $CAELESTIA_BIN shell -d"
-
-}
+echo "If the shell doesn't start, restart it with the same wrapper the shell uses:"
+echo "  bash \"\$HOME/.config/quickshell/caelestia/scripts/restart_shell.sh\""
+echo "Check logs by running: $CAELESTIA_BIN shell -l"

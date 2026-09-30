@@ -6,9 +6,11 @@ import Qt.labs.folderlistmodel
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Caelestia
 import Caelestia.Config
 import qs.components
 import qs.components.containers
+import qs.components.controls
 import qs.components.effects
 import qs.services
 import qs.utils
@@ -20,19 +22,92 @@ Item {
 
     property int cellWidth: 100
     property int cellHeight: 120
+    property var savedOrder: []
+    property bool layoutLoaded: false
+    // True while an icon's inline rename editor is open; the background window
+    // raises its layer-shell keyboard focus on this so the editor can type.
+    property Item renamingDelegate: null
 
-    // How many columns fit given the grid width
-    function getIconCols() { return Math.max(1, Math.floor(gridItem.width / root.cellWidth)); }
+    readonly property bool renameActive: renamingDelegate !== null
 
-    // How many rows are occupied
-    function getIconRows() { return Math.max(1, Math.floor(gridItem.height / root.cellHeight)); }
+    function getIconCols(): int {
+        return Math.max(1, Math.floor(gridItem.width / root.cellWidth));
+    }
+
+    function getIconRows(): int {
+        return Math.max(1, Math.floor(gridItem.height / root.cellHeight));
+    }
+
+    function saveLayout(): void {
+        if (!layoutLoaded)
+            return;
+        let arr = [];
+        for (let i = 0; i < instantiator.count; i++) {
+            let item = instantiator.objectAt(i);
+            if (item)
+                arr.push({ name: item.fileName, col: item.col, row: item.row });
+        }
+        saveProc.jsonContent = JSON.stringify(arr);
+        saveProc.running = true;
+    }
+
+    function isCellFree(c: int, r: int, ignoreItem: Item): bool {
+        for (let i = 0; i < instantiator.count; i++) {
+            let item = instantiator.objectAt(i);
+            if (item && item !== ignoreItem && item.col === c && item.row === r)
+                return false;
+        }
+        return true;
+    }
+
+    function findFreeCell(): var {
+        for (let r = 0; r < 1000; r++) {
+            for (let c = 0; c < getIconCols(); c++) {
+                if (isCellFree(c, r, null))
+                    return { col: c, row: r };
+            }
+        }
+        return { col: 0, row: 0 };
+    }
+
+    function runFileOp(args: var): void {
+        fileOpProc.commandLine = args;
+        fileOpProc.running = true;
+    }
+
+    function trashIcon(path: string): void {
+        if (path.length === 0)
+            return;
+        runFileOp(["kioclient", "move", path, "trash:/"]);
+    }
+
+    function renameIcon(oldPath: string, newName: string): void {
+        const idx = Math.max(oldPath.lastIndexOf("/"), 0);
+        const dir = oldPath.substring(0, idx);
+        const trimmed = newName.trim();
+        if (trimmed.length === 0 || trimmed === oldPath.substring(idx + 1))
+            return;
+        // Stay inside the desktop folder: no separators, no relative walks.
+        if (trimmed === "." || trimmed === ".." || trimmed.includes("/"))
+            return;
+        runFileOp(["kioclient", "move", oldPath, dir + "/" + trimmed]);
+    }
+
+    function iconAt(x: real, y: real): bool {
+        if (!visible)
+            return false;
+        const c = Math.floor((x - gridItem.x) / root.cellWidth);
+        const r = Math.floor((y - gridItem.y) / root.cellHeight);
+        for (let i = 0; i < instantiator.count; i++) {
+            const item = instantiator.objectAt(i);
+            if (item && item.col === c && item.row === r)
+                return true;
+        }
+        return false;
+    }
 
     anchors.fill: parent
     visible: GlobalConfig.forScreen(screenData.name).background.enabled && GlobalConfig.forScreen(screenData.name).background.wallpaperEnabled && GlobalConfig.forScreen(screenData.name).background.desktopIconsEnabled
-
-    property var savedOrder: []
-
-    property bool layoutLoaded: false
 
     Component.onCompleted: {
         loadLayoutProc.running = true;
@@ -41,7 +116,7 @@ Item {
     Process {
         id: loadLayoutProc
 
-        command: ["cat", Quickshell.env("HOME") + "/.local/share/caelestia/desktop_layout.json"]
+        command: ["sh", "-c", "cat ~/.local/share/caelestia/desktop_layout.json 2>/dev/null || echo '[]'"]
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
@@ -50,10 +125,10 @@ Item {
                     root.savedOrder = [];
                 }
                 root.layoutLoaded = true;
-                // Reposition existing items if they were loaded before layout
                 for (var i = 0; i < instantiator.count; i++) {
                     var item = instantiator.objectAt(i);
-                    if (item) item.initPosition();
+                    if (item)
+                        item.initPosition();
                 }
             }
         }
@@ -67,51 +142,32 @@ Item {
         command: ["python3", "-c", "import sys, os; d = os.path.dirname(sys.argv[1]); os.makedirs(d, exist_ok=True) if d else None; open(sys.argv[1], 'w').write(sys.argv[2])", Quickshell.env("HOME") + "/.local/share/caelestia/desktop_layout.json", jsonContent]
     }
 
-    function saveLayout() {
-        if (!layoutLoaded) return;
-        let arr = [];
-        for (let i = 0; i < instantiator.count; i++) {
-            let item = instantiator.objectAt(i);
-            if (item) {
-                arr.push({ name: item.fileName, col: item.col, row: item.row });
-            }
-        }
-        saveProc.jsonContent = JSON.stringify(arr);
-        saveProc.running = true;
-    }
+    Process {
+        id: fileOpProc
 
-    function isCellFree(c, r, ignoreItem) {
-        for (let i = 0; i < instantiator.count; i++) {
-            let item = instantiator.objectAt(i);
-            if (item && item !== ignoreItem && item.col === c && item.row === r) {
-                return false;
-            }
-        }
-        return true;
-    }
+        property var commandLine: []
+        property string errorText: ""
 
-    function findFreeCell() {
-        console.log("findFreeCell called. getIconCols(): " + getIconCols() + ", root.width: " + root.width + ", count: " + instantiator.count);
-        for (let r = 0; r < 1000; r++) {
-            for (let c = 0; c < getIconCols(); c++) {
-                if (isCellFree(c, r, null)) {
-                    console.log("findFreeCell returning: " + c + ", " + r);
-                    return {col: c, row: r};
-                }
-            }
+        command: commandLine
+        stderr: StdioCollector {
+            onStreamFinished: fileOpProc.errorText = text.trim()
         }
-        return {col: 0, row: 0};
+        onExited: (exitCode) => {
+            if (exitCode !== 0)
+                Toaster.toast(qsTr("File operation failed"),
+                    fileOpProc.errorText.length > 0 ? fileOpProc.errorText : qsTr("kioclient could not complete the request"),
+                    "error");
+            fileOpProc.errorText = "";
+        }
     }
 
     Item {
         id: gridItem
 
-        anchors.fill: parent
-
         readonly property int barZone: Visibilities.bars.get(root.screenData.name)?.visualThickness ?? (Tokens.sizes.bar.innerWidth + Math.max(Tokens.padding.small, Config.border.thickness))
-
         readonly property int baseMargin: Tokens.padding.large * 2
 
+        anchors.fill: parent
         anchors.margins: baseMargin
         anchors.leftMargin: Config.bar.position === "left" ? baseMargin + barZone : baseMargin
         anchors.rightMargin: Config.bar.position === "right" ? baseMargin + barZone : baseMargin
@@ -131,41 +187,62 @@ Item {
             onObjectAdded: (index, object) => {
                 object.parent = gridItem;
             }
-            onObjectRemoved: (index, object) => {
-                object.destroy();
-            }
 
             delegate: Item {
                 id: delegateItem
 
-                width: root.cellWidth
-                height: root.cellHeight
-
                 required property string fileName
-
                 required property string filePath
-
                 required property bool fileIsDir
-
                 required property string fileSuffix
 
                 property string path: filePath.replace("file://", "")
-
                 property string desktopName: fileName
-
                 property string desktopIcon: ""
-
                 property int col: -1
-
                 property int row: -1
+                property bool renaming: false
 
-                x: col * root.cellWidth + (dragHandler.active ? dragHandler.translation.x : 0)
-                y: row * root.cellHeight + (dragHandler.active ? dragHandler.translation.y : 0)
+                readonly property DesktopEntry desktopEntry: {
+                    if (!fileName.toLowerCase().endsWith(".desktop"))
+                        return null;
+                    const cleanId = fileName.endsWith(".desktop") ? fileName.slice(0, -8) : fileName;
+                    return DesktopEntries.applications.values.find(e => e.id === fileName || e.id === cleanId || e.id + ".desktop" === fileName)
+                        ?? DesktopEntries.heuristicLookup(cleanId)
+                        ?? null;
+                }
 
-                z: dragHandler.active ? 10 : 1
+                readonly property string iconSetBase: Qt.resolvedUrl(Quickshell.shellDir + "/assets/icons/yet-another-monochrome-icon-set")
+                property bool useMaterialYouIcons: GlobalConfig.forScreen(screenData.name).background.materialYouIconsEnabled
+                property bool useVibrantIcons: GlobalConfig.forScreen(screenData.name).background.materialYouIconsVibrant
 
-                function initPosition() {
-                    if (col !== -1 && row !== -1) return; // already init
+                function startRename(): void {
+                    if (root.renamingDelegate && root.renamingDelegate !== delegateItem)
+                        root.renamingDelegate.cancelRename();
+                    root.renamingDelegate = delegateItem;
+                    renaming = true;
+                    renameField.text = fileName;
+                    renameField.forceActiveFocus();
+                }
+
+                function commitRename(): void {
+                    if (!renaming)
+                        return;
+                    renaming = false;
+                    if (root.renamingDelegate === delegateItem)
+                        root.renamingDelegate = null;
+                    root.renameIcon(path, renameField.text);
+                }
+
+                function cancelRename(): void {
+                    renaming = false;
+                    if (root.renamingDelegate === delegateItem)
+                        root.renamingDelegate = null;
+                }
+
+                function initPosition(): void {
+                    if (col !== -1 && row !== -1)
+                        return;
 
                     let targetCol = -1;
                     let targetRow = -1;
@@ -190,13 +267,89 @@ Item {
                     }
                 }
 
-                Component.onCompleted: { Logger.log("DELEGATE CREATED FOR: " + fileName);
-                    if (root.layoutLoaded) {
+                function getIconName(isDir: bool, filename: string, suffix: string): string {
+                    if (isDir)
+                        return "folder";
+                    const ext = suffix.toLowerCase();
+                    const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"];
+                    const videoExts = ["mp4", "mkv", "webm", "avi", "mov"];
+                    const archiveExts = ["zip", "tar", "gz", "rar", "7z"];
+                    const audioExts = ["mp3", "wav", "flac", "ogg"];
+                    const codeExts = ["qml", "js", "html", "css", "py", "sh", "cpp", "c", "h", "json"];
+
+                    if (ext === "pdf")
+                        return "application-pdf";
+                    if (filename.toLowerCase().endsWith(".desktop"))
+                        return desktopIcon || desktopEntry?.icon || "application-x-executable";
+                    if (imageExts.includes(ext))
+                        return "image-x-generic";
+                    if (videoExts.includes(ext))
+                        return "video-x-generic";
+                    if (archiveExts.includes(ext))
+                        return "package-x-generic";
+                    if (audioExts.includes(ext))
+                        return "audio-x-generic";
+                    if (codeExts.includes(ext))
+                        return "text-x-script";
+
+                    return "text-x-generic";
+                }
+
+                function getIconSource(isDir: bool, filename: string, suffix: string): string {
+                    if (filename.toLowerCase().endsWith(".desktop")) {
+                        const iconVal = desktopEntry?.icon || desktopIcon;
+                        if (iconVal !== "") {
+                            if (iconVal.startsWith("/"))
+                                return "file://" + iconVal;
+                            if (useMaterialYouIcons)
+                                return iconSetBase + "/apps/scalable/" + iconVal + ".svg";
+                            return Quickshell.iconPath(iconVal, "application-x-executable");
+                        }
+                    }
+                    const iconName = getIconName(isDir, filename, suffix);
+                    if (useMaterialYouIcons) {
+                        if (isDir)
+                            return iconSetBase + "/places/scalable/folder.svg";
+                        return iconSetBase + "/mimetypes/scalable/" + iconName + ".svg";
+                    }
+                    return "image://icon/" + iconName;
+                }
+
+                function getFallbackIconSource(isDir: bool, filename: string, suffix: string): string {
+                    if (filename.toLowerCase().endsWith(".desktop")) {
+                        const iconVal = desktopEntry?.icon || desktopIcon;
+                        if (iconVal !== "") {
+                            if (iconVal.startsWith("/"))
+                                return "file://" + iconVal;
+                            return Quickshell.iconPath(iconVal, "application-x-executable");
+                        }
+                    }
+                    return "image://icon/" + getIconName(isDir, filename, suffix);
+                }
+
+                function launch(): void {
+                    if (delegateItem.desktopEntry)
+                        Launch.launchEntry(delegateItem.desktopEntry);
+                    else
+                        Launch.exec(["xdg-open", path]);
+                }
+
+                width: root.cellWidth
+                height: root.cellHeight
+                x: col * root.cellWidth + (dragHandler.active ? dragHandler.translation.x : 0)
+                y: row * root.cellHeight + (dragHandler.active ? dragHandler.translation.y : 0)
+                z: dragHandler.active ? 10 : 1
+
+                Component.onCompleted: {
+                    if (root.layoutLoaded)
                         initPosition();
-                    }
-                    if (fileName.toLowerCase().endsWith(".desktop")) {
+                    if (fileName.toLowerCase().endsWith(".desktop"))
                         desktopInfoProc.running = true;
-                    }
+                }
+
+                Component.onDestruction: {
+                    if (root.renamingDelegate === delegateItem)
+                        root.renamingDelegate = null;
                 }
 
                 Process {
@@ -227,84 +380,11 @@ Item {
                                         iconFound = true;
                                     }
                                 }
-                                if (nameFound && iconFound) break;
+                                if (nameFound && iconFound)
+                                    break;
                             }
                         }
                     }
-                }
-
-                function getIconName(isDir, filename, suffix) {
-                    if (isDir) return "folder";
-                    const ext = suffix.toLowerCase();
-                    const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"];
-                    const videoExts = ["mp4", "mkv", "webm", "avi", "mov"];
-                    const archiveExts = ["zip", "tar", "gz", "rar", "7z"];
-                    const audioExts = ["mp3", "wav", "flac", "ogg"];
-                    const codeExts = ["qml", "js", "html", "css", "py", "sh", "cpp", "c", "h", "json"];
-
-                    if (ext === "pdf") return "application-pdf";
-                    if (filename.toLowerCase().endsWith(".desktop")) return desktopIcon || "application-x-executable";
-                    if (imageExts.includes(ext)) return "image-x-generic";
-                    if (videoExts.includes(ext)) return "video-x-generic";
-                    if (archiveExts.includes(ext)) return "package-x-generic";
-                    if (audioExts.includes(ext)) return "audio-x-generic";
-                    if (codeExts.includes(ext)) return "text-x-script";
-
-                    return "text-x-generic";
-                }
-
-                // Returns the search directories within the icon set, ordered by priority
-                readonly property string iconSetBase: Qt.resolvedUrl(Quickshell.shellDir + "/assets/icons/yet-another-monochrome-icon-set")
-
-                readonly property var iconSetDirs: ["apps/scalable", "mimetypes/scalable", "places/scalable", "actions/scalable", "devices/scalable", "status/scalable"]
-
-                function getMaterialYouIconUrl(iconName) {
-                    if (!iconName) return "";
-                    for (let i = 0; i < iconSetDirs.length; i++) {
-                        let url = iconSetBase + "/" + iconSetDirs[i] + "/" + iconName + ".svg";
-                        // Qt.resolvedUrl normalises it; we return it for use as Image.source
-                        return url; // try first candidate; Image will report Error and we fallback
-                    }
-                    return "";
-                }
-
-                function getMaterialYouIconUrlByPriority(iconName) {
-                    // Build ordered candidate list: apps first (for .desktop icons), then mimetypes, then places
-                    if (!iconName) return "";
-                    let candidates = [];
-                    for (let i = 0; i < iconSetDirs.length; i++) {
-                        candidates.push(iconSetBase + "/" + iconSetDirs[i] + "/" + iconName + ".svg");
-                    }
-                    return candidates;
-                }
-
-                property bool useMaterialYouIcons: GlobalConfig.forScreen(screenData.name).background.materialYouIconsEnabled
-
-                property bool useVibrantIcons: GlobalConfig.forScreen(screenData.name).background.materialYouIconsVibrant
-
-                function getIconSource(isDir, filename, suffix) {
-                    if (filename.toLowerCase().endsWith(".desktop") && desktopIcon !== "") {
-                        if (desktopIcon.startsWith("/")) return "file://" + desktopIcon;
-                        if (useMaterialYouIcons) {
-                            return iconSetBase + "/apps/scalable/" + desktopIcon + ".svg";
-                        }
-                        return Quickshell.iconPath(desktopIcon, "application-x-executable");
-                    }
-                    const iconName = getIconName(isDir, filename, suffix);
-                    if (useMaterialYouIcons) {
-                        // For generic types, mimetypes dir has them; for folder, places dir
-                        if (isDir) return iconSetBase + "/places/scalable/folder.svg";
-                        return iconSetBase + "/mimetypes/scalable/" + iconName + ".svg";
-                    }
-                    return "image://icon/" + iconName;
-                }
-
-                function getFallbackIconSource(isDir, filename, suffix) {
-                    if (filename.toLowerCase().endsWith(".desktop") && desktopIcon !== "") {
-                        if (desktopIcon.startsWith("/")) return "file://" + desktopIcon;
-                        return Quickshell.iconPath(desktopIcon, "application-x-executable");
-                    }
-                    return "image://icon/" + getIconName(isDir, filename, suffix);
                 }
 
                 Rectangle {
@@ -313,7 +393,11 @@ Item {
                     opacity: mouseArea.containsMouse || dragHandler.active ? 0.12 : 0
                     radius: Tokens.rounding.medium
 
-                    Behavior on opacity { NumberAnimation { duration: 100 } }
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: 100
+                        }
+                    }
                 }
 
                 ColumnLayout {
@@ -324,37 +408,42 @@ Item {
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+
                         Image {
                             id: iconImage
 
                             anchors.centerIn: parent
-                            width: 64; height: 64
-                            source: getIconSource(fileIsDir, fileName, fileSuffix)
+                            width: 64
+                            height: 64
+                            source: delegateItem.getIconSource(delegateItem.fileIsDir, delegateItem.fileName, delegateItem.fileSuffix)
                             fillMode: Image.PreserveAspectFit
-                            // Tint with the shell's primary accent when Material You icons are active
-                            layer.enabled: useMaterialYouIcons
+                            layer.enabled: delegateItem.useMaterialYouIcons
                             layer.effect: Colouriser {
                                 sourceColor: "black"
                                 colorizationColor: {
                                     let c = Colours.palette.m3primary;
-                                    if (useVibrantIcons) {
+                                    if (delegateItem.useVibrantIcons)
                                         return Qt.hsla(c.hslHue, 1.0, Math.max(0.4, Math.min(0.6, c.hslLightness)), c.a);
-                                    }
                                     return c;
                                 }
                             }
-                            // If the Material You SVG is missing, fall back to KDE icon
                             onStatusChanged: {
-                                if (status === Image.Error && useMaterialYouIcons) {
+                                if (status === Image.Error && delegateItem.useMaterialYouIcons) {
                                     layer.enabled = false;
-                                    source = getFallbackIconSource(fileIsDir, fileName, fileSuffix);
+                                    source = delegateItem.getFallbackIconSource(delegateItem.fileIsDir, delegateItem.fileName, delegateItem.fileSuffix);
                                 }
                             }
                         }
                     }
+
                     Text {
+                        visible: !delegateItem.renaming
                         Layout.fillWidth: true
-                        text: fileName.toLowerCase().endsWith(".desktop") ? desktopName : fileName
+                        text: {
+                            if (delegateItem.fileName.toLowerCase().endsWith(".desktop"))
+                                return delegateItem.desktopEntry?.name || delegateItem.desktopName;
+                            return delegateItem.fileName;
+                        }
                         color: Colours.palette.m3onSurface
                         font: Tokens.font.body.small
                         horizontalAlignment: Text.AlignHCenter
@@ -364,27 +453,38 @@ Item {
                         style: Text.Outline
                         styleColor: Colours.palette.m3surface
                     }
+
+                    StyledTextField {
+                        id: renameField
+
+                        visible: delegateItem.renaming
+                        Layout.fillWidth: true
+                        onAccepted: delegateItem.commitRename()
+                        onActiveFocusChanged: {
+                            // Clicking anywhere outside the editor cancels the rename.
+                            if (!activeFocus && delegateItem.renaming)
+                                delegateItem.cancelRename();
+                        }
+                        Keys.onEscapePressed: delegateItem.cancelRename()
+                    }
                 }
 
                 DragHandler {
                     id: dragHandler
 
-                    target: null
-
                     property real lastTranslationX: 0
-
                     property real lastTranslationY: 0
 
+                    target: null
+                    enabled: !delegateItem.renaming
                     onTranslationChanged: {
                         if (active) {
                             lastTranslationX = translation.x;
                             lastTranslationY = translation.y;
                         }
                     }
-
                     onActiveChanged: {
                         if (!active) {
-                            // Snap to nearest grid cell
                             let dropX = col * root.cellWidth + lastTranslationX + delegateItem.width / 2;
                             let dropY = row * root.cellHeight + lastTranslationY + delegateItem.height / 2;
                             let newCol = Math.floor(dropX / root.cellWidth);
@@ -400,12 +500,17 @@ Item {
                                     for (let r = Math.max(0, newRow - rad); r <= Math.min(root.getIconRows() - 1, newRow + rad); r++) {
                                         for (let c = Math.max(0, newCol - rad); c <= Math.min(root.getIconCols() - 1, newCol + rad); c++) {
                                             if (root.isCellFree(c, r, delegateItem)) {
-                                                newCol = c; newRow = r; found = true; break;
+                                                newCol = c;
+                                                newRow = r;
+                                                found = true;
+                                                break;
                                             }
                                         }
-                                        if (found) break;
+                                        if (found)
+                                            break;
                                     }
-                                    if (found) break;
+                                    if (found)
+                                        break;
                                 }
                             }
 
@@ -424,16 +529,37 @@ Item {
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: (mouse) => {
-                        if (mouse.button === Qt.LeftButton) {
-                            if (fileName.toLowerCase().endsWith(".desktop")) {
-                                Quickshell.execDetached(["kioclient", "exec", path]);
-                            } else {
-                                Quickshell.execDetached(["xdg-open", path]);
-                            }
+                        if (mouse.button === Qt.RightButton) {
+                            // The click that dismisses the editor should not
+                            // immediately open a new menu on the same icon.
+                            if (!delegateItem.renaming)
+                                iconMenu.openFor(delegateItem, mouse.x, mouse.y);
+                            return;
                         }
+                        if (delegateItem.renaming) {
+                            renameField.forceActiveFocus();
+                            return;
+                        }
+                        if (root.renameActive) {
+                            // Another icon's editor is open: click outside it
+                            // cancels the rename instead of opening the file.
+                            root.renamingDelegate.cancelRename();
+                            return;
+                        }
+                        delegateItem.launch();
                     }
                 }
             }
         }
+    }
+
+    DesktopIconContextMenu {
+        id: iconMenu
+
+        onRenameRequested: (delegateTarget) => {
+            if (delegateTarget)
+                delegateTarget.startRename();
+        }
+        onTrashRequested: path => root.trashIcon(path)
     }
 }

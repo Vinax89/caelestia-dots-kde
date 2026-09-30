@@ -15,11 +15,17 @@ StackView {
     required property PopoutState popouts
     required property QsMenuHandle trayItem
 
-    implicitWidth: currentItem?.implicitWidth ?? 0
-    implicitHeight: currentItem?.implicitHeight ?? 0
+    property real scaleOffset: 1.0
+    property real fontScale: 1.0
+    property bool _isSidebarOpen: false
+
+    implicitWidth: (currentItem as SubMenu)?.hasChildren ? currentItem.implicitWidth : -Tokens.padding.extraLargeIncreased * root.scaleOffset
+    implicitHeight: (currentItem as SubMenu)?.hasChildren ? currentItem.implicitHeight : -Tokens.padding.extraLargeIncreased * root.scaleOffset
 
     initialItem: SubMenu {
         handle: root.trayItem
+        scaleOffset: root.scaleOffset
+        fontScale: root.fontScale
     }
 
     pushEnter: NoAnim {}
@@ -43,22 +49,14 @@ StackView {
         id: menu
 
         required property QsMenuHandle handle
+        readonly property bool hasChildren: menuOpener.children.values.some(e => !e.isSeparator)
         property bool isSubMenu
         property bool shown
         property int groupRebuildCount: 0
         property real perfOpenStartedAt: 0
 
-    readonly property real masterScale: !isNaN(GlobalConfig.bar.previewScale) ? GlobalConfig.bar.previewScale : 1.0
-
-    readonly property real elementOffset: GlobalConfig.bar.perElementPreviewScale ? (!isNaN(GlobalConfig.bar.previewScales.trayMenu) ? GlobalConfig.bar.previewScales.trayMenu : 0.0) : 0.0
-
-    readonly property real barScaleOffset: GlobalConfig.bar.previewScaleWithBar ? (!isNaN(GlobalConfig.bar.scale) ? GlobalConfig.bar.scale : 1.0) : 1.0
-
-    readonly property real scaleOffset: Math.max(0.1, (masterScale + elementOffset) * barScaleOffset)
-
-    readonly property real elementFontOffset: GlobalConfig.bar.perElementFontScale ? (!isNaN(GlobalConfig.bar.previewFontScales.trayMenu) ? GlobalConfig.bar.previewFontScales.trayMenu : 0.0) : 0.0
-
-    readonly property real fontScale: Math.max(0.1, scaleOffset + (!isNaN(GlobalConfig.bar.fontScaleOffset) ? GlobalConfig.bar.fontScaleOffset : 0.0) + elementFontOffset)
+        required property real scaleOffset
+        required property real fontScale
 
         padding: Tokens.padding.small * scaleOffset
         spacing: Tokens.spacing.small * scaleOffset
@@ -150,7 +148,6 @@ StackView {
             onObjectAdded: menu.queueUpdateGroups()
 
             onObjectRemoved: menu.queueUpdateGroups()
-            // In case the model itself changes completely
 
             onModelChanged: menu.queueUpdateGroups()
         }
@@ -215,7 +212,9 @@ StackView {
                                             if (entry.hasChildren)
                                                 root.push(subMenuComp.createObject(null, {
                                                     handle: entry,
-                                                    isSubMenu: true
+                                                    isSubMenu: true,
+                                                    scaleOffset: root.scaleOffset,
+                                                    fontScale: root.fontScale
                                                 }));
                                             else {
                                                 item.modelData.triggered();

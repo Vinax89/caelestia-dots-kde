@@ -11,7 +11,10 @@ import qs.utils
 Singleton {
     id: root
 
-    enum Action {
+    // The single snip-action enum. Lives next to the command builder so the
+    // switch and its values can't drift apart. UI files reference it via
+    // ScreenshotAction.SnipAction.
+    enum SnipAction {
         Copy,
         Edit,
         Search,
@@ -28,12 +31,11 @@ Singleton {
         return str.replace(/'/g, "'\\''");
     }
 
-    function getCommand(x, y, width, height, screenshotPath, action, saveDir = "") {
-        if (action === ScreenshotAction.Action.Search && !/^https:\/\/[^\s]+$/.test(root.fileUploadApiEndpoint)) {
-            console.warn("[Region Selector] Refusing non-HTTPS upload endpoint");
-            return;
-        }
-        // Set command for action
+    function getScript(x, y, width, height, screenshotPath, action, saveDir = "") {
+        if (action === ScreenshotAction.SnipAction.Search
+                && (!/^https:\/\/[^\s]+$/.test(root.fileUploadApiEndpoint)
+                    || !/^https:\/\/[^\s]+$/.test(root.imageSearchEngineBaseUrl)))
+            return "false";
         const rx = Math.round(x);
         const ry = Math.round(y);
         const rw = Math.round(width);
@@ -43,19 +45,17 @@ Singleton {
             + `-crop ${rw}x${rh}+${rx}+${ry} +repage`
         const cropToFile = (outPath) => `${cropBase} '${escapeShellStr(outPath)}'`
         const cleanup = `rm -f '${escapeShellStr(screenshotPath)}'`
-        const annotationCommand = `swappy -f -`; // default to swappy
+        const annotationCommand = `swappy -f -`;
         const uploadAndGetUrl = (filePath) => {
-            return `curl --fail --silent --show-error --max-time 30 -sF files[]=@'${escapeShellStr(filePath)}' "$1" | jq -er '.files[0].url'`
+            return `curl -sF files[]=@'${escapeShellStr(filePath)}' '${escapeShellStr(root.fileUploadApiEndpoint)}' | jq -r '.files[0].url'`
         }
 
         const rawSaveDir = saveDir;
 
         switch (action) {
-            case ScreenshotAction.Action.Copy: {
+            case ScreenshotAction.SnipAction.Copy: {
                 let saveDir = rawSaveDir === "" ? "~/Pictures/Screenshots" : rawSaveDir;
-                return [
-                    "bash", "-c",
-                    `set -euo pipefail; ` +
+                return `set -euo pipefail; ` +
                     `SAVE_DIR='${escapeShellStr(saveDir)}'; ` +
                     `SAVE_DIR="\${SAVE_DIR/#\\~/$HOME}"; ` +
                     `mkdir -p "$SAVE_DIR" && ` +
@@ -65,21 +65,19 @@ Singleton {
                     `ACTION=$(notify-send "Screenshot Captured" "Saved to $saveFile" -i "$saveFile" -a "Screenshot" --action="open=Open" --action="folder=Open Folder" || true); ` +
                     `if [ "$ACTION" = "open" ]; then xdg-open "$saveFile"; elif [ "$ACTION" = "folder" ]; then xdg-open "$SAVE_DIR"; fi; ` +
                     `${cleanup}`
-                ]
             }
 
-            case ScreenshotAction.Action.Edit: {
+            case ScreenshotAction.SnipAction.Edit: {
                 let saveDir = rawSaveDir === "" ? "~/Pictures/Screenshots" : rawSaveDir;
-                return ["bash", "-c",
-                    `set -euo pipefail; ` +
+                return `set -euo pipefail; ` +
                     `SAVE_DIR='${escapeShellStr(saveDir)}'; ` +
                     `SAVE_DIR="\${SAVE_DIR/#\\~/$HOME}"; ` +
                     `mkdir -p "$SAVE_DIR" && ` +
                     `saveFile="$SAVE_DIR/screenshot-$(date +%Y-%m-%d_%H.%M.%S).png" && ` +
-                    `TMPF=$(mktemp "${Paths.runtimeTemp}/qs-snip-XXXXXX.png"); ` +
+                    `TMPF=$(mktemp /tmp/qs-snip-XXXXXX.png); ` +
                     `${cropBase} "$TMPF" && ` +
                     `CONF_DIR=$(mktemp -d); ln -s ~/.config/* "$CONF_DIR/" 2>/dev/null || true; rm -rf "$CONF_DIR/swappy"; mkdir -p "$CONF_DIR/swappy"; ` +
-                    `SWAPPY_OUT_DIR=$(mktemp -d "${Paths.runtimeTemp}/swappy-out-XXXXXX"); ` +
+                    `SWAPPY_OUT_DIR=$(mktemp -d /tmp/swappy-out-XXXXXX); ` +
                     `if [ -f ~/.config/swappy/config ]; then cp ~/.config/swappy/config "$CONF_DIR/swappy/config"; else echo "[Default]" > "$CONF_DIR/swappy/config"; fi; ` +
                     `sed -i '/^early_exit.*/d; /^save_dir.*/d; /^save_filename_format.*/d; /^auto_save.*/d' "$CONF_DIR/swappy/config"; ` +
                     `echo -e "early_exit=true\\nsave_dir=$SWAPPY_OUT_DIR\\nsave_filename_format=swappy-out.png\\nauto_save=true" >> "$CONF_DIR/swappy/config"; ` +
@@ -96,39 +94,44 @@ Singleton {
                         `if [ "$ACTION" = "open" ]; then xdg-open "$saveFile"; elif [ "$ACTION" = "folder" ]; then xdg-open "$SAVE_DIR"; fi; ` +
                     `fi; ` +
                     `rm -f "$TMPF"; ${cleanup}`
-                ]
             }
 
-            case ScreenshotAction.Action.Search: {
+            case ScreenshotAction.SnipAction.Search: {
                 const tmpFile = Paths.runtimeTemp("snip-search.png")
-                return ["bash", "-c",
-                    `set -euo pipefail; trap "rm -f '${escapeShellStr(tmpFile)}' '${escapeShellStr(screenshotPath)}'" EXIT; ` +
-                    `kdialog --warningyesno "Search uploads this screenshot to uguu.se and opens the result in your browser. Continue?" --title "Confirm screenshot upload" && ` +
+                return `set -euo pipefail; ` +
+                    `kdialog --warningyesno "Search uploads this screenshot to an external image host. Continue?" --title "Confirm screenshot upload" || { ${cleanup}; exit 1; }; ` +
                     `${cropToFile(tmpFile)} && ` +
-                    `url=$(${uploadAndGetUrl(tmpFile)}) && xdg-open "${root.imageSearchEngineBaseUrl}$url"`
-                , root.fileUploadApiEndpoint]
+                    `url=$(${uploadAndGetUrl(tmpFile)}); xdg-open '${escapeShellStr(root.imageSearchEngineBaseUrl)}'"$url"; ` +
+                    `rm -f '${tmpFile}'; ${cleanup}`
             }
 
-            case ScreenshotAction.Action.CharRecognition:
-                return ["bash", "-c",
-                    `set -euo pipefail; TMPF=$(mktemp "${Paths.runtimeTemp}/qs-snip-XXXXXX.png"); ` +
+            case ScreenshotAction.SnipAction.CharRecognition:
+                return `set -euo pipefail; TMPF=$(mktemp /tmp/qs-snip-XXXXXX.png); ` +
                     `${cropBase} -colorspace gray -type grayscale -contrast-stretch 0 -resize 300% "$TMPF" && ` +
                     `LANGS=$(tesseract --list-langs 2>/dev/null | awk 'NR>1 && $1!="osd" {print $1}' | tr '\\n' '+' | sed 's/\\+$//'); ` +
-                    `if [ -n "$LANGS" ]; then TEXT=$(tesseract "$TMPF" stdout -l "$LANGS" 2>/dev/null); else TEXT=$(tesseract "$TMPF" stdout 2>/dev/null); fi; ` +
+                    `if [ -n "$LANGS" ]; then ` +
+                        `TEXT=$(tesseract "$TMPF" stdout -l "$LANGS" 2>/dev/null); ` +
+                    `else ` +
+                        `TEXT=$(tesseract "$TMPF" stdout 2>/dev/null); ` +
+                    `fi; ` +
                     `printf "%s" "$TEXT" | wl-copy; ` +
                     `notify-send "Text Recognized" "$TEXT" -a "Screenshot" || true; ` +
                     `rm -f "$TMPF"; ${cleanup}`
-                ]
 
-            case ScreenshotAction.Action.Record:
-                return ["spectacle", "-R", "r"]
+            case ScreenshotAction.SnipAction.Record:
+                return `spectacle -R r`
 
-            case ScreenshotAction.Action.RecordWithSound:
-                return ["spectacle", "-R", "r"]
+            case ScreenshotAction.SnipAction.RecordWithSound:
+                return `spectacle -R r`
 
             default:
                 console.warn("[Region Selector] Unknown snip action, skipping snip.");
                 return;
         }
+    }
+
+    function getCommand(x, y, width, height, screenshotPath, action, saveDir = "") {
+        const script = root.getScript(x, y, width, height, screenshotPath, action, saveDir);
+        return script ? ["bash", "-c", script] : undefined;
     }
 }

@@ -36,7 +36,6 @@ PageBase {
         StepperRow {
             Layout.topMargin: Tokens.spacing.extraSmall / 2 - parent.spacing
             Layout.fillWidth: true
-            last: true
             label: qsTr("Drag threshold")
             subtext: qsTr("Pixels dragged before the sidebar opens")
             value: Config.sidebar.dragThreshold
@@ -46,7 +45,19 @@ PageBase {
             onMoved: v => GlobalConfig.sidebar.dragThreshold = v
         }
 
-        // Sidebar Tabs
+        StepperRow {
+            Layout.topMargin: Tokens.spacing.extraSmall / 2 - parent.spacing
+            Layout.fillWidth: true
+            last: true
+            label: qsTr("Grab width")
+            subtext: qsTr("Pixels of screen edge reserved for grabbing the sidebar")
+            value: Config.sidebar.grabWidth
+            from: 1
+            to: 100
+            stepSize: 1
+            onMoved: v => GlobalConfig.sidebar.grabWidth = v
+        }
+
         SectionHeader {
             text: qsTr("Sidebar Tabs")
         }

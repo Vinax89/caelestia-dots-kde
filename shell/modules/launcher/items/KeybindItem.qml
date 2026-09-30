@@ -17,18 +17,10 @@ Item {
             return;
         root.list.visibilities.launcher = false;
 
-        const isKDE = typeof KWinActiveWindowBridge !== "undefined";
-        let actionStr = root.modelData.action;
+        const actionStr = root.modelData.action;
 
         if (actionStr.startsWith("command(") && actionStr.endsWith(")")) {
-            actionStr = actionStr.substring(8, actionStr.length - 1);
-            const command = actionStr.trim().split(/\s+/);
-            if (command.length > 0 && command[0] !== "")
-                Quickshell.execDetached(command);
-        } else if (isKDE) {
-            // Shortcut already active via kglobalaccel — nothing to dispatch.
-        } else {
-            Quickshell.execDetached(["hyprctl", "dispatch", ...actionStr.trim().split(/\s+/)]);
+            Quickshell.execDetached(["sh", "-c", actionStr.substring(8, actionStr.length - 1)]);
         }
     }
 
@@ -74,7 +66,7 @@ Item {
             }
 
             StyledText {
-                text: (modelData && modelData.description) ? Strings.localizeEnglishSpelling(modelData.description) : ((modelData && modelData.action) ? modelData.action : "")
+                text: (modelData && modelData.description) ? modelData.description : ((modelData && modelData.action) ? modelData.action : "")
                 font: Tokens.font.body.small
                 color: Colours.palette.m3onSurfaceVariant
                 elide: Text.ElideRight

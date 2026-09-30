@@ -20,10 +20,10 @@ Item {
 
     readonly property bool updateRunning: UpdateChecker.updateRunning
 
-    // Index of the Nexus "Updates" page, resolved dynamically so this
+    // Index of the Nexus "Updates" page, resolved by page key so this
     // indicator can't drift out of sync if the page registry is reordered.
     readonly property int updatesPageIdx: {
-        const idx = PageRegistry.pages.findIndex(page => page.icon === "update");
+        const idx = PageRegistry.indexForKey("updates");
         return idx >= 0 ? idx : 0;
     }
 
@@ -39,13 +39,17 @@ Item {
         color: (root.hasUpdate || root.updateRunning) ? Colours.palette.m3primary : Colours.palette.m3secondary
     }
 
-    MouseArea {
-        anchors.fill: parent
+    StateLayer {
+        anchors.fill: undefined
+        anchors.centerIn: parent
+        implicitWidth: root.implicitWidth
+        implicitHeight: root.implicitHeight
+        radius: Tokens.rounding.full
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        cursorShape: Qt.PointingHandCursor
         Accessible.name: qsTr("Caelestia updates")
         Accessible.role: Accessible.Button
         Accessible.description: qsTr("Left-click to open the Updates page. Right-click to check for updates")
+
         onClicked: mouse => {
             if (mouse.button === Qt.RightButton) {
                 UpdateChecker.checkUpdates();

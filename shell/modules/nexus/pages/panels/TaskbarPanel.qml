@@ -1,8 +1,11 @@
 pragma ComponentBehavior: Bound
 
+import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Caelestia.Config
 import qs.components.controls
+import qs.services
 import qs.utils
 import qs.modules.nexus.common
 
@@ -32,6 +35,32 @@ PageBase {
         }
     ]
 
+    readonly property list<MenuItem> useGlobalItems: [
+        MenuItem {
+            text: qsTr("Use global position")
+            activeText: root.itemForPosition(GlobalConfig.bar.position).activeText
+        }
+    ]
+
+    readonly property list<ShellScreen> perMonitorRows: {
+        if (Screens.screens.length > 1)
+            return Screens.screens;
+        return Screens.screens.filter(s => GlobalConfig.forScreen(s.name).bar.overrides.includes("position"));
+    }
+
+    function itemForPosition(pos: string): MenuItem {
+        for (let i = 0; i < root.positionItems.length; i++) {
+            if (root.positionItems[i].value === pos)
+                return root.positionItems[i];
+        }
+        return root.positionItems[0];
+    }
+
+    function resetScreenPositionOverrides(): void {
+        for (let i = 0; i < Quickshell.screens.length; i++)
+            GlobalConfig.forScreen(Quickshell.screens[i].name).bar.resetOption("position");
+    }
+
     title: qsTr("Taskbar")
     isSubPage: true
 
@@ -41,10 +70,9 @@ PageBase {
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
-        // Behaviour
         SectionHeader {
             first: true
-            text: Strings.localizeEnglishSpelling(qsTr("Behaviour"))
+            text: qsTr("Behavior")
         }
 
         ToggleRow {
@@ -75,15 +103,12 @@ PageBase {
             Layout.fillWidth: true
             label: qsTr("Position")
             subtext: qsTr("Screen edge to place the bar on")
-            active: {
-                for (let i = 0; i < positionItems.length; i++) {
-                    if (positionItems[i].value === GlobalConfig.bar.position)
-                        return positionItems[i];
-                }
-                return positionItems[0];
+            active: root.itemForPosition(GlobalConfig.bar.position)
+            menuItems: root.positionItems
+            onSelected: item => {
+                GlobalConfig.bar.position = item.value;
+                root.resetScreenPositionOverrides();
             }
-            menuItems: positionItems
-            onSelected: item => GlobalConfig.bar.position = item.value
         }
 
         ToggleRow {
@@ -105,7 +130,40 @@ PageBase {
         }
 
         SectionHeader {
-            text: Strings.localizeEnglishSpelling(qsTr("Scaling"))
+            visible: root.perMonitorRows.length > 0
+            text: qsTr("Per-monitor position")
+        }
+
+        Repeater {
+            id: perMonitorRepeater
+
+            model: root.perMonitorRows
+
+            SelectRow {
+                required property var modelData
+                required property int index
+
+                readonly property var screenConfig: GlobalConfig.forScreen(modelData.name)
+                readonly property bool hasOverride: screenConfig.bar.overrides.includes("position")
+
+                first: index === 0
+                last: index === perMonitorRepeater.count - 1
+                Layout.fillWidth: true
+                label: modelData.name
+                subtext: hasOverride ? qsTr("Overridden for this monitor") : qsTr("Using global position")
+                active: root.itemForPosition(screenConfig.bar.position)
+                menuItems: hasOverride ? root.positionItems.concat(root.useGlobalItems) : root.positionItems
+                onSelected: item => {
+                    if (item === root.useGlobalItems[0])
+                        screenConfig.bar.resetOption("position");
+                    else
+                        screenConfig.bar.position = item.value;
+                }
+            }
+        }
+
+        SectionHeader {
+            text: qsTr("Scaling")
         }
 
         StepperRow {
@@ -159,7 +217,6 @@ PageBase {
             onClicked: root.nState.openSubPage(14)
         }
 
-        // Components
         SectionHeader {
             text: qsTr("Components")
         }
@@ -180,7 +237,6 @@ PageBase {
             onClicked: root.nState.openSubPage(15)
         }
 
-        // Scroll actions
         SectionHeader {
             text: qsTr("Scroll actions")
         }

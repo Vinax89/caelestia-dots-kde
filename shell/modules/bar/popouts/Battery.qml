@@ -11,14 +11,22 @@ ColumnLayout {
     id: root
 
     required property PopoutState popouts
-    property bool _isSidebarOpen: popouts.sidebarOpen && popouts.isHorizontal
+    property real scaleOffset: 1.0
+    property real fontScale: 1.0
+    property bool _isSidebarOpen: false
 
-    readonly property real masterScale: !isNaN(GlobalConfig.bar.previewScale) ? GlobalConfig.bar.previewScale : 1.0
-    readonly property real elementOffset: GlobalConfig.bar.perElementPreviewScale ? (!isNaN(GlobalConfig.bar.previewScales.battery) ? GlobalConfig.bar.previewScales.battery : 0.0) : 0.0
-    readonly property real barScaleOffset: GlobalConfig.bar.previewScaleWithBar ? (!isNaN(GlobalConfig.bar.scale) ? GlobalConfig.bar.scale : 1.0) : 1.0
-    readonly property real scaleOffset: Math.max(0.1, (masterScale + elementOffset) * barScaleOffset)
-    readonly property real elementFontOffset: GlobalConfig.bar.perElementFontScale ? (!isNaN(GlobalConfig.bar.previewFontScales.battery) ? GlobalConfig.bar.previewFontScales.battery : 0.0) : 0.0
-    readonly property real fontScale: Math.max(0.1, scaleOffset + (!isNaN(GlobalConfig.bar.fontScaleOffset) ? GlobalConfig.bar.fontScaleOffset : 0.0) + elementFontOffset)
+    // PowerProfiles.degradationReason is an enum; printing it directly showed the
+    // enum member name ("HighTemperature") rather than something a user reads.
+    function perfDegradationToString(p: int): string {
+        switch (p) {
+        case PerformanceDegradationReason.HighTemperature:
+            return qsTr("The device is too hot");
+        case PerformanceDegradationReason.LapDetected:
+            return qsTr("The device is on a lap");
+        default:
+            return qsTr("Unknown reason");
+        }
+    }
 
     width: Math.max(300 * scaleOffset, _isSidebarOpen ? (Tokens.sizes.sidebar.width * scaleOffset) - Tokens.padding.extraLargeIncreased : 0)
     spacing: Tokens.spacing.medium * scaleOffset
@@ -96,7 +104,6 @@ ColumnLayout {
                                 NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
                             }
 
-                            // The perfectly rounded solid block
                             Rectangle {
                                 anchors.top: parent.top
                                 anchors.topMargin: waveLayer.opacity * Math.min(24, parent.height)
@@ -112,7 +119,6 @@ ColumnLayout {
                                 topRightRadius: height >= batteryBody.height - 3 ? Tokens.rounding.medium - 3 : 0
                             }
 
-                            // The safely clipped subtle wave
                             Item {
                                 id: waveLayer
 
@@ -149,7 +155,6 @@ ColumnLayout {
                             }
                         }
 
-                        // The Battery Border
                         Rectangle {
                             anchors.fill: parent
                             color: "transparent"
@@ -181,30 +186,17 @@ ColumnLayout {
                     }
 
                     StyledText {
-                        function formatSeconds(s: int, fallback: string): string {
-                            const day = Math.floor(s / 86400);
-                            const hr = Math.floor(s / 3600) % 60;
-                            const min = Math.floor(s / 60) % 60;
-
-                            let comps = [];
-                            if (day > 0) comps.push(`${day}d`);
-                            if (hr > 0) comps.push(`${hr}h`);
-                            if (min > 0) comps.push(`${min}m`);
-
-                            return comps.join(" ") || fallback;
-                        }
-
                         text: {
                             if (!UPower.displayDevice.isLaptopBattery)
                                 return qsTr("No battery detected");
 
                             if (UPower.onBattery)
-                                return qsTr("~ %1").arg(formatSeconds(UPower.displayDevice.timeToEmpty, "Calculating..."));
+                                return qsTr("~ %1").arg(Units.formatDurationShort(UPower.displayDevice.timeToEmpty, "Calculating..."));
 
                             if (UPower.displayDevice.state === UPowerDeviceState.FullyCharged || UPower.displayDevice.percentage >= 1.0)
                                 return qsTr("Fully charged!");
 
-                            return qsTr("~ %1").arg(formatSeconds(UPower.displayDevice.timeToFull, "Calculating..."));
+                            return qsTr("~ %1").arg(Units.formatDurationShort(UPower.displayDevice.timeToFull, "Calculating..."));
                         }
                         color: Colours.palette.m3onSurfaceVariant
                         font.pointSize: Tokens.font.body.medium.pointSize * root.fontScale
@@ -242,7 +234,7 @@ ColumnLayout {
 
                             StyledText {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: qsTr("Degraded: %1").arg(PerformanceDegradationReason.toString(PowerProfiles.degradationReason))
+                                text: qsTr("Performance degraded: %1").arg(root.perfDegradationToString(PowerProfiles.degradationReason))
                                 color: Colours.palette.m3onError
                                 font.pointSize: Tokens.font.mono.medium.pointSize * root.fontScale
                             }

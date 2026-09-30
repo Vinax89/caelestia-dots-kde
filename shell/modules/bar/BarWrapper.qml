@@ -15,6 +15,7 @@ Item {
     id: root
 
     required property ShellScreen screen
+    Config.screen: screen.name
     required property DrawerVisibilities visibilities
     required property BarPopouts.Wrapper popouts
     required property bool fullscreen
@@ -37,25 +38,26 @@ Item {
             return Qt.rect(ox, oy, contentWidth, screen.height);
         return Qt.rect(ox + screen.width - contentWidth, oy, contentWidth, screen.height);
     }
-    readonly property bool dodging: dodgeEnabled && Hypr.hasWindowOverlapping(screen.name, dodgeRect.x, dodgeRect.y, dodgeRect.width, dodgeRect.height, Config.bar.dodgeFocusedOnly)
-    // Treat a dodging bar as non-persistent: it stays out of the way but is
-    // still reachable through the hover edge and the usual toggles.
+    readonly property var _dodgeWatchWindowList: (true) ? Kwin.windowList : null
+    readonly property var _dodgeWatchActiveWindow: (true) ? Kwin.activeWindow : null
+    readonly property int _dodgeWatchActiveId: (true) ? Kwin.activeWsId : -1
+    readonly property var _dodgeWatchActiveByOutput: (true) ? Kwin.activeByOutput : null
+    readonly property bool dodging: {
+        // Reading these tracked props here makes QML invalidate this binding
+        // when windowList, activeWindow, activeId, or per-screen workspace changes.
+        void _dodgeWatchWindowList;
+        void _dodgeWatchActiveWindow;
+        void _dodgeWatchActiveId;
+        void _dodgeWatchActiveByOutput;
+        return dodgeEnabled && Kwin.hasWindowOverlapping(screen.name, dodgeRect.x, dodgeRect.y, dodgeRect.width, dodgeRect.height, Config.bar.dodgeFocusedOnly);
+    }
+
     readonly property bool keptOpen: Config.bar.persistent && !dodging
-    // Reserving space while dodging would keep windows off the bar, so nothing
-    // would ever overlap it and the mode would never engage.
     readonly property int exclusiveZone: !disabled && !dodgeEnabled && (Config.bar.persistent || visibilities.bar) ? contentWidth : Config.border.thickness
-    // What the desktop layer (icons, the clock, the audio visualiser) should
-    // leave clear so its own content doesn't render under the bar. This is
-    // exclusiveZone without the dodge carve-out: dodging drops the reported
-    // zone to (near) nothing so KWin will let windows slide under the bar,
-    // which is exactly what makes overlap detection possible, but the bar is
-    // still visually there whenever it isn't actively dodging, and desktop
-    // content needs to keep leaving room for it regardless of what KWin was
-    // told for window-placement purposes.
     readonly property int visualThickness: !disabled && (Config.bar.persistent || visibilities.bar) ? contentWidth : Config.border.thickness
     readonly property bool shouldBeVisible: !fullscreen && !disabled && !visibilities.overview && (keptOpen || visibilities.bar || isHovered)
     property bool isHovered
-    readonly property bool isHorizontal: Config.bar.position === "top" || Config.bar.position === "bottom"
+    readonly property bool isHorizontal: root.position === "top" || root.position === "bottom"
     readonly property int clampedThickness: Math.max(Config.border.minThickness, isHorizontal ? implicitHeight : implicitWidth)
     readonly property int clampedWidth: isHorizontal ? root.width : clampedThickness
     readonly property int clampedHeight: isHorizontal ? clampedThickness : root.height
@@ -147,7 +149,7 @@ Item {
         states: [
             State {
                 name: "left"
-                when: Config.bar.position === "left"
+                when: root.position === "left"
 
                 AnchorChanges {
                     target: content
@@ -159,7 +161,7 @@ Item {
             },
             State {
                 name: "right"
-                when: Config.bar.position === "right"
+                when: root.position === "right"
 
                 AnchorChanges {
                     target: content
@@ -171,7 +173,7 @@ Item {
             },
             State {
                 name: "top"
-                when: Config.bar.position === "top"
+                when: root.position === "top"
 
                 AnchorChanges {
                     target: content
@@ -183,7 +185,7 @@ Item {
             },
             State {
                 name: "bottom"
-                when: Config.bar.position === "bottom"
+                when: root.position === "bottom"
 
                 AnchorChanges {
                     target: content

@@ -1,8 +1,12 @@
 #pragma once
 
-#include "service.hpp"
 #include <qqmlintegration.h>
 #include <qtimer.h>
+
+#include <algorithm>
+#include <cstddef>
+
+#include "service.hpp"
 
 namespace caelestia::services {
 
@@ -21,6 +25,12 @@ public slots:
 
 protected:
     virtual void process() = 0;
+
+    template <typename Sample> [[nodiscard]] static bool isSilent(const Sample* samples, std::size_t count) {
+        return count == 0 || std::all_of(samples, samples + count, [](Sample sample) {
+            return sample == Sample(0);
+        });
+    }
 
 private:
     QTimer* m_timer = nullptr;

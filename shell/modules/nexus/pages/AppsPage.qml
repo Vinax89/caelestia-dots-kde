@@ -24,7 +24,6 @@ PageBase {
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
-        // Default applications
         SectionHeader {
             first: true
             text: qsTr("Default applications")
@@ -88,7 +87,6 @@ PageBase {
             onSelected: app => GlobalConfig.general.apps.explorer = app.command
         }
 
-        // Library
         SectionHeader {
             text: qsTr("Library")
         }
@@ -98,7 +96,7 @@ PageBase {
             last: true
             icon: "apps"
             label: qsTr("All apps")
-            status: Strings.localizeEnglishSpelling(qsTr("Browse installed apps, set favourites and hidden"))
+            status: qsTr("Browse installed apps, set favorites and hidden")
             onClicked: root.nState.openSubPage(1)
         }
     }
@@ -157,7 +155,7 @@ PageBase {
                         IconImage {
                             asynchronous: true
                             implicitSize: Math.round(Tokens.font.icon.large.pointSize * 1.8)
-                            source: Quickshell.iconPath("system-run", "image-missing")
+                            source: Quickshell.iconPath("system-run", "application-x-executable")
                         }
 
                         ColumnLayout {
@@ -209,7 +207,7 @@ PageBase {
                         IconImage {
                             asynchronous: true
                             implicitSize: Math.round(Tokens.font.icon.large.pointSize * 1.8)
-                            source: Quickshell.iconPath(appItem.modelData.entry.icon, "image-missing")
+                            source: WinIcons.sourceFor(appItem.modelData.entry, "", appItem.modelData.entry?.id ?? "", 0)
                         }
 
                         ColumnLayout {

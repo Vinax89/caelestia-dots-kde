@@ -15,13 +15,12 @@ Singleton {
     readonly property MprisPlayer active: props.manualActive ?? list.find(p => getIdentity(p) === GlobalConfig.services.defaultPlayer) ?? list[0] ?? null
     property alias manualActive: props.manualActive
 
-    // Dedup key for progressive metadata (e.g. mpv-mpris/yt-dlp player fills title then artist later).
     property string lastNowPlayingKey: ""
 
     function getIdentity(player: MprisPlayer): string {
         if (!player)
             return "";
-        const alias = GlobalConfig.services.playerAliases.find(a => a.from === player.identity);
+        const alias = GlobalConfig.services.playerAliases.values.find(a => a.from === player.identity);
         return alias?.to ?? player.identity;
     }
 
@@ -94,7 +93,7 @@ Singleton {
     CustomShortcut {
         // qmllint enable unresolved-type
         name: "mediaToggle"
-        description: "Toggle media playback"
+        description: qsTr("Toggle media playback")
         onPressed: {
             const active = root.active;
             if (active && active.canTogglePlaying)
@@ -106,7 +105,7 @@ Singleton {
     CustomShortcut {
         // qmllint enable unresolved-type
         name: "mediaPrev"
-        description: "Previous track"
+        description: qsTr("Previous track")
         onPressed: {
             const active = root.active;
             if (active && active.canGoPrevious)
@@ -118,7 +117,7 @@ Singleton {
     CustomShortcut {
         // qmllint enable unresolved-type
         name: "mediaNext"
-        description: "Next track"
+        description: qsTr("Next track")
         onPressed: {
             const active = root.active;
             if (active && active.canGoNext)
@@ -130,7 +129,7 @@ Singleton {
     CustomShortcut {
         // qmllint enable unresolved-type
         name: "mediaStop"
-        description: "Stop media playback"
+        description: qsTr("Stop media playback")
         onPressed: root.active?.stop()
     }
 

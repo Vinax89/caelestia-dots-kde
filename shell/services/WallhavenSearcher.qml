@@ -41,7 +41,6 @@ Singleton {
     property real activeDownloadProgress: 0
     property bool activeDownloadRunning: false
 
-    // Filters
     property var filters: {
         "categories": "111",
         "purity": "100",
@@ -339,7 +338,6 @@ Singleton {
         const fullPath = wallpaperUrl;
         const urlMatch = fullPath.match(/\.([a-zA-Z]{3,4})(?:\?|$)/);
         let ext = urlMatch ? urlMatch[1] : "";
-        // Normalize to lowercase and handle jpeg -> jpg
         if (ext) {
             ext = ext.toLowerCase();
             if (ext === "jpeg")

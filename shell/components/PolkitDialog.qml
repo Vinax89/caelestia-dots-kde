@@ -58,21 +58,29 @@ StyledWindow {
     readonly property string commandText: splitMessage.command
 
     property string buffer: ""
+    property bool isActive: agent.isActive && agent.flow != null
+
     readonly property list<int> shapeQueue: {
-        const shapes = [MaterialShape.Slanted, MaterialShape.Arch, MaterialShape.Fan, MaterialShape.Arrow, MaterialShape.SemiCircle, MaterialShape.Triangle, MaterialShape.Diamond, MaterialShape.ClamShell, MaterialShape.Pentagon, MaterialShape.Gem, MaterialShape.Sunny, MaterialShape.VerySunny, MaterialShape.Cookie4Sided, MaterialShape.Ghostish, MaterialShape.SoftBurst];
+        let shapes = [
+            MaterialShape.Circle,
+            MaterialShape.Square,
+            MaterialShape.Diamond,
+            MaterialShape.Pentagon,
+            MaterialShape.Gem,
+            MaterialShape.Cookie4Sided,
+            MaterialShape.Cookie6Sided
+        ];
         for (let i = shapes.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            let j = Math.floor(Math.random() * (i + 1));
             [shapes[i], shapes[j]] = [shapes[j], shapes[i]];
         }
         return shapes;
     }
 
     name: "polkit"
+    visible: isActive || closeAnim.running
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-
-    property bool isActive: agent.isActive && agent.flow != null
-    visible: isActive || closeAnim.running
 
     anchors.top: true
     anchors.bottom: true
@@ -94,17 +102,16 @@ StyledWindow {
 
         SequentialAnimation {
             ParallelAnimation {
-                Anim { target: dialogContainer; property: "opacity"; to: 1; duration: Tokens.anim.durations.small }
-                Anim { target: dialogContainer; property: "scale"; to: 1; type: Anim.Emphasized; duration: 400 }
+                Anim { target: dialogContainer; property: "opacity"; to: 1; type: Anim.FastEffects }
+                Anim { target: dialogContainer; property: "scale"; to: 1; type: Anim.Emphasized }
             }
-            // Delegate size expansion to Behaviors so they constantly evaluate layout recalculations
             PropertyAction { target: dialogContainer; property: "isExpanded"; value: true }
             ParallelAnimation {
-                Anim { target: lockIcon; property: "scale"; to: 0; type: Anim.Emphasized; duration: 400 }
-                Anim { type: Anim.DefaultEffects; target: lockIcon; property: "opacity"; to: 0; duration: 250 }
-                Anim { type: Anim.DefaultEffects; target: dialogContent; property: "opacity"; to: 1; duration: 500 }
-                Anim { target: dialogContent; property: "scale"; to: 1; type: Anim.Emphasized; duration: 500 }
-                Anim { target: dialogBg; property: "radius"; to: Tokens.rounding.large; duration: 500 }
+                Anim { target: lockIcon; property: "scale"; to: 0; type: Anim.Emphasized }
+                Anim { type: Anim.FastEffects; target: lockIcon; property: "opacity"; to: 0 }
+                Anim { type: Anim.DefaultEffects; target: dialogContent; property: "opacity"; to: 1 }
+                Anim { target: dialogContent; property: "scale"; to: 1; type: Anim.EmphasizedLarge }
+                Anim { target: dialogBg; property: "radius"; to: Tokens.rounding.large; type: Anim.EmphasizedLarge }
             }
         }
     }
@@ -112,7 +119,7 @@ StyledWindow {
     TextMetrics {
         id: nonAnimPlaceholder
 
-        text: "Enter your password"
+        text: qsTr("Enter your password")
         font: Tokens.font.body.builders.medium.scale(centerScale).width(110).build()
     }
 
@@ -120,7 +127,6 @@ StyledWindow {
         id: closeAnim
 
         ParallelAnimation {
-            // Trigger collapse logic via the Behavior state
             PropertyAction { target: dialogContainer; property: "isExpanded"; value: false }
             Anim { target: dialogBg; property: "radius"; to: dialogContainer.initialRadius }
             Anim { target: dialogContent; property: "scale"; to: 0 }
@@ -156,9 +162,8 @@ StyledWindow {
         implicitHeight: isExpanded ? targetHeight : iconSize
         scale: 0
 
-        // This prevents the snapshotting issue by persistently interpolating dynamically updating bindings
-        Behavior on implicitWidth { Anim { type: Anim.Emphasized; duration: 500 } }
-        Behavior on implicitHeight { Anim { type: Anim.Emphasized; duration: 500 } }
+        Behavior on implicitWidth { Anim { type: Anim.EmphasizedLarge } }
+        Behavior on implicitHeight { Anim { type: Anim.EmphasizedLarge } }
 
         StyledRect {
             id: dialogBg
@@ -195,7 +200,6 @@ StyledWindow {
             scale: 0
             spacing: Tokens.spacing.large
 
-            // Title Container
             StyledRect {
                 Layout.fillWidth: true
                 implicitHeight: titleLayout.implicitHeight + Tokens.padding.large * 2
@@ -211,7 +215,7 @@ StyledWindow {
 
                     StyledText {
                         Layout.fillWidth: true
-                        text: "Authentication Required"
+                        text: qsTr("Authentication Required")
                         font: Tokens.font.title.builders.large.weight(Font.Medium).build()
                         color: Colours.palette.m3onSurface
                         horizontalAlignment: Text.AlignHCenter
@@ -219,7 +223,6 @@ StyledWindow {
                 }
             }
 
-            // Message and Command
             Column {
                 Layout.fillWidth: true
                 spacing: Tokens.spacing.medium
@@ -281,14 +284,6 @@ StyledWindow {
 
                 focus: true
 
-                Behavior on implicitWidth { Anim {} }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.IBeamCursor
-                    onClicked: passwordRect.forceActiveFocus()
-                }
-
                 Keys.onPressed: event => {
                     if (event.key === Qt.Key_Enter || event.key === Qt.Key_Return) {
                         if (agent.flow && root.buffer) {
@@ -314,8 +309,17 @@ StyledWindow {
                     } else if (event.text.length > 0) {
                         charList.bindImWidth();
                         root.buffer += event.text;
+                        placeholder.animate = false;
                         event.accepted = true;
                     }
+                }
+
+                Behavior on implicitWidth { Anim {} }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.IBeamCursor
+                    onClicked: passwordRect.forceActiveFocus()
                 }
 
                 Connections {
@@ -369,43 +373,13 @@ StyledWindow {
                             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
                         }
 
-                        ListView {
+                        AnimatedPasswordMask {
                             id: charList
-
-                            readonly property int fullWidth: {
-                                let w = (count - 1) * spacing;
-                                for (let i = 0; i < count; i++)
-                                    w += ((itemAtIndex(i) as CharItem)?.nonAnimWidthScale ?? 1) * implicitHeight;
-                                return w + implicitHeight;
-                            }
-
-                            function bindImWidth(): void {
-                                imWidthBehavior.enabled = false;
-                                implicitWidth = Qt.binding(() => fullWidth);
-                                imWidthBehavior.enabled = true;
-                            }
 
                             anchors.centerIn: parent
                             anchors.horizontalCenterOffset: implicitWidth > parent.width ? -(implicitWidth - parent.width) / 2 : 0
-
-                            implicitWidth: fullWidth
-                            implicitHeight: Tokens.font.body.medium.pointSize
-
-                            orientation: Qt.Horizontal
-                            spacing: Tokens.spacing.extraSmall
-                            interactive: false
-
-                            model: ScriptModel {
-                                values: root.buffer.split("")
-                            }
-
-                            delegate: CharItem {}
-
-                            Behavior on implicitWidth {
-                                id: imWidthBehavior
-
-                                Anim {}
-                            }
+                            buffer: root.buffer
+                            shapeQueue: root.shapeQueue
                         }
                     }
 
@@ -455,123 +429,6 @@ StyledWindow {
                             Behavior on opacity { Anim { type: Anim.DefaultEffects } }
                         }
                     }
-                }
-            }
-        }
-    }
-
-    component CharItem: Item {
-        id: ch
-
-        required property int index
-        property real nonAnimWidthScale: 1
-
-        implicitHeight: charList.implicitHeight
-
-        ListView.onRemove: {
-            initAnim.stop();
-            removeAnim.start();
-        }
-
-        MaterialShape {
-            id: charShape
-
-            anchors.centerIn: parent
-            implicitSize: charList.implicitHeight * 1.5
-            shape: root.shapeQueue[ch.index % root.shapeQueue.length] ?? MaterialShape.Circle
-            color: Colours.palette.m3onSurface
-
-            Behavior on color {
-                CAnim {}
-            }
-
-            SequentialAnimation {
-                id: initAnim
-
-                running: true
-
-                ParallelAnimation {
-                    Anim {
-                        target: charShape
-                        property: "opacity"
-                        from: 0
-                        to: 1
-                        type: Anim.DefaultEffects
-                    }
-                    Anim {
-                        target: charShape
-                        property: "scale"
-                        from: 0
-                        to: 1
-                        type: Anim.FastSpatial
-                    }
-                    Anim {
-                        target: ch
-                        property: "implicitWidth"
-                        from: charList.implicitHeight
-                        to: charList.implicitHeight * 1.3
-                        type: Anim.DefaultEffects
-                    }
-                    PropertyAction {
-                        target: ch
-                        property: "nonAnimWidthScale"
-                        value: 1.5
-                    }
-                }
-                PauseAnimation {
-                    duration: 180 * Tokens.anim.durations.scale
-                }
-                PropertyAction {
-                    target: charShape
-                    property: "shape"
-                    value: MaterialShape.Circle
-                }
-                ParallelAnimation {
-                    Anim {
-                        target: charShape
-                        property: "scale"
-                        to: 2 / 3
-                        type: Anim.FastSpatial
-                    }
-                    Anim {
-                        target: ch
-                        property: "implicitWidth"
-                        to: charList.implicitHeight
-                        type: Anim.DefaultEffects
-                    }
-                    PropertyAction {
-                        target: ch
-                        property: "nonAnimWidthScale"
-                        value: 1
-                    }
-                }
-            }
-
-            SequentialAnimation {
-                id: removeAnim
-
-                PropertyAction {
-                    target: ch
-                    property: "ListView.delayRemove"
-                    value: true
-                }
-                ParallelAnimation {
-                    Anim {
-                        type: Anim.DefaultEffects
-                        target: charShape
-                        property: "opacity"
-                        to: 0
-                    }
-                    Anim {
-                        target: charShape
-                        property: "scale"
-                        to: 0.5
-                    }
-                }
-                PropertyAction {
-                    target: ch
-                    property: "ListView.delayRemove"
-                    value: false
                 }
             }
         }

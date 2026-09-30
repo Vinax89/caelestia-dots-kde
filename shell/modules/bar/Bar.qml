@@ -82,7 +82,7 @@ Item {
                 const loader = rep.itemAt(i) as WrappedLoader;
                 if (loader?.enabled && loader.id === "tray") {
                     const tray = loader.item as Tray;
-                    if (Config.bar.popouts.tray || !tray.pinned) {
+                    if (tray && (Config.bar.popouts.tray || !tray.pinned)) {
                         tray.expanded = false;
                         tray.pinned = false;
                     }
@@ -92,6 +92,9 @@ Item {
     }
 
     function checkPopout(pos: real): void {
+        if (popouts.hasCurrent && (popouts.currentName === "clockcontext" || popouts.currentName === "dockcontext" || popouts.currentName === "greetercontext" || popouts.currentName === "statusiconscontext"))
+            return;
+
         const ch = getLoaderAt(isHorizontal ? pos : width / 2, isHorizontal ? height / 2 : pos) as WrappedLoader;
 
         if (currentHoveredItem && currentHoveredItem !== ch?.item) {
@@ -104,15 +107,13 @@ Item {
             closeTray();
 
         if (!ch) {
-            if (popouts.hasCurrent && (popouts.currentName === "dockcontext" || popouts.currentName === "dockhover" || popouts.currentName === "activewindow")) return;
+            if (popouts.hasCurrent && (popouts.currentName === "dockhover" || popouts.currentName === "greeter")) return;
             if (!Config.bar.popouts.tray && popouts.currentName.startsWith("traymenu")) return;
-            // skip hover-driven tray recalculation in click mode
             popouts.hasCurrent = false;
             return;
         }
 
         const id = ch.id;
-        // top is absolute pos
         let mappedChPos = mapFromItem(ch, 0, 0);
         const top = isHorizontal ? mappedChPos.x : mappedChPos.y;
 
@@ -148,7 +149,6 @@ Item {
 
             let icon = items.childAt(localX, localY);
             if (!icon) {
-                // Find nearest visible child by center distance
                 let bestDist = 1e9;
                 for (let i = 0; i < items.children.length; i++) {
                     const child = items.children[i];
@@ -164,29 +164,33 @@ Item {
                 }
             }
             if (icon) {
-                popouts.currentName = icon.name;
+                popouts.currentName = icon.popoutName ?? icon.name;
                 popouts.currentCenter = isHorizontal ? icon.mapToItem(null, icon.width / 2, 0).x : icon.mapToItem(null, 0, icon.height / 2).y;
                 popouts.hasCurrent = true;
             } else {
                 popouts.hasCurrent = false;
             }
-        } else if (id === "activeWindow" && Config.bar.popouts.activeWindow && Config.bar.activeWindow.showOnHover) {
+        } else if (id === "greeter" && Config.bar.popouts.greeter && Config.bar.greeter.showOnHover) {
             const item = ch.item as Item;
             if (item) {
                 const relPos = pos - top;
                 const inside = isHorizontal ? (relPos >= 0 && relPos <= item.implicitWidth) : (relPos >= 0 && relPos <= item.implicitHeight);
                 if (inside) {
-                    popouts.currentName = id.toLowerCase();
-                    popouts.currentCenter = isHorizontal ? item.mapToItem(null, item.implicitWidth / 2, 0).x : (item.mapToItem(null, 0, item.implicitHeight / 2).y ?? 0);
-                    popouts.hasCurrent = true;
+                    if (!popouts.hasCurrent || popouts.currentName !== "greetercontext") {
+                        popouts.currentName = "greeter";
+                        popouts.currentCenter = isHorizontal ? item.mapToItem(null, item.implicitWidth / 2, 0).x : (item.mapToItem(null, 0, item.implicitHeight / 2).y ?? 0);
+                        popouts.hasCurrent = true;
+                    }
                 } else {
-                    popouts.hasCurrent = false;
+                    if (popouts.currentName !== "greetercontext") {
+                        popouts.hasCurrent = false;
+                    }
                 }
             } else {
                 popouts.hasCurrent = false;
             }
         } else if (id === "dock") {
-            if (popouts.hasCurrent && (popouts.currentName === "dockcontext" || popouts.currentName === "activewindow")) return;
+            if (popouts.hasCurrent && (popouts.currentName === "dockcontext" || popouts.currentName === "greeter" || popouts.currentName === "greetercontext" || popouts.currentName === "statusiconscontext")) return;
 
             const item = ch.item;
             if (item && typeof item.handleHover === "function") {
@@ -225,6 +229,25 @@ Item {
             } else {
                 popouts.hasCurrent = false;
             }
+        } else if (id === "clock") {
+            if (Config.bar.popouts.clock) {
+                const item = ch.item as Item;
+                if (item) {
+                    const relPos = pos - top;
+                    const inside = isHorizontal ? (relPos >= 0 && relPos <= item.implicitWidth) : (relPos >= 0 && relPos <= item.implicitHeight);
+                    if (inside) {
+                        popouts.currentName = "clock";
+                        popouts.currentCenter = isHorizontal ? item.mapToItem(null, item.implicitWidth / 2, 0).x : (item.mapToItem(null, 0, item.implicitHeight / 2).y ?? 0);
+                        popouts.hasCurrent = true;
+                    } else {
+                        popouts.hasCurrent = false;
+                    }
+                } else {
+                    popouts.hasCurrent = false;
+                }
+            } else {
+                popouts.hasCurrent = false;
+            }
         } else {
             popouts.hasCurrent = false;
         }
@@ -234,24 +257,21 @@ Item {
         const ch = getLoaderAt(isHorizontal ? pos : width / 2, isHorizontal ? height / 2 : pos) as WrappedLoader;
 
         if (ch?.id === "dock") {
-            let mappedChPos = mapFromItem(ch, 0, 0);
-            const top = isHorizontal ? mappedChPos.x : mappedChPos.y;
-            const relPos = pos - top;
-            const dockHit = ch.item ? ch.item.childAt(isHorizontal ? relPos : ch.width / 2, isHorizontal ? ch.height / 2 : relPos) : null;
-            if (dockHit) return;
+            if (ch.item && typeof ch.item.handleWheel === "function") {
+                ch.item.handleWheel(angleDelta);
+            }
+            return;
         }
 
         if (ch?.id === "workspaces" && Config.bar.scrollActions.workspaces) {
-            const mon = (GlobalConfig.bar.workspaces.perMonitorWorkspaces ? Hypr.monitorFor(screen) : Hypr.focusedMonitor);
+            const mon = (Config.bar.workspaces.perMonitor ? Kwin.monitorFor(screen) : Kwin.focusedMonitor);
             const specialWs = mon?.lastIpcObject.specialWorkspace.name;
             if (specialWs?.length > 0)
-                Hypr.dispatch(Hypr.usingLua ? `hl.dsp.workspace.toggle_special("${specialWs.slice(8)}")` : `togglespecialworkspace ${specialWs.slice(8)}`);
+                Kwin.dispatch(Kwin.usingLua ? `hl.dsp.workspace.toggle_special("${specialWs.slice(8)}")` : `togglespecialworkspace ${specialWs.slice(8)}`);
             else {
-                const activeId = typeof KWinWorkspaceState !== "undefined"
-                    ? KWinWorkspaceState.activeId
-                    : Hypr.activeWsId;
+                const activeId = Kwin.activeWsId;
                 if (angleDelta.y < 0 || activeId > 1)
-                    Hypr.dispatch(Hypr.usingLua ? `hl.dsp.focus({ workspace = "r${angleDelta.y > 0 ? "-" : "+"}1" })` : `workspace r${angleDelta.y > 0 ? "-" : "+"}1`);
+                    Kwin.dispatch(Kwin.usingLua ? `hl.dsp.focus({ workspace = "r${angleDelta.y > 0 ? "-" : "+"}1" })` : `workspace r${angleDelta.y > 0 ? "-" : "+"}1`);
             }
         } else if ((isHorizontal ? pos < screen.width / 2 : pos < screen.height / 2) && Config.bar.scrollActions.volume) {
             if (angleDelta.y > 0)
@@ -312,10 +332,6 @@ Item {
         columnSpacing: Tokens.spacing.medium
         rowSpacing: Tokens.spacing.medium
 
-        // Plain ternaries assigning `undefined` to x/y (a real-typed property)
-        // trigger "Unable to assign [undefined] to y/x" warnings even though
-        // the other branch is unreachable at the same time. Bindings with a
-        // `when` guard simply don't apply instead of assigning undefined.
         Binding on x {
             when: isHorizontal
             value: Math.max(middleLayout.minX, Math.min(middleLayout.idealX, middleLayout.maxX))
@@ -389,9 +405,9 @@ Item {
                 }
             }
             DelegateChoice {
-                roleValue: "activeWindow"
+                roleValue: "greeter"
                 delegate: WrappedLoader {
-                    sourceComponent: ActiveWindow {
+                    sourceComponent: Greeter {
                         bar: root
                         monitor: Brightness.getMonitorForScreen(root.screen)
                     }
@@ -408,19 +424,23 @@ Item {
             DelegateChoice {
                 roleValue: "clock"
                 delegate: WrappedLoader {
-                    sourceComponent: Clock {}
+                    sourceComponent: Clock {
+                        bar: root
+                    }
                 }
             }
             DelegateChoice {
                 roleValue: "statusIcons"
                 delegate: WrappedLoader {
-                    sourceComponent: StatusIcons {}
+                    sourceComponent: StatusIcons {
+                        bar: root
+                    }
                 }
             }
             DelegateChoice {
                 roleValue: "kbLayoutIndicator"
                 delegate: WrappedLoader {
-                    visible: enabled && (Hypr.kbLayout || "").length > 0
+                    visible: enabled && (Kwin.kbLayout || "").length > 0
                     sourceComponent: KbLayoutIndicator {}
                 }
             }

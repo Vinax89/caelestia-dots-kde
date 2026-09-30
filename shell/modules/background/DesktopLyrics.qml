@@ -28,20 +28,14 @@ Item {
     readonly property color safePrimary: useLightSet ? Colours.palette.m3primaryContainer : Colours.palette.m3primary
     readonly property color safeSecondary: useLightSet ? Colours.palette.m3secondaryContainer : Colours.palette.m3secondary
     readonly property color safeTertiary: useLightSet ? Colours.palette.m3tertiaryContainer : Colours.palette.m3tertiary
-    readonly property string sansFont: GlobalConfig.appearance.font.body.family || "Sans Serif"
+    readonly property string sansFont: GlobalConfig.appearance.font.body.family
     readonly property int alignment: Config.background.desktopLyrics.alignment
     readonly property bool autoHide: Config.background.desktopLyrics.autoHide
-    readonly property bool allWindowsFloating: {
-        if (typeof KWinActiveWindowBridge !== "undefined") {
-            const wins = KWinActiveWindowBridge.windowList || [];
-            return wins.every(w => !!w?.floating);
-        }
-        return Hypr.monitorFor(screen)?.activeWorkspace?.toplevels?.values.every(
-            t => t.lastIpcObject?.floating) ?? true;
-    }
-    readonly property bool shouldHide: autoHide && !allWindowsFloating
+    readonly property bool windowHidesLyrics: Kwin.windowHidesDesktopWidgets(root.screen ? root.screen.name : "", Config.background.visualiser.hideOnAllMonitors)
+    readonly property bool allWindowsFloating: !windowHidesLyrics
+    readonly property bool shouldHide: autoHide && windowHidesLyrics
 
-    property bool hasLyrics: Lyrics.hasLyrics
+    readonly property bool hasLyrics: Lyrics.hasLyrics
     property int currentLyricIndex: -1
     readonly property bool isCurrentActive: currentLyricIndex >= 0
 
@@ -207,7 +201,6 @@ Item {
 
     Connections {
         function onHasLyricsChanged() {
-            root.hasLyrics = Lyrics.hasLyrics;
             root.forceUpdate();
         }
 
@@ -218,7 +211,6 @@ Item {
         id: lyricsContainer
 
         anchors.fill: parent
-        // Removed clip: true from here so the shadow doesn't get cut off
 
         layer.enabled: Config.background.desktopLyrics.shadow.enabled
         layer.effect: MultiEffect {
@@ -341,11 +333,11 @@ Item {
                     }
                     GradientStop {
                         color: Qt.alpha("black", 1)
-                        position: 0.25 // fadeMargin
+                        position: 0.25
                     }
                     GradientStop {
                         color: Qt.alpha("black", 1)
-                        position: 0.75 // 1 - fadeMargin
+                        position: 0.75
                     }
                     GradientStop {
                         color: Qt.alpha("black", 0)
@@ -354,7 +346,6 @@ Item {
                 }
             }
 
-            // --- Previous Lyric ---
             Item {
                 id: prevLyricItem
 
@@ -387,7 +378,6 @@ Item {
                 }
             }
 
-            // --- Current Lyric ---
             Item {
                 id: lyricContainer
 

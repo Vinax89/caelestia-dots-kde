@@ -82,7 +82,7 @@ Item {
                     color: Colours.palette.m3onSurfaceVariant
                     fontStyle: Tokens.font.icon.extraLarge
                     fill: 1
-                    grade: -2 // Ugh material symbols are such a pain with fill
+                    grade: -2
                 }
             }
 
@@ -179,7 +179,7 @@ Item {
 
         anchors.bottom: parent.bottom
         anchors.left: pfpContainer.right
-        anchors.bottomMargin: -Tokens.padding.small // Clamshell is taller than what it is visually
+        anchors.bottomMargin: -Tokens.padding.small
         anchors.leftMargin: -Tokens.padding.extraLargeIncreased
         implicitSize: Tokens.sizes.dashboard.uptimeSize + Tokens.padding.small * 2
         shape: MaterialShape.ClamShell
@@ -203,7 +203,7 @@ Item {
         anchors.leftMargin: Tokens.spacing.small
         anchors.verticalCenterOffset: Math.round(fontInfo.pointSize * 0.1)
 
-        text: "up " + SysInfo.uptime.split(",").slice(0, 2).join(",") // Max 2 components
+        text: "up " + SysInfo.uptime.split(",").slice(0, 2).join(",")
         width: Tokens.sizes.dashboard.userWidth - x - Tokens.padding.extraLarge
         elide: Text.ElideRight
     }

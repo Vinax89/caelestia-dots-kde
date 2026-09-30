@@ -1,104 +1,50 @@
 name: Version Release
 
 on:
-  workflow_run:
-    workflows: [Validate]
-    types: [completed]
-    branches: [main]
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: version-release
+  cancel-in-progress: true
 
 jobs:
   version-release:
     runs-on: ubuntu-latest
-    # `workflow_run` runs in the context of the base repository with whatever
-    # permissions this job declares -- here, contents: write. The `branches:`
-    # filter above is NOT a provenance check: it matches
-    # workflow_run.head_branch, which for a pull_request run is the *head*
-    # branch, so a fork PR opened from a branch literally named "main" passes
-    # it. Everything below would then run against attacker-controlled code
-    # holding a write-scoped token.
-    #
-    # Require the triggering run to be a push on this repository. Fork PRs
-    # produce event == 'pull_request' and a head_repository that is the fork,
-    # so both halves have to hold.
-    if: >-
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.conclusion == 'success'
-    concurrency:
-      group: version-release
-      cancel-in-progress: true
     permissions:
       contents: write
-    env:
-      GIT_COMMIT: ${{ github.event.workflow_run.head_sha }}
+
+    outputs:
+      release-created: ${{ steps.release-needed.outputs.needed }}
     steps:
-      # Verify the signature BEFORE any of the commit's files reach the disk.
-      # This fetches the commit object into a bare repository: no working tree
-      # is written, no submodule URL is resolved, and nothing from the commit
-      # is read, sourced or executed until it has been anchored to the pinned
-      # fingerprint.
-      - name: Verify release commit signature
-        env:
-          TARGET_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          trusted_fingerprint=968479A1AFF927E37D1A566BB5690EEEBB952194
-
-          workdir="$(mktemp -d)"
-          trap 'rm -rf -- "$workdir"' EXIT
-          verify_home="$workdir/gnupg"
-          mkdir -p "$verify_home"
-          chmod 700 "$verify_home"
-
-          curl -fsSL --proto '=https' --tlsv1.2 https://github.com/web-flow.gpg \
-            -o "$workdir/trusted.asc"
-          fingerprints="$(gpg --homedir "$verify_home" --batch --with-colons \
-            --import-options show-only --import "$workdir/trusted.asc" 2>/dev/null \
-            | awk -F: '$1 == "fpr" { print $10 }')"
-          grep -Fxq "$trusted_fingerprint" <<< "$fingerprints"
-          gpg --homedir "$verify_home" --batch --import "$workdir/trusted.asc" >/dev/null 2>&1
-
-          git init --quiet --bare "$workdir/bare.git"
-          git -C "$workdir/bare.git" remote add origin "https://github.com/$TARGET_REPO.git"
-          git -C "$workdir/bare.git" fetch --quiet --depth=1 origin "$GIT_COMMIT"
-
-          status="$(GNUPGHOME="$verify_home" git -C "$workdir/bare.git" \
-            -c gpg.program=gpg verify-commit --raw "$GIT_COMMIT" 2>&1 || true)"
-          valid_fingerprint="$(printf '%s\n' "$status" \
-            | sed -n 's/^\[GNUPG:\] VALIDSIG \([0-9A-F]*\) .*/\1/p' | head -n1)"
-
-          if [[ "$valid_fingerprint" != "$trusted_fingerprint" ]]; then
-            echo "::error::$GIT_COMMIT is not signed by the trusted release signer."
-            echo "  expected: $trusted_fingerprint"
-            echo "  got:      ${valid_fingerprint:-<no valid signature>}"
-            exit 1
-          fi
-
-          echo "Verified signature on $GIT_COMMIT"
+      - name: Create GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: true
           fetch-depth: 0
           fetch-tags: true
-          submodules: recursive
 
       - name: Fetch main Branch
         run: |
           set -euo pipefail
-          git fetch origin main:refs/remotes/origin/main
+          git fetch origin main:refs/remotes/origin/main --force
 
       - name: Load Version from Config
         run: |
           set -euo pipefail
-
-          # Parse, do not `source`. version.env is data; sourcing it executes it,
-          # which turns any write to that file into arbitrary shell in a job
-          # holding a write-scoped token.
-          VERSION="$(sed -n 's/^VERSION[[:space:]]*=[[:space:]]*//p' \
-            .github/version.env | tr -d '"'"'"' \t\r' | head -n1)"
+          source .github/version.env
 
           if [[ -z "${VERSION:-}" ]]; then
             echo "VERSION is missing in .github/version.env"
@@ -116,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # shellcheck disable=SC2016  # the ${...} below is QML source matched literally
+          # shellcheck disable=SC2016
           ABOUT_BINDING=$(grep -F 'text: CUtils.version ? `v${CUtils.version}` : "…"' shell/modules/nexus/pages/AboutPage.qml | head -n 1 || true)
 
           echo "Config VERSION: $VERSION"
@@ -127,39 +73,47 @@ jobs:
             exit 1
           fi
 
+      - name: Check whether a release is needed
+        id: release-needed
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create or Update Version Tag
+        if: steps.release-needed.outputs.needed == 'true'
         run: |
           set -euo pipefail
 
-          # $GIT_COMMIT was anchored to the pinned release-signer fingerprint by
-          # the "Verify release commit signature" step, before this commit's
-          # files were ever written to disk.
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
 
-          PREVIOUS_VERSION_TAG=$(git rev-parse -q --verify "refs/tags/$VERSION" || true)
+          echo "LAST_TAG=$LAST_TAG" >> "$GITHUB_ENV"
 
-          echo "PREVIOUS_VERSION_TAG=$PREVIOUS_VERSION_TAG" >> "$GITHUB_ENV"
-
-          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-            echo "Tag $VERSION already exists; leaving it unchanged."
-            echo "RELEASE_CREATED=false" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          # Lightweight tags deliberately inherit the verified commit signature.
-          # The updater resolves the tag, then verifies that commit against the
-          # pinned signer fingerprint before executing any checked-out code.
-          git tag "$VERSION" "$GIT_COMMIT"
+          git tag "$VERSION" "$GITHUB_SHA"
           git push origin "refs/tags/$VERSION"
-          echo "RELEASE_CREATED=true" >> "$GITHUB_ENV"
 
       - name: Create or Update Release
-        if: ${{ env.RELEASE_CREATED == 'true' }}
+        if: steps.release-needed.outputs.needed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
-          if [ -n "$PREVIOUS_VERSION_TAG" ]; then
-            git log "$PREVIOUS_VERSION_TAG..$GIT_COMMIT" --no-merges --invert-grep --grep='\[skip ci\]' --pretty='- %s (%h)' > commit_notes.txt
+          if [ -n "$LAST_TAG" ] && [ "$LAST_TAG" != "$VERSION" ]; then
+            git fetch origin dev:refs/remotes/origin/dev --force || true
+
+            SYNC_COMMIT=$(git rev-list "$LAST_TAG..origin/dev" --ancestry-path --merges | tail -n 1 || true)
+
+            if [ -n "$SYNC_COMMIT" ]; then
+              git log "$SYNC_COMMIT..origin/dev" --no-merges --invert-grep --grep='\[skip ci\]' --pretty='- %s (%h)' > commit_notes.txt
+            else
+              git log "$LAST_TAG..$GITHUB_SHA" --no-merges --invert-grep --grep='\[skip ci\]' --pretty='- %s (%h)' > commit_notes.txt
+            fi
           else
             git log origin/main -n 15 --no-merges --invert-grep --grep='\[skip ci\]' --pretty='- %s (%h)' > commit_notes.txt
           fi
@@ -169,59 +123,272 @@ jobs:
             echo
 
             if [ -s commit_notes.txt ]; then
-              cat commit_notes.txt
+              if grep -qiE '^- (major)(\([^)]*\))?:' commit_notes.txt; then
+                echo "#### Major Changes"
+                grep -iE '^- (major)(\([^)]*\))?:' commit_notes.txt | sed -E 's/^- (major)\(([^)]*)\): /- \2: /i; s/^- (major): /- /i'
+                echo
+              fi
+
+              if grep -qiE '^- (feat|feature)(\([^)]*\))?:' commit_notes.txt; then
+                echo "#### Features"
+                grep -iE '^- (feat|feature)(\([^)]*\))?:' commit_notes.txt | sed -E 's/^- (feat|feature)\(([^)]*)\): /- \2: /i; s/^- (feat|feature): /- /i'
+                echo
+              fi
+
+              if grep -qiE '^- (perf|performance)(\([^)]*\))?:' commit_notes.txt; then
+                echo "#### Performance"
+                grep -iE '^- (perf|performance)(\([^)]*\))?:' commit_notes.txt | sed -E 's/^- (perf|performance)\(([^)]*)\): /- \2: /i; s/^- (perf|performance): /- /i'
+                echo
+              fi
+
+              if grep -qiE '^- (fix|bug)(\([^)]*\))?:' commit_notes.txt; then
+                echo "#### Bug Fixes"
+                grep -iE '^- (fix|bug)(\([^)]*\))?:' commit_notes.txt | sed -E 's/^- (fix|bug)\(([^)]*)\): /- \2: /i; s/^- (fix|bug): /- /i'
+                echo
+              fi
             else
               echo "- Maintenance release for $VERSION."
             fi
-
-            echo
-            echo "*May your desktop always reflect the stars.*"
           } > release_notes.md
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release edit "$VERSION" \
-              --title "Caelestia KDE $VERSION" \
+              --title "Caelestia $VERSION" \
               --notes-file release_notes.md \
               --prerelease=false \
               --latest
           else
             gh release create "$VERSION" \
-              --title "Caelestia KDE $VERSION" \
+              --title "Caelestia $VERSION" \
               --notes-file release_notes.md \
               --prerelease=false \
               --latest
           fi
 
-      - name: Update README Contributor Stats
-        if: ${{ env.RELEASE_CREATED == 'true' }}
+      - name: Open Sync PR to dev
+        if: steps.release-needed.outputs.needed == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
-          python3 .github/scripts/contributors.py --update-readme
+          echo "Attempting to open a PR to sync main into dev..."
 
-          if git diff --quiet -- .github/README.md; then
-            echo "No contributor changes to commit."
-            exit 0
+          gh pr create \
+            --base dev \
+            --head main \
+            --title "chore: sync main back to dev after $VERSION" \
+            --body "This is an automated PR to sync the new release tags from \`main\` back into \`dev\`." || true
+
+  build-shell:
+    name: Precompile shell artifacts (x86_64)
+    needs: version-release
+    if: needs.version-release.outputs.release-created == 'true'
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Shell Build Dependencies
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed git github-cli cmake ninja meson autoconf-archive \
+            qt6-base qt6-declarative qt6-shadertools qt6-wayland qt6-tools \
+            kwindowsystem kguiaddons kglobalaccel kconfig networkmanager-qt pulseaudio-qt \
+            libqalculate pipewire libpipewire aubio lm_sensors extra-cmake-modules \
+            fftw ncurses alsa-lib iniparser libglvnd sdl2 portaudio sndio libpulse
+
+      - name: Install Prebuilt CAVA SDK (Arch)
+        run: |
+          set -euo pipefail
+          source scripts/lib/toolchain.sh
+          install_cava_sdk arch
+
+      - name: Load Release Tag
+        run: |
+          set -euo pipefail
+          source .github/version.env
+          echo "TAG=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Configure Shell
+        run: |
+          set -euo pipefail
+          cmake -G Ninja -B shell/build -S shell -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DINSTALL_QSCONFDIR=etc/xdg/quickshell/caelestia \
+            -DINSTALL_LIBDIR=lib/caelestia \
+            -DINSTALL_QMLDIR=lib/qt6/qml
+
+      - name: Build Shell
+        run: |
+          set -euo pipefail
+          cmake --build shell/build -j"$(nproc)"
+
+      - name: Stage Compiled Artifacts
+        run: |
+          set -euo pipefail
+          QT_ABI="$(pkg-config --modversion Qt6Core | grep -oE '^[0-9]+\.[0-9]+')"
+          DESTDIR="$PWD/stage" cmake --install shell/build
+          mkdir -p dist/root/lib/qt6/qml dist/root/lib/caelestia dist/root/quickshell
+          cp -a stage/usr/lib/qt6/qml/Caelestia stage/usr/lib/qt6/qml/M3Shapes dist/root/lib/qt6/qml/
+          cp -a stage/usr/lib/caelestia/version dist/root/lib/caelestia/
+          cp -a stage/usr/etc/xdg/quickshell/caelestia dist/root/quickshell/
+          ARTIFACT="dist/caelestia-kde-x86_64-qt${QT_ABI}.tar.gz"
+          tar -C dist/root -czf "$ARTIFACT" lib quickshell
+          echo "ARTIFACT=$ARTIFACT" >> "$GITHUB_ENV"
+          CHECKSUM="${ARTIFACT}.sha256"
+          sha256sum "$ARTIFACT" | sed "s|$(dirname "$ARTIFACT")/||" > "$CHECKSUM"
+          echo "CHECKSUM=$CHECKSUM" >> "$GITHUB_ENV"
+
+      - name: Attach Shell Artifacts to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # --repo: inside a container gh's git-based repo detection fails ("not a git
+          gh release upload "$TAG" "$ARTIFACT" "$CHECKSUM" --repo "$GITHUB_REPOSITORY" --clobber
+
+  build-source:
+    name: Build AUR source tarball
+    needs: version-release
+    if: needs.version-release.outputs.release-created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Materialize the Submodules the Tarball Inlines
+        run: |
+          set -euo pipefail
+          if [ ! -f .gitmodules ]; then
+            echo "::error::no .gitmodules; the submodules the tarball inlines cannot be resolved"
+            exit 1
           fi
 
-          # Commit through the Contents API rather than `git commit && git push`.
-          #
-          # A local commit made by the runner is unsigned. The updater trusts
-          # commits signed by GitHub's web-flow key, so pushing an unsigned
-          # commit to the branch tip breaks verification for anyone who
-          # verifies the branch head. Commits created through the API are
-          # web-flow signed, which keeps the chain intact.
-          branch="${TARGET_BRANCH:-main}"
-          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/.github/README.md?ref=${branch}" --jq .sha)"
+          mapfile -t submodules < <(
+            git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | cut -d' ' -f2-
+          )
+          if [ "${#submodules[@]}" -eq 0 ]; then
+            echo "::error::.gitmodules declares no submodules; the tarball would carry none"
+            exit 1
+          fi
 
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/.github/README.md" \
-            -f message="[skip ci] Update contributor stats for $VERSION" \
-            -f content="$(base64 -w0 .github/README.md)" \
-            -f sha="$current_sha" \
-            -f branch="$branch" >/dev/null
+          for path in "${submodules[@]}"; do
+            echo "::group::submodule $path"
+            # A .gitmodules entry with no gitlink in this tree has nothing to inline:
+            # the path is either a real directory the tarball already carries or it is
+            # absent, which the PKGBUILD's prepare() reports by name.
+            if ! git ls-files --stage -- "$path" | grep -q '^160000'; then
+              echo "::warning::$path is declared in .gitmodules but is not a submodule in this tree"
+              echo "::endgroup::"
+              continue
+            fi
+            # scripts/lib/submodules.sh is not reused here on purpose: the installer
+            # helper it exposes ends in a plain clone of the submodule's default
+            # branch, and a release tarball has to carry the commits the tag pins.
+            if ! git submodule update --init --recursive --depth 1 --force "$path"; then
+              # A stale gitlink inside a submodule is not this repository's to fix, and
+              # the tarball only needs the submodule's own contents at its pinned commit.
+              echo "::warning::$path does not check out recursively, retrying without it"
+              git submodule update --init --depth 1 --force "$path"
+            fi
+            if [ -z "$(ls -A "$path")" ]; then
+              echo "::error::submodule $path is empty; the PKGBUILD refuses a tarball without it"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
 
-          echo "Committed contributor stats to $branch via the API (web-flow signed)."
+      - name: Load Release Tag
+        run: |
+          set -euo pipefail
+          source .github/version.env
+          echo "TAG=$VERSION" >> "$GITHUB_ENV"
+          echo "PKGVER=${VERSION#v}" >> "$GITHUB_ENV"
+
+      - name: Stage the Tree
+        run: |
+          set -euo pipefail
+          ROOT="caelestia-kde-$PKGVER"
+          mkdir -p "dist/$ROOT"
+          # /dist is anchored: the staging directory lives inside the tree being
+          # staged, and without this rsync copies it into itself.
+          rsync -a --exclude '/dist' --exclude '.git' --exclude '.gitmodules' ./ "dist/$ROOT/"
+          git rev-parse HEAD > "dist/$ROOT/REVISION"
+
+      - name: Build the Tarball
+        run: |
+          set -euo pipefail
+          ARTIFACT="caelestia-kde-v$PKGVER.tar.gz"
+          tar -C dist -czf "$ARTIFACT" "caelestia-kde-$PKGVER"
+          sha256sum "$ARTIFACT" | tee "$ARTIFACT.sha256"
+          du -h "$ARTIFACT"
+          {
+            echo "### $ARTIFACT"
+            printf '%s\n' '```'
+            cat "$ARTIFACT.sha256"
+            printf '%s\n' '```'
+            echo "First entry of the PKGBUILD's \`sha256sums\` array."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "ARTIFACT=$ARTIFACT" >> "$GITHUB_ENV"
+
+      - name: Attach to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "$ARTIFACT" "$ARTIFACT.sha256" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+  build-installer:
+    name: Build installer TUI (${{ matrix.arch }})
+    needs: version-release
+    if: needs.version-release.outputs.release-created == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Build Dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake g++ make
+
+      - name: Load Release Tag
+        run: |
+          set -euo pipefail
+          source .github/version.env
+          echo "TAG=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build Installer TUI
+        run: |
+          set -euo pipefail
+          cmake -B installer/build -DCMAKE_BUILD_TYPE=Release installer/tui
+          cmake --build installer/build -- -j"$(nproc)"
+
+      - name: Attach Prebuilt Installer to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TUI_VERSION="$(tr -d '[:space:]' < installer/data/tui.version)"
+          BINARY="caelestia-install-${{ matrix.arch }}-v${TUI_VERSION}"
+          cp installer/build/caelestia-install "$BINARY"
+          sha256sum "$BINARY" > "$BINARY.sha256"
+          gh release upload "$TAG" "$BINARY" "$BINARY.sha256" --repo "$GITHUB_REPOSITORY" --clobber

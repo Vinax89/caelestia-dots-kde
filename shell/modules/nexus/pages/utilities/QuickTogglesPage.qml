@@ -16,15 +16,17 @@ PageBase {
     ]
     readonly property var toolToggles: [
         { id: "settings", label: qsTr("Settings") },
-        { id: "colorpicker", label: Strings.localizeEnglishSpelling(qsTr("Colour Picker")) },
+        { id: "colorpicker", label: qsTr("Color Picker") },
         { id: "wallpaper", label: qsTr("Wallpaper") },
         { id: "badapple", label: qsTr("Bad Apple") },
     ]
     readonly property var systemToggles: [
         { id: "mic", label: qsTr("Microphone") },
         { id: "dnd", label: qsTr("Do Not Disturb") },
+        { id: "gameMode", label: qsTr("Game Mode") },
         { id: "pauseWallpaper", label: qsTr("Pause Wallpaper") },
         { id: "nightlight", label: qsTr("Night Light") },
+        { id: "easyeffects", label: qsTr("EasyEffects") },
         { id: "restartShell", label: qsTr("Restart Shell") },
     ]
 

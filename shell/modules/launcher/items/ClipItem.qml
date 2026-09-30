@@ -22,8 +22,6 @@ Item {
         root.list.visibilities.launcher = false;
         const preview = root.modelData.preview.length > 30 ? root.modelData.preview.slice(0, 30) + "..." : root.modelData.preview;
 
-        // A pinned entry may have rotated out of cliphist, so `cliphist decode`
-        // can no longer produce it — the stored bytes are the source of truth.
         if (root.isPinned)
             Clipboard.copyPinned(root.modelData.pinId);
         else
@@ -33,41 +31,39 @@ Item {
             Toaster.toast(qsTr("Copied to clipboard"), preview, "content_paste");
     }
 
-    Component.onCompleted: {
-        if (!root.modelData?.isImage) return;
+    function updateImage(): void {
+        if (!root.modelData?.isImage) {
+            imagePreview.imagePath = "";
+            return;
+        }
 
-        // A pinned image has its own stored copy; nothing pre-warms it and no
-        // imageReady will ever arrive for it.
         if (root.isPinned) {
             imagePreview.imagePath = root.modelData.imagePath ?? "";
             return;
         }
 
-        // Check whether the image was already pre-warmed during reload()
-        const cached = Clipboard.getImagePath(root.modelData.id);
-        // FileInfo is not available in QML directly; use a heuristic: if imagePath is
-        // already set by an earlier imageReady emission, we are done. Otherwise listen.
-        // The C++ backend emits imageReady for already-cached files too, so we will
-        // always receive the signal — but set eagerly in case it fires before onCompleted.
-        imagePreview.imagePath = cached;
+        // If already cached on disk, display immediately; otherwise wait for imageReady
+        if (Clipboard.isImageCached(root.modelData.id)) {
+            imagePreview.imagePath = Clipboard.getImagePath(root.modelData.id);
+        } else {
+            imagePreview.imagePath = "";
+        }
     }
+    implicitHeight: (root.modelData?.isImage ?? false) ? Tokens.sizes.launcher.itemHeight * 2 : Tokens.sizes.launcher.itemHeight
+    anchors.left: parent?.left
+    anchors.right: parent?.right
 
-    /// Listen for the imageReady signal from the C++ backend (forwarded via Clipboard singleton).
-    /// This fires as soon as the decoded file is fully written — no timers needed.
+    onModelDataChanged: updateImage()
+    Component.onCompleted: updateImage()
+
     Connections {
-        target: Clipboard
-
         function onImageReady(id: int, path: string): void {
             if (root.modelData?.isImage && id === root.modelData.id)
                 imagePreview.imagePath = path;
         }
+
+        target: Clipboard
     }
-
-    implicitHeight: (root.modelData?.isImage ?? false) ? Tokens.sizes.launcher.itemHeight * 2 : Tokens.sizes.launcher.itemHeight
-
-    anchors.left: parent?.left
-
-    anchors.right: parent?.right
 
     StateLayer {
         radius: Tokens.rounding.large
@@ -102,11 +98,9 @@ Item {
             anchors.leftMargin: (root.modelData?.isImage ?? false) ? Tokens.spacing.medium : 0
             visible: root.modelData?.isImage ?? false
 
-            Image {
+            CachingImage {
                 anchors.fill: parent
-                asynchronous: true
-                fillMode: Image.PreserveAspectCrop
-                source: imagePreview.imagePath.length > 0 ? "file://" + imagePreview.imagePath : ""
+                path: imagePreview.imagePath
             }
         }
 
@@ -123,14 +117,16 @@ Item {
             visible: !(root.modelData?.isImage ?? false)
         }
 
-        MouseArea {
+        StateLayer {
             id: pinIcon
 
-            width: 32
-            height: 32
+            anchors.fill: undefined
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
-            hoverEnabled: true
+            width: 32
+            height: 32
+            radius: Tokens.rounding.full
+
             onClicked: {
                 if (!root.modelData)
                     return;
@@ -145,6 +141,10 @@ Item {
                 text: root.isPinned ? "keep" : "keep_off"
                 fill: root.isPinned ? 1 : 0
                 color: pinIcon.containsMouse ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+
+                Behavior on color {
+                    CAnim {}
+                }
             }
         }
     }

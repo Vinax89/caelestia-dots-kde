@@ -5,8 +5,6 @@ import QtQuick.Layouts
 import Quickshell
 import Caelestia
 import Caelestia.Config
-import Caelestia.Services
-import Caelestia.Services
 import qs.components
 import qs.components.controls
 import qs.services
@@ -21,7 +19,7 @@ ColumnLayout {
     property bool isPinned: {
         if (!model)
             return false;
-        const current = GlobalConfig.launcher.favouriteApps || [];
+        const current = GlobalConfig.bar.dock.pinnedApps || [];
         for (let i = 0; i < current.length; i++) {
             if (model.id === current[i] || (model.entry && model.entry.id === current[i])) {
                 return true;
@@ -30,12 +28,9 @@ ColumnLayout {
         return false;
     }
 
-    readonly property real masterScale: !isNaN(GlobalConfig.bar.previewScale) ? GlobalConfig.bar.previewScale : 1.0
-    readonly property real elementOffset: GlobalConfig.bar.perElementPreviewScale ? (!isNaN(GlobalConfig.bar.previewScales.dock) ? GlobalConfig.bar.previewScales.dock : 0.0) : 0.0
-    readonly property real barScaleOffset: GlobalConfig.bar.previewScaleWithBar ? (!isNaN(GlobalConfig.bar.scale) ? GlobalConfig.bar.scale : 1.0) : 1.0
-    readonly property real scaleOffset: Math.max(0.1, (masterScale + elementOffset) * barScaleOffset)
-    readonly property real elementFontOffset: GlobalConfig.bar.perElementFontScale ? (!isNaN(GlobalConfig.bar.previewFontScales.dock) ? GlobalConfig.bar.previewFontScales.dock : 0.0) : 0.0
-    readonly property real fontScale: Math.max(0.1, scaleOffset + (!isNaN(GlobalConfig.bar.fontScaleOffset) ? GlobalConfig.bar.fontScaleOffset : 0.0) + elementFontOffset)
+    property real scaleOffset: 1.0
+    property real fontScale: 1.0
+    property bool _isSidebarOpen: false
 
     width: 200 * scaleOffset
     implicitWidth: 200 * scaleOffset
@@ -58,7 +53,6 @@ ColumnLayout {
             anchors.margins: Tokens.padding.medium * root.scaleOffset
             spacing: Tokens.spacing.small * root.scaleOffset
 
-            // Pin/Unpin action
             StyledRect {
                 id: pinItem
 
@@ -77,20 +71,20 @@ ColumnLayout {
 
                     onClicked: {
                         if (isPinned) {
-                            const current = GlobalConfig.launcher.favouriteApps ? [...GlobalConfig.launcher.favouriteApps] : [];
+                            const current = GlobalConfig.bar.dock.pinnedApps ? [...GlobalConfig.bar.dock.pinnedApps] : [];
                             let index = current.indexOf(model.id);
                             if (index === -1 && model.entry)
                                 index = current.indexOf(model.entry.id);
                             if (index !== -1) {
                                 current.splice(index, 1);
-                                GlobalConfig.launcher.favouriteApps = current;
+                                GlobalConfig.bar.dock.pinnedApps = current;
                             }
                         } else {
-                            const current = GlobalConfig.launcher.favouriteApps ? [...GlobalConfig.launcher.favouriteApps] : [];
+                            const current = GlobalConfig.bar.dock.pinnedApps ? [...GlobalConfig.bar.dock.pinnedApps] : [];
                             const idToPin = model.entry ? model.entry.id : model.id;
                             if (!current.includes(idToPin)) {
                                 current.push(idToPin);
-                                GlobalConfig.launcher.favouriteApps = current;
+                                GlobalConfig.bar.dock.pinnedApps = current;
                             }
                         }
                         root.popouts.hasCurrent = false;
@@ -106,7 +100,6 @@ ColumnLayout {
                 }
             }
 
-            // New window action
             StyledRect {
                 id: newWinItem
 
@@ -124,16 +117,9 @@ ColumnLayout {
                     radius: newWinItem.radius
 
                     onClicked: {
-                        if (model.entry) {
-                            const subCmd = model.entry.runInTerminal
-                                ? [...GlobalConfig.general.apps.terminal, `${Quickshell.shellDir}/assets/wrap_term_launch.sh`, ...model.entry.command]
-                                : model.entry.command;
-                            const finalCmd = GlobalConfig.services.useSystemd ? ["app2unit", "--", ...subCmd] : subCmd;
-                            Quickshell.execDetached({
-                                command: finalCmd,
-                                workingDirectory: model.entry.workingDirectory
-                            });
-                        }
+                        if (model.entry)
+                            Launch.launchEntry(model.entry);
+
                         root.popouts.hasCurrent = false;
                     }
                 }
@@ -158,7 +144,6 @@ ColumnLayout {
         icon: "close"
         visible: {
             if (!model || !model.toplevels || model.toplevels.length === 0) return false;
-            // Hide for Nexus since it's an internal shell window managed differently
             return !model.toplevels.some(t => t.title && String(t.title).startsWith("Nexus"));
         }
 
@@ -166,10 +151,10 @@ ColumnLayout {
             for (const toplevel of model.toplevels) {
                 if (toplevel.pid) {
                     Quickshell.execDetached({ command: ["kill", "-15", String(toplevel.pid)] });
-                } else if (typeof KWinActiveWindowBridge !== "undefined" && KWinActiveWindowBridge.windowList) {
-                    KWinActiveWindowBridge.closeWindow(toplevel.address);
+                } else if (Kwin.windowList.length > 0) {
+                    Kwin.closeWindow(toplevel.address);
                 } else {
-                    Hypr.dispatch(Hypr.usingLua ? `hl.dsp.window.close({ window = "address:0x${toplevel.address}" })` : `closewindow address:0x${toplevel.address}`);
+                    Kwin.dispatch(Kwin.usingLua ? `hl.dsp.window.close({ window = "address:0x${toplevel.address}" })` : `closewindow address:0x${toplevel.address}`);
                 }
             }
             root.popouts.hasCurrent = false;

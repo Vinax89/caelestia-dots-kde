@@ -1,8 +1,8 @@
 #pragma once
 
-#include "config.hpp"
-
 #include <qquickattachedpropertypropagator.h>
+
+#include "rootnodes.hpp"
 
 namespace caelestia::config {
 
@@ -26,11 +26,11 @@ class Config : public QQuickAttachedPropertyPropagator, public QQmlParserStatus 
     Q_MOC_INCLUDE("overviewconfig.hpp")
     Q_MOC_INCLUDE("serviceconfig.hpp")
     Q_MOC_INCLUDE("sessionconfig.hpp")
-    Q_MOC_INCLUDE("shimejiconfig.hpp")
     Q_MOC_INCLUDE("sidebarconfig.hpp")
     Q_MOC_INCLUDE("userpaths.hpp")
     Q_MOC_INCLUDE("utilitiesconfig.hpp")
     Q_MOC_INCLUDE("winfoconfig.hpp")
+    Q_MOC_INCLUDE("tabswitchconfig.hpp")
 
     Q_PROPERTY(QString screen READ screen WRITE inheritScreen NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::AppearanceConfig* appearance READ appearance NOTIFY sourceChanged)
@@ -46,12 +46,12 @@ class Config : public QQuickAttachedPropertyPropagator, public QQmlParserStatus 
     Q_PROPERTY(const caelestia::config::OsdConfig* osd READ osd NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::OverviewConfig* overview READ overview NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::ServiceConfig* services READ services NOTIFY sourceChanged)
-    Q_PROPERTY(const caelestia::config::ShimejiConfig* shimeji READ shimeji NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::SessionConfig* session READ session NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::SidebarConfig* sidebar READ sidebar NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::UtilitiesConfig* utilities READ utilities NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::WInfoConfig* winfo READ winfo NOTIFY sourceChanged)
     Q_PROPERTY(const caelestia::config::UserPaths* paths READ paths NOTIFY sourceChanged)
+    Q_PROPERTY(const caelestia::config::TabSwitchConfig* tabSwitch READ tabSwitch NOTIFY sourceChanged)
 
 public:
     explicit Config(QObject* parent = nullptr);
@@ -72,14 +72,14 @@ public:
     [[nodiscard]] const OsdConfig* osd() const;
     [[nodiscard]] const OverviewConfig* overview() const;
     [[nodiscard]] const ServiceConfig* services() const;
-    [[nodiscard]] const ShimejiConfig* shimeji() const;
     [[nodiscard]] const SessionConfig* session() const;
     [[nodiscard]] const SidebarConfig* sidebar() const;
     [[nodiscard]] const UtilitiesConfig* utilities() const;
     [[nodiscard]] const WInfoConfig* winfo() const;
     [[nodiscard]] const UserPaths* paths() const;
+    [[nodiscard]] const TabSwitchConfig* tabSwitch() const;
 
-    [[nodiscard]] Q_INVOKABLE static GlobalConfig* forScreen(const QString& screen);
+    [[nodiscard]] Q_INVOKABLE static ConfigRoot* forScreen(const QString& screen);
 
     static Config* qmlAttachedProperties(QObject* object);
 
@@ -98,7 +98,7 @@ private:
 
     bool m_complete = false;
     QString m_screen;
-    GlobalConfig* m_config = nullptr;
+    ConfigRoot* m_config = nullptr;
 };
 
 } // namespace caelestia::config

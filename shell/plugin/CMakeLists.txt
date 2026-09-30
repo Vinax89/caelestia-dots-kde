@@ -10,10 +10,17 @@ if(CAELESTIA_UNITY_BUILD)
     set(CMAKE_UNITY_BUILD_BATCH_SIZE 16)
 endif()
 
+# Normally inherited from the top level project; defaulted here so the plugin
+# can still be configured on its own.
+if(NOT DEFINED INSTALL_QSCONFDIR)
+    set(INSTALL_QSCONFDIR "etc/xdg/quickshell/caelestia" CACHE STRING "Quickshell config install dir")
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS ShaderTools Core Qml Gui Quick QuickControls2 Concurrent Sql Network DBus WaylandClient)
 find_package(KF6WindowSystem REQUIRED)
 find_package(KF6GuiAddons REQUIRED)
 find_package(KF6NetworkManagerQt REQUIRED)
+find_package(KF6PulseAudioQt REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(Qalculate IMPORTED_TARGET libqalculate REQUIRED)
 pkg_check_modules(Pipewire IMPORTED_TARGET libpipewire-0.3 REQUIRED)
@@ -37,6 +44,21 @@ if(NOT Cava_FOUND)
         message(STATUS "Found cava (via find_library): ${Cava_LIBRARY}")
     endif()
 endif()
+
+# The provider is compiled only when cava's headers and library are there, so a build
+# without them ships a shell whose visualiser is dead: no error, nothing in the package
+# to say so, and at runtime only "CavaProvider unavailable, visualiser disabled" in the
+# journal. A distribution build that means to include it asks for it and fails here
+# instead, where the message can name what is missing. A developer build leaves it off
+# and gets the provider or not, as the machine allows.
+option(REQUIRE_CAVA "Fail the configure when libcava is missing" OFF)
+if(NOT Cava_FOUND AND REQUIRE_CAVA)
+    message(FATAL_ERROR
+        "libcava was not found and REQUIRE_CAVA is on: this build would leave out the "
+        "audio visualiser. Install libcava (its headers, its shared library and its "
+        "pkg-config file) and configure again. Note that Arch's `cava` package ships only "
+        "the cava executable - the library comes from the separate libcava package.")
+endif()
 include(cmake/sensorslib.cmake)
 
 set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
@@ -44,5 +66,9 @@ qt_standard_project_setup(REQUIRES 6.9)
 
 include(cmake/pch.cmake)
 include(cmake/qml-module.cmake)
+
+# Header only helpers
+add_library(caelestia-util INTERFACE)
+target_include_directories(caelestia-util INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_subdirectory(src/Caelestia)

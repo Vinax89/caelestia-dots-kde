@@ -12,7 +12,6 @@ set. It covers idempotent install/update, a failed batch followed by retry,
 cancellation of an active transaction, and restoration of captured package
 state after a simulated downstream failure.
 
-The `CAELESTIA_INTEGRATION_PACKAGES` override is intentionally undocumented for
-end users. It changes only the requested package set and third-party repository
-setup; package installation, retry, and installed-state checks remain the
-production code paths.
+The fixture calls the shared production `install_if_missing` helper for `tree`
+and `jq`; it does not run the desktop installer or third-party repository setup.
+The container matrix is also part of the Validate workflow.

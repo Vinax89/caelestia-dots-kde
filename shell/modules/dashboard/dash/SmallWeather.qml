@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Caelestia.Config
 import qs.components
@@ -51,6 +53,9 @@ Item {
             font: Tokens.font.body.small
 
             elide: Text.ElideRight
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
+            horizontalAlignment: Text.AlignHCenter
             width: Math.min(implicitWidth, root.parent.width - icon.implicitWidth - info.anchors.leftMargin - Tokens.padding.extraLargeIncreased)
         }
     }

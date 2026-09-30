@@ -16,10 +16,70 @@ Searcher {
     }
 
     function previewVariant(variant: string): void {
-        const cmd = `import json\nfrom caelestia.utils.scheme import get_scheme\nscheme = get_scheme()\nscheme._variant = "${variant}"\nscheme._update_colours()\nprint(json.dumps({"name": scheme.name, "flavour": scheme.flavour, "mode": scheme.mode, "variant": scheme.variant, "colours": scheme.colours}))`;
-        getPreviewColoursProc.command = ["python3", "-c", cmd];
+        // The scheme command derives the preview from whatever is in effect: the
+        // wallpaper for a dynamic scheme, the shipped colors otherwise. It prints
+        // the palette instead of applying it, which is what a preview is.
+        getPreviewColoursProc.command = ["caelestia", "scheme", "set", "--preview", "-v", variant, ...Colours.smartArg];
         getPreviewColoursProc.running = true;
     }
+
+    useFuzzy: GlobalConfig.launcher.useFuzzy.variants
+    list: [
+        Variant {
+            variant: "vibrant"
+            icon: "sentiment_very_dissatisfied"
+            name: qsTr("Vibrant")
+            description: qsTr("A high chroma palette. The primary palette's chroma is at maximum.")
+        },
+        Variant {
+            variant: "tonalspot"
+            icon: "android"
+            name: qsTr("Tonal Spot")
+            description: qsTr("Default for Material theme colors. A pastel palette with a low chroma.")
+        },
+        Variant {
+            variant: "expressive"
+            icon: "compare_arrows"
+            name: qsTr("Expressive")
+            description: qsTr("A medium chroma palette. The primary palette's hue is different from the seed color, for variety.")
+        },
+        Variant {
+            variant: "fidelity"
+            icon: "compare"
+            name: qsTr("Fidelity")
+            description: qsTr("Matches the seed color, even if the seed color is very bright (high chroma).")
+        },
+        Variant {
+            variant: "content"
+            icon: "sentiment_calm"
+            name: qsTr("Content")
+            description: qsTr("Almost identical to fidelity.")
+        },
+        Variant {
+            variant: "fruitsalad"
+            icon: "nutrition"
+            name: qsTr("Fruit Salad")
+            description: qsTr("A playful theme - the seed color's hue does not appear in the theme.")
+        },
+        Variant {
+            variant: "rainbow"
+            icon: "looks"
+            name: qsTr("Rainbow")
+            description: qsTr("A playful theme - the seed color's hue does not appear in the theme.")
+        },
+        Variant {
+            variant: "neutral"
+            icon: "contrast"
+            name: qsTr("Neutral")
+            description: qsTr("Close to grayscale, a hint of chroma.")
+        },
+        Variant {
+            variant: "monochrome"
+            icon: "filter_b_and_w"
+            name: qsTr("Monochrome")
+            description: qsTr("All colors are grayscale, no chroma.")
+        }
+    ]
 
     Process {
         id: getPreviewColoursProc
@@ -32,65 +92,6 @@ Searcher {
         }
     }
 
-    list: [
-        Variant {
-            variant: "vibrant"
-            icon: "sentiment_very_dissatisfied"
-            name: qsTr("Vibrant")
-            description: qsTr("A high chroma palette. The primary palette's chroma is at maximum.")
-        },
-        Variant {
-            variant: "tonalspot"
-            icon: "android"
-            name: qsTr("Tonal Spot")
-            description: Strings.localizeEnglishSpelling(qsTr("Default for Material theme colours. A pastel palette with a low chroma."))
-        },
-        Variant {
-            variant: "expressive"
-            icon: "compare_arrows"
-            name: qsTr("Expressive")
-            description: Strings.localizeEnglishSpelling(qsTr("A medium chroma palette. The primary palette's hue is different from the seed colour, for variety."))
-        },
-        Variant {
-            variant: "fidelity"
-            icon: "compare"
-            name: qsTr("Fidelity")
-            description: Strings.localizeEnglishSpelling(qsTr("Matches the seed colour, even if the seed colour is very bright (high chroma)."))
-        },
-        Variant {
-            variant: "content"
-            icon: "sentiment_calm"
-            name: qsTr("Content")
-            description: qsTr("Almost identical to fidelity.")
-        },
-        Variant {
-            variant: "fruitsalad"
-            icon: "nutrition"
-            name: qsTr("Fruit Salad")
-            description: Strings.localizeEnglishSpelling(qsTr("A playful theme - the seed colour's hue does not appear in the theme."))
-        },
-        Variant {
-            variant: "rainbow"
-            icon: "looks"
-            name: qsTr("Rainbow")
-            description: Strings.localizeEnglishSpelling(qsTr("A playful theme - the seed colour's hue does not appear in the theme."))
-        },
-        Variant {
-            variant: "neutral"
-            icon: "contrast"
-            name: qsTr("Neutral")
-            description: qsTr("Close to grayscale, a hint of chroma.")
-        },
-        Variant {
-            variant: "monochrome"
-            icon: "filter_b_and_w"
-            name: qsTr("Monochrome")
-            description: Strings.localizeEnglishSpelling(qsTr("All colours are grayscale, no chroma."))
-        }
-    ]
-
-    useFuzzy: GlobalConfig.launcher.useFuzzy.variants
-
     component Variant: QtObject {
         required property string variant
         required property string icon
@@ -101,7 +102,8 @@ Searcher {
             if (list) {
                 list.visibilities.launcher = false;
             }
-            Quickshell.execDetached(["caelestia", "scheme", "set", "-v", variant]);
+            GlobalConfig.services.smartScheme = false;
+            Quickshell.execDetached(["caelestia", "scheme", "set", "--no-smart", "-v", variant]);
         }
     }
 }

@@ -57,7 +57,7 @@ ColumnLayout {
 
         model: FolderListModel {
             folder: "file://" + Paths.recsdir
-            nameFilters: ["recording_*.mp4"]
+            nameFilters: ["recording_*.mp4", "recording_*.gif"]
             sortField: FolderListModel.Time
             sortReversed: false
         }
@@ -94,7 +94,7 @@ ColumnLayout {
                     if (!matches)
                         return time;
                     const date = new Date(...matches.slice(1));
-                    date.setMonth(date.getMonth() - 1); // Woe (months start from 0)
+                    date.setMonth(date.getMonth() - 1);
                     return qsTr("Recording at %1").arg(Qt.formatDateTime(date, Qt.locale()));
                 }
                 color: Colours.palette.m3onSurfaceVariant
@@ -171,7 +171,7 @@ ColumnLayout {
                 MaterialIcon {
                     Layout.alignment: Qt.AlignHCenter
                     text: "scan_delete"
-                    color: Colours.palette.m3onSurfaceVariant
+                    color: Colours.palette.m3outline
                     fontStyle: Tokens.font.icon.extraLarge
 
                     opacity: root.props.recordingListExpanded ? 1 : 0
@@ -199,7 +199,7 @@ ColumnLayout {
                     MaterialIcon {
                         Layout.alignment: Qt.AlignHCenter
                         text: "scan_delete"
-                        color: Colours.palette.m3onSurfaceVariant
+                        color: Colours.palette.m3outline
 
                         opacity: !root.props.recordingListExpanded ? 1 : 0
                         scale: !root.props.recordingListExpanded ? 1 : 0
@@ -222,7 +222,7 @@ ColumnLayout {
 
                     StyledText {
                         text: qsTr("No recordings found")
-                        color: Colours.palette.m3onSurfaceVariant
+                        color: Colours.palette.m3outline
                     }
                 }
             }

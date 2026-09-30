@@ -6,7 +6,6 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Caelestia.Config
-import Caelestia.Services
 import qs.components
 import qs.services
 
@@ -16,6 +15,7 @@ Item {
     required property var bar
     required property ShellScreen screen
     required property bool fullscreen
+    Config.screen: root.screen.name
     readonly property int barThickness: bar.thickness
 
     implicitWidth: container.implicitWidth
@@ -23,50 +23,59 @@ Item {
 
     StyledClippingRect {
         id: container
-        // Removed manual monitorCenter logic as it's handled natively by Bar.qml layout zones
 
         readonly property bool onSpecial: false
-        property int workspaceCount: {
-            if (typeof KWinWorkspaceState !== "undefined" && KWinWorkspaceState.workspaces.length > 0) {
-                return KWinWorkspaceState.workspaces.length;
-            }
-            return Config.bar.workspaces.shown;
-        }
-        property int activeWsId: {
-            if (typeof KWinWorkspaceState !== "undefined" && KWinWorkspaceState.activeId > 0) {
-                return KWinWorkspaceState.activeId;
-            }
-            return 1;
-        }
+        readonly property bool isHorizontal: root.bar.isHorizontal
+        property var kwinWindowList: Kwin.windowList
+
+        readonly property int desktopCount: Math.max(1, Kwin.workspaces.length)
+        readonly property int activeWsId: Kwin.activeWorkspaceFor(root.screen.name)
+        readonly property int shown: Math.max(1, Config.bar.workspaces.shown)
         readonly property var occupied: {
-            let occ = {};
-            const count = container.workspaceCount;
-            for (let i = 1; i <= count; ++i) {
+            const occ = {};
+            for (let i = 1; i <= container.desktopCount; ++i) {
                 occ[i] = false;
             }
             const kwinList = container.kwinWindowList;
             if (kwinList) {
                 for (let i = 0; i < kwinList.length; ++i) {
                     const w = kwinList[i];
+                    if (Config.bar.workspaces.perMonitor && w.output !== root.screen.name)
+                        continue;
                     if (w.workspace && typeof w.workspace.id === "number") {
                         occ[w.workspace.id] = true;
-                    }
-                }
-            } else if (typeof Hypr !== "undefined") {
-                const wins = Hypr.toplevels.values;
-                for (let i = 0; i < wins.length; ++i) {
-                    if (wins[i].workspace && typeof wins[i].workspace.id === "number") {
-                        occ[wins[i].workspace.id] = true;
                     }
                 }
             }
             return occ;
         }
-        readonly property int groupOffset: Math.floor((activeWsId - 1) / container.workspaceCount) * container.workspaceCount
+        readonly property var wsIds: {
+            if (Config.bar.workspaces.showUnoccupied) {
+                const ids = [];
+                const start = Math.floor((container.activeWsId - 1) / container.shown) * container.shown;
+                for (let i = 0; i < container.shown; ++i) {
+                    const id = start + i + 1;
+                    if (id <= container.desktopCount)
+                        ids.push(id);
+                }
+                return ids;
+            }
+            const ids = [];
+            for (let id = 1; id <= container.desktopCount; ++id) {
+                if (container.occupied[id] || id === container.activeWsId)
+                    ids.push(id);
+            }
+            const currentIdx = ids.indexOf(container.activeWsId);
+            if (currentIdx < 0)
+                return [];
+            const end = Math.max(currentIdx + 1, Math.min(container.shown, ids.length));
+            return ids.slice(Math.max(0, end - container.shown), end);
+        }
+        readonly property var pills: {
+            void workspaces.count;
+            return container.wsIds.map((_, i) => workspaces.itemAt(i)).filter(p => p);
+        }
         property real blur: onSpecial ? 1 : 0
-        readonly property bool isHorizontal: Config.bar.position === "top" || Config.bar.position === "bottom"
-        // Force QML dependency tracker to bind to windowList correctly
-        property var kwinWindowList: KWinActiveWindowBridge.windowList
 
         implicitWidth: isHorizontal ? (layout.implicitWidth + Tokens.padding.small) : barThickness
         implicitHeight: isHorizontal ? barThickness : (layout.implicitHeight + Tokens.padding.small)
@@ -75,12 +84,10 @@ Item {
 
         Connections {
             function onWorkspacesChanged() {
-                if (typeof KWinActiveWindowBridge !== "undefined") {
-                    KWinActiveWindowBridge.refreshWindows();
-                }
+                Kwin.refreshWindows();
             }
 
-            target: typeof KWinWorkspaceState !== "undefined" ? KWinWorkspaceState : null
+            target: Kwin
         }
         Item {
             anchors.fill: parent
@@ -96,12 +103,28 @@ Item {
             Loader {
                 asynchronous: true
                 active: Config.bar.workspaces.occupiedBg
-                anchors.fill: parent
-                anchors.margins: Tokens.padding.extraSmall
+                anchors.fill: layout
                 sourceComponent: OccupiedBg {
-                    workspaces: workspaces
-                    occupied: container.occupied
-                    groupOffset: container.groupOffset
+                    workspaces: container.pills
+                    wsSpacing: Math.floor(Tokens.spacing.small)
+                    isHorizontal: container.isHorizontal
+                }
+            }
+            Loader {
+                asynchronous: true
+                active: opacity > 0
+                opacity: Config.bar.workspaces.showUnoccupied ? 0 : 1
+                anchors.fill: layout
+                sourceComponent: GapMarkers {
+                    workspaces: container.pills
+                    wsSpacing: Math.floor(Tokens.spacing.small)
+                    isHorizontal: container.isHorizontal
+                }
+
+                Behavior on opacity {
+                    Anim {
+                        type: Anim.DefaultEffects
+                    }
                 }
             }
             GridLayout {
@@ -117,12 +140,15 @@ Item {
                 Repeater {
                     id: workspaces
 
-                    model: container.workspaceCount
+                    model: container.wsIds
 
                     Workspace {
+                        required property int modelData
+
+                        ws: modelData
                         activeWsId: container.activeWsId
                         occupied: container.occupied
-                        groupOffset: container.groupOffset
+                        screenName: root.screen.name
                     }
                 }
             }
@@ -133,30 +159,29 @@ Item {
                 active: Config.bar.workspaces.activeIndicator
                 sourceComponent: ActiveIndicator {
                     activeWsId: container.activeWsId
-                    workspaces: workspaces
+                    workspaces: container.pills
                     mask: layout
                     fullscreen: root.fullscreen
+                    screenName: root.screen.name
                 }
             }
             MouseArea {
                 anchors.fill: layout
                 onClicked: event => {
-                    const ws = (layout.childAt(event.x, event.y) as Workspace)?.ws;
+                    const pill = container.pills.find(p => container.isHorizontal ? event.x >= p.x && event.x <= p.x + p.width : event.y >= p.y && event.y <= p.y + p.height);
+                    const ws = pill?.ws;
                     if (!ws)
                         return;
-                    if (container.activeWsId !== ws) {
-                        if (typeof KWinWorkspaceState !== "undefined") {
-                            KWinWorkspaceState.setDesktop(ws);
-                        }
-                    }
+                    if (container.activeWsId !== ws)
+                        Kwin.setDesktop(ws);
                 }
                 onWheel: event => {
                     if (!Config.bar.scrollActions.workspaces) return;
 
                     if (event.angleDelta.y > 0 || event.angleDelta.x > 0) {
-                        KWinWorkspaceState.previousDesktop();
+                        Kwin.previousDesktop();
                     } else if (event.angleDelta.y < 0 || event.angleDelta.x < 0) {
-                        KWinWorkspaceState.nextDesktop();
+                        Kwin.nextDesktop();
                     }
                 }
             }

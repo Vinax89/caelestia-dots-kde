@@ -29,27 +29,15 @@ Singleton {
     property bool loaded: false
     property bool checkingUpdates: false
 
-    // Periodic auto-check heartbeat (drives the tray indicator popout's
-    // "last check X ago / next check in Y" readout, CachyOS-updater style).
-    // A single-shot timer is restarted every time a check completes so the
-    // next auto-check always lands one interval after the most recent one,
-    // manual or otherwise.
     property double lastCheckMs: 0
 
-    property int checkIntervalMs: 1800000 // 30 minutes
+    property int checkIntervalMs: 1800000
 
-    // Dev-branch commit pagination: the update checker only fetches the
-    // first page (devCommitLimit commits) and exposes a "load more" affordance
-    // for the rest, so we never pull the whole dev history up front.
     property int devCommitLimit: 10
     property int devCommitOffset: 0
     property bool hasMoreCommits: false
     property bool loadingMoreCommits: false
 
-    // ── Update process state ────────────────────────────────────────────
-    // Lives on the singleton (rather than UpdatesPage) so it survives the
-    // page being destroyed/recreated when the user navigates to a different
-    // top-level Nexus page and back (see Pages.qml `loadPage`).
     property string updateLogs: ""
     property bool updateRunning: false
     property bool updateCancelled: false
@@ -73,7 +61,7 @@ Singleton {
         devCommitOffset = 0;
         hasMoreCommits = false;
         checkClaudeCodeUpdate();
-        
+
         let bashCmd = `
     CURRENT_BRANCH="$1"
     LOCAL_COMMIT="$(cat \"$HOME/.config/quickshell/caelestia/.current_commit\" 2>/dev/null || true)"
@@ -147,10 +135,29 @@ if [ "$CURRENT_BRANCH" = "main" ]; then
     if [ -z "$FROM_VERSION" ] && [ -f "$HOME/.config/quickshell/caelestia/.github/version.env" ]; then
         FROM_VERSION="$(sed -nE 's/^VERSION[[:space:]]*=[[:space:]]*([A-Za-z0-9._-]+).*/\\1/p' "$HOME/.config/quickshell/caelestia/.github/version.env" | head -n 1)"
     fi
+    # The compiled version helper, which is what the caelestia command reports from as
+    # well. On a packaged install it is the only one of these that answers: there is no
+    # checkout for git to describe and no version.env beside the config, and without it the
+    # update row stays empty because an unknown version is never offered as updatable.
+    #
+    # This comment and the script below avoid naming template-literal syntax directly.
+    # Both of its forms are syntax to the QML template literal they live in:
+    # dollar-brace interpolation is evaluated as QML before bash is handed the script, and
+    # an unescaped backtick ends the literal, which stops the file parsing and takes every
+    # singleton that imports this service down with it. Each has broken this file once,
+    # the backtick in a comment that named a command in backticks, the interpolation in
+    # the comment that replaced it.
+    VER_HELPER_DIR="$CAELESTIA_LIB_DIR"
+    if [ -z "$VER_HELPER_DIR" ]; then
+        VER_HELPER_DIR=/usr/lib/caelestia
+    fi
+    if [ -z "$FROM_VERSION" ] && [ -x "$VER_HELPER_DIR/version" ]; then
+        FROM_VERSION="$("$VER_HELPER_DIR/version" -s 2>/dev/null | awk '{ sub(/,/, "", $2); print $2 }')"
+    fi
     [ -n "$FROM_VERSION" ] || FROM_VERSION="unknown"
     FROM_VERSION="$(normalize_version "$FROM_VERSION")"
 
-    TAG_LINES="$(git -C "$REPO" for-each-ref --sort=-creatordate --format='%(refname:short)|%(creatordate:iso8601-strict)' refs/tags 2>/dev/null || true)"
+    TAG_LINES="$(git -C "$REPO" for-each-ref --sort=-creatordate --format='%(refname:short)|%(creatordate:iso8601-strict)' 'refs/tags/v*' 2>/dev/null || true)"
     LATEST_VERSION="$(printf '%s\n' "$TAG_LINES" | sed -n '1s/|.*//p')"
     PREVIOUS_VERSION="$(printf '%s\n' "$TAG_LINES" | sed -n '2s/|.*//p')"
     [ -n "$LATEST_VERSION" ] || LATEST_VERSION="$FROM_VERSION"
@@ -229,7 +236,7 @@ def fetch_releases() -> list:
         return []
 
 try:
-    raw_tags = run_git("for-each-ref", "--sort=-creatordate", "--format=%(refname:short)|%(creatordate:iso8601-strict)", "refs/tags")
+    raw_tags = run_git("for-each-ref", "--sort=-creatordate", "--format=%(refname:short)|%(creatordate:iso8601-strict)", "refs/tags/v*")
 except Exception:
     raise SystemExit(0)
 
@@ -418,11 +425,10 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
         root.updateCancelled = true;
         updateProcess.running = false;
         root.updateRunning = false;
-        root.updateStatus = qsTr("Cancelled");
-        root.updateLogs += "\n[Cancelled by user]";
+        root.updateStatus = qsTr("Canceled");
+        root.updateLogs += "\n[Canceled by user]";
     }
 
-    // Process to read local commit and saved branch
     Process {
         id: localCommitProcess
 
@@ -464,7 +470,7 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
                     let parsedCommitCount = 0;
                     let parsedHasMore = false;
                     root.availableBranches = ["main", "dev"];
-                    
+
                     for (let i = 0; i < lines.length; i++) {
                         const line = lines[i].trim();
                         if (line === "") continue;
@@ -483,7 +489,6 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
                             parsedVersionSummaryMode = true;
                             parsedPendingCount = isNaN(count) ? 1 : Math.max(1, count);
                             parsedHasUpdate = parsedPendingCount > 0;
-                            // Show only version entries in main mode; no commit-level rows.
                             continue;
                         }
                         if (line.startsWith("META|")) {
@@ -513,7 +518,6 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
                                 });
                                 parsedVersions.push(tag);
                             } catch (_ignored) {
-                                // Ignore malformed release lines and keep parsing.
                             }
                             continue;
                         }
@@ -537,7 +541,6 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
                             continue;
                         }
                         if (line.startsWith("COMMIT\u001f")) {
-                            // COMMIT<US>fullHash<US>shortHash<US>subject<US>author<US>date<US>parents
                             const parts = line.split("\u001f");
                             parsedVersionSummaryMode = false;
                             const parentsField = (parts[6] || "").trim();
@@ -581,7 +584,6 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
                     }
 
                     if (!parsedVersionSummaryMode && parsedLocalCommitFull === "") {
-                        // No installed commit on record yet: can't say what's pending.
                         parsedPendingCount = 0;
                         parsedHasUpdate = false;
                     }
@@ -619,10 +621,6 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
                         if (!root.availableVersions.includes(root.targetVersion)) {
                             root.targetVersion = root.availableVersions.length > 0 ? root.availableVersions[0] : "";
                         }
-                        // Leave currentVersion as "unknown" when the installed
-                        // version could not be resolved — pretending the newest
-                        // release is installed hides the real state and invites
-                        // wrong upgrade/downgrade offers.
                         if (root.previousVersion === "unknown" && root.availableVersions.length > 1) {
                             root.previousVersion = root.availableVersions[1];
                         }
@@ -637,9 +635,6 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
         }
     }
 
-    // Fetch the next page of dev-branch commits. Unlike checkUpdates() this
-    // does not re-clone/re-fetch or re-resolve branches — the bare repo
-    // already exists, so it's just a git log with a --skip offset.
     Process {
         id: moreCommitsProcess
 
@@ -711,12 +706,9 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
 
     property alias buildShell: updaterSettings.buildShell
 
-    // ---- Claude Code (the `claude` CLI backing the AI assistant) ----
-    // Checked alongside the shell's own updates so the AI settings page can offer
-    // "Update" or "Check for updates" without having to poll on its own.
-    property string claudeCodeVersion: ""       // installed, "" when not installed
+    property string claudeCodeVersion: ""
 
-    property string claudeCodeLatestVersion: "" // newest published, "" when unknown
+    property string claudeCodeLatestVersion: ""
 
     property bool claudeCodeChecking: false
 
@@ -737,9 +729,6 @@ git -C "$REPO" log --format="COMMIT%x1f%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1f%P" --ski
     Process {
         id: claudeCodeProcess
 
-        // Prints "<installed>|<latest>". The published version comes from the same
-        // endpoint claude.ai/install.sh reads, which is what the settings page's
-        // install/update button runs, so the two can't disagree about what "latest" is.
         command: ["sh", "-c", `
 BIN="$HOME/.local/bin/claude"
 INSTALLED=""
@@ -790,7 +779,7 @@ echo "$INSTALLED|$LATEST"
     Process {
         id: updateProcess
 
-        command: [Paths.absolutePath("~/.local/bin/caelestia-update"), root.currentBranch]
+        command: [Paths.bin("caelestia-update"), root.currentBranch]
             .concat(root.targetVersion !== "" ? [root.targetVersion] : [])
         environment: ({
             CAELESTIA_SKIP_DEPLOY: updaterSettings.deployConfigs ? "0" : "1",
@@ -815,7 +804,7 @@ echo "$INSTALLED|$LATEST"
             root.lastUpdateOutputMs = 0;
             if (root.updateCancelled) {
                 root.updateCancelled = false;
-                root.updateStatus = qsTr("Cancelled");
+                root.updateStatus = qsTr("Canceled");
                 return;
             }
             if (code === 0) {

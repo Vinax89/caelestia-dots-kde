@@ -26,6 +26,8 @@ Item {
     readonly property alias star2: star2
     readonly property alias star3: star3
 
+    readonly property bool onScreen: Window.window ? Window.window.visible : false
+
     signal animationCompleted
 
     implicitWidth: 128
@@ -161,7 +163,7 @@ Item {
     }
 
     SequentialAnimation {
-        running: !root.skipIntroAnimation
+        running: root.onScreen && !root.skipIntroAnimation
         onFinished: root.animationCompleted()
 
         ParallelAnimation {
@@ -369,7 +371,7 @@ Item {
     }
 
     SequentialAnimation {
-        running: true
+        running: root.onScreen
         loops: Animation.Infinite
 
         PauseAnimation {

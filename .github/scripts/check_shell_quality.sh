@@ -119,6 +119,9 @@ is_posix_sh_script() {
 strict_failed=0
 strict_exempt=0
 for f in "${SHELL_FILES[@]}"; do
+    # Sourced modules deliberately inherit their caller's shell options. Requiring
+    # errexit inside them would silently change the behavior of the updater and tests.
+    case "$f" in scripts/lib/*|tests/helpers.sh) continue ;; esac
     if grep -qE 'set\s+-euo\s+pipefail|set\s+-eu\s+-o\s+pipefail' "$f" 2>/dev/null; then
         continue
     fi
@@ -152,6 +155,7 @@ echo -e "${BOLD}=== Privilege Wrapper Check ===${RESET}"
 # real binary to avoid recursing into itself.
 wrapper_failed=0
 while IFS= read -r -d '' f; do
+    [[ "$f" == scripts/lib/privileges.sh ]] && continue
     if grep -nE '(^|[^[:alnum:]_/])/(usr/)?bin/sudo\b' "$f" >/dev/null 2>&1; then
         log_err "$f calls sudo by absolute path, bypassing the PATH privilege wrapper"
         wrapper_failed=1

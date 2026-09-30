@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Layouts
+import Caelestia.Components
 import Caelestia.Config
-import Caelestia.Internal
+import Caelestia.Services
 import qs.components
-import qs.components.misc
 import qs.services
 
 StyledRect {
@@ -15,7 +15,7 @@ StyledRect {
     implicitWidth: Tokens.sizes.dashboard.perfNetworkCardWidth
     implicitHeight: Tokens.sizes.dashboard.perfNetworkCardHeight
 
-    Ref {
+    ServiceRef {
         service: NetworkUsage
     }
 
@@ -42,7 +42,6 @@ StyledRect {
             }
         }
 
-        // Sparkline graph
         Item {
             Layout.topMargin: Tokens.spacing.medium
             Layout.bottomMargin: Tokens.spacing.small
@@ -90,17 +89,15 @@ StyledRect {
                 }
             }
 
-            // "Collecting data" placeholder
             StyledText {
                 anchors.centerIn: parent
                 text: qsTr("Collecting data...")
                 font: Tokens.font.body.small
-                color: Colours.palette.m3onSurfaceVariant
+                color: Colours.palette.m3outline
                 visible: NetworkUsage.downloadBuffer.count < 2
             }
         }
 
-        // Download row
         RowLayout {
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
@@ -122,16 +119,12 @@ StyledRect {
             }
 
             StyledText {
-                text: {
-                    const fmt = NetworkUsage.formatBytes(NetworkUsage.downloadSpeed ?? 0);
-                    return fmt ? `${fmt.value.toFixed(1)} ${fmt.unit}` : "0.0 B/s";
-                }
+                text: Units.formatBytes(NetworkUsage.downloadSpeed ?? 0, true)
                 font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
                 color: Colours.palette.m3tertiary
             }
         }
 
-        // Upload row
         RowLayout {
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
@@ -153,16 +146,12 @@ StyledRect {
             }
 
             StyledText {
-                text: {
-                    const fmt = NetworkUsage.formatBytes(NetworkUsage.uploadSpeed ?? 0);
-                    return fmt ? `${fmt.value.toFixed(1)} ${fmt.unit}` : "0.0 B/s";
-                }
+                text: Units.formatBytes(NetworkUsage.uploadSpeed ?? 0, true)
                 font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
                 color: Colours.palette.m3secondary
             }
         }
 
-        // Session totals
         RowLayout {
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
@@ -184,11 +173,7 @@ StyledRect {
             }
 
             StyledText {
-                text: {
-                    const down = NetworkUsage.formatBytesTotal(NetworkUsage.downloadTotal ?? 0);
-                    const up = NetworkUsage.formatBytesTotal(NetworkUsage.uploadTotal ?? 0);
-                    return (down && up) ? `↓${down.value.toFixed(1)}${down.unit} ↑${up.value.toFixed(1)}${up.unit}` : "↓0.0B ↑0.0B";
-                }
+                text: `↓${Units.formatBytes(NetworkUsage.downloadTotal ?? 0)} ↑${Units.formatBytes(NetworkUsage.uploadTotal ?? 0)}`
                 font: Tokens.font.body.small
                 color: Colours.palette.m3onSurfaceVariant
             }

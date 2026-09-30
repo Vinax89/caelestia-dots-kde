@@ -71,8 +71,6 @@ Item {
 
     property real savedContentY: -1
 
-    // Refresh the model list when switching to an OpenAI-compatible provider, so a
-    // key added after startup takes effect without a reload.
     onProviderChanged: {
         cancelRateLimitRetry();
         if (isOpenaiCompat)
@@ -121,10 +119,6 @@ Item {
         loadHistory();
     }
 
-    // ── XHR network error handling ────────────────────────────────
-    // QML's XMLHttpRequest does not fire onreadystatechange for network
-    // failures (DNS, connection refused, timeout). Without an onerror
-    // handler the UI silently hangs with a loading indicator forever.
 
     function logFetchError(provider) {
         Logger.log("[AI] Network error fetching models from " + (provider || "unknown"));
@@ -135,14 +129,13 @@ Item {
         isThinking = false;
         inAgentLoop = false;
         currentActionText = "";
-        // Mark the last (assistant) bubble as failed so the user sees feedback.
         for (var ei = chatHistory.count - 1; ei >= 0; ei--) {
             var em = chatHistory.get(ei);
             if (!em.isUser && !em.isFinished) {
                 chatHistory.setProperty(ei, "isFinished", true);
                 if (!em.text)
                     chatHistory.setProperty(ei, "text",
-                        "⚠️ Network error — check your connection and try again.");
+                        "⚠️ Network error - check your connection and try again.");
                 break;
             }
         }
@@ -150,9 +143,6 @@ Item {
 
     property var ollamaModelsList: []
 
-    // Every provider's model list is discovered from that provider, so none of
-    // them need editing here when a vendor ships a new model. Anthropic's list
-    // comes from GET /v1/models (needs the API key the provider requires anyway).
     property var claudeModelsList: []
 
     function fetchClaudeModels() {
@@ -181,7 +171,6 @@ Item {
                 }
                 if (list.length === 0)
                     return;
-                // Newest first — the API returns them in creation order.
                 list.reverse();
                 root.claudeModelsList = list;
                 if (list.indexOf(GlobalConfig.ai.defaultClaudeModel) === -1)
@@ -194,15 +183,8 @@ Item {
         xhr.send();
     }
 
-    // Model choices for the Claude Code (subscription CLI) provider. "default"
-    // means: don't pass --model at all and let the CLI use whatever the
-    // subscription defaults to. The concrete ids are read out of the installed
-    // binary by fetchClaudeCodeModels(), so they track the CLI as it updates.
     property var claudeCodeModelsList: ["default"]
 
-    // Effort/thinking levels vary per model: recent models add xhigh/max, some support
-    // fewer, and several (haiku, older sonnet, opus ≤4.1) support none at all. Returns
-    // the valid levels for a given model ("" when the model has no effort control).
     function effortLevelsFor(model) {
         var m = String(model || "default").toLowerCase();
         if (m === "haiku")
@@ -241,14 +223,11 @@ Item {
         return [];
     }
 
-    // Effort choices for the currently-selected Claude Code model (empty = unsupported).
     readonly property var claudeCodeEffortOptions: {
         var lv = effortLevelsFor(activeModel());
         return lv.length > 0 ? ["default"].concat(lv) : [];
     }
 
-    // Extract the model IDs the installed `claude` binary knows about (a real
-    // "fetch" of what this CLI version supports), merged with the handy aliases.
     function fetchClaudeCodeModels() {
         var bin = claudeCodeBinPath();
         var script =
@@ -273,9 +252,6 @@ Item {
     }
 
     function applyClaudeCodeModels(text) {
-        // The binary also embeds unrelated strings that merely start with "claude-"
-        // and long-dead models, so only ids shaped like <family>-<version> survive,
-        // minus dated snapshots (…-20250514) and the ".0" aliases of a base version.
         var ids = [];
         var seen = {};
         const lines = (text || "").split("\n");
@@ -289,11 +265,8 @@ Item {
             ids.push(id);
         }
 
-        // A family's bare major ("claude-opus-4") is just a stub for its newest
-        // minor, so drop it when a more specific id for the same major exists.
         ids = ids.filter(id => !ids.some(other => other !== id && other.indexOf(id + "-") === 0));
 
-        // Newest first: sort by family version, descending.
         ids.sort((a, b) => {
             const va = (a.match(/\d+/g) || []).map(Number);
             const vb = (b.match(/\d+/g) || []).map(Number);
@@ -308,20 +281,16 @@ Item {
         claudeCodeModelsList = ["default"].concat(ids);
     }
 
-    // Currently selected provider ("ollama" | "claude-code" | "claude"), persisted in config.
     readonly property string provider: GlobalConfig.ai.defaultProvider || "ollama"
 
-    readonly property bool isClaude: provider === "claude"       // Anthropic HTTP API (API key)
+    readonly property bool isClaude: provider === "claude"
 
-    readonly property bool isClaudeCode: provider === "claude-code" // `claude` CLI (subscription)
+    readonly property bool isClaudeCode: provider === "claude-code"
 
-    // Runtime cache of Claude Code CLI session ids, keyed by chat id (also persisted
-    // into allChatSessions so --resume works across shell restarts).
     property var claudeCodeSessions: ({})
 
     property var currentClaudeCodeProc: null
 
-    // Prompt suggestions (Claude Code): starter prompts generated on demand.
     property var promptSuggestions: []
 
     property bool loadingSuggestions: false
@@ -332,8 +301,6 @@ Item {
         loadingSuggestions = true;
         promptSuggestions = [];
 
-        // Gather recent conversation context + the current input draft so suggestions
-        // are relevant to what the user is doing (not generic starters).
         var lines = [];
         for (var li = 0; li < chatHistory.count; li++) {
             var lm = chatHistory.get(li);
@@ -408,10 +375,6 @@ Item {
         }
     }
 
-    // A stored CLI session id only applies to the account that created it (session
-    // ids live under that account's CLAUDE_CONFIG_DIR). If the active account differs,
-    // return "" so we start a fresh session under the new account instead of a
-    // --resume that would fail with "no conversation found".
     function claudeCodeSessionFor(chatId) {
         var active = GlobalConfig.ai.activeClaudeAccount || "";
         var c = claudeCodeSessions[chatId];
@@ -440,10 +403,6 @@ Item {
         }
     }
 
-    // Plain-text transcript of the conversation so far, used to seed a *fresh* CLI
-    // session (new chat, or after switching account) with prior context. Includes the
-    // latest user message and skips the streaming placeholder. Returns "" when there
-    // is only the single latest message (nothing to carry over).
     function claudeCodeTranscript() {
         var lines = [];
         var count = 0;
@@ -462,10 +421,6 @@ Item {
         return "Continue this conversation. Conversation so far:\n\n" + lines.join("\n\n") + "\n\nReply to the last user message.";
     }
 
-    // Resolve the Anthropic API key: ANTHROPIC_API_KEY env var wins, config field is the fallback.
-    // These providers all expose the same /models catalogue and take the same
-    // /chat/completions request, so they share one model list, key handling and
-    // request path, and differ only in base URL and key.
     readonly property bool isOpenaiCompat: root.openaiCompatProviders.indexOf(provider) !== -1
 
     // opencode is the exception: it is in the list above because it shares all of
@@ -488,19 +443,11 @@ Item {
         return GlobalConfig.ai.openaiUrl || "https://api.openai.com/v1";
     }
 
-    // Which wire format an opencode model needs. The gateway routes by model rather
-    // than by product, and the split differs between zen and go — minimax is
-    // OpenAI-compatible on zen but Anthropic-compatible on go — so this is keyed on
-    // both. Prefixes rather than full ids, so a new point release of an existing
-    // family keeps working; when opencode adds a family, this is what needs updating.
     readonly property var opencodeAnthropicPrefixes: ({
         "opencode": ["claude-", "qwen"],
         "opencode-go": ["minimax-", "qwen"]
     })
 
-    // zen serves GPT over /responses and Gemini over /models/[id]. Neither is a
-    // format the shell speaks, so those models are kept out of the picker instead
-    // of being offered and then failing on send.
     readonly property var opencodeUnsupportedPrefixes: ({
         "opencode": ["gpt-", "gemini-"],
         "opencode-go": []
@@ -522,13 +469,8 @@ Item {
         return true;
     }
 
-    // True when the request for the active provider and model must be built and
-    // parsed as Anthropic Messages rather than OpenAI chat completions.
     readonly property bool anthropicWire: isClaude || (isOpencode && opencodeWire(provider, activeModel()) === "anthropic")
 
-    // opencode's /messages endpoint ignores Authorization and answers "Missing API
-    // key"; x-api-key is read by both of its endpoints, so it is the one that works
-    // whichever wire the chosen model needs. The others take the bearer token.
     function setAuthHeader(xhr, p) {
         const which = p || provider;
         const key = root.getApiKeyFor(which);
@@ -538,20 +480,8 @@ Item {
             xhr.setRequestHeader("Authorization", "Bearer " + key);
     }
 
-    // The API key for a provider. The environment variable wins over the config
-    // field, so a key exported in the session is never overridden by a stale one
-    // saved in settings.
-    // API keys live in the session keyring (Secret Service — KWallet on KDE,
-    // gnome-keyring elsewhere), not in shell.json. A config file is world-readable
-    // by anything running as the user and ends up in dotfile backups and git
-    // repos; a key is not the kind of thing to leave sitting there.
-    //
-    // The config fields are kept only so an existing plaintext key can be moved
-    // across once and then cleared.
     property var keyringKeys: ({})
 
-    // zen and go are one opencode account, so both read and write the same entry
-    // rather than making the user paste the key twice.
     function keyringOwner(p) {
         const which = p || provider;
         return which === "opencode-go" ? "opencode" : which;
@@ -591,20 +521,19 @@ Item {
         root.keyringKeys = Object.assign({}, m);
 
         const attr = root.keyringAttr(which);
-        // The key goes in on stdin so it never appears in the process list.
         const script = key === ""
             ? "secret-tool clear service caelestia key " + JSON.stringify(attr)
-            : "printf %s \"$1\" | secret-tool store --label=" + JSON.stringify("Caelestia " + which + " API key") +
+            : "printf %s \"$CAELESTIA_AI_KEY\" | secret-tool store --label=" + JSON.stringify("Caelestia " + which + " API key") +
               " service caelestia key " + JSON.stringify(attr);
-        const cmd = key === "" ? ["sh", "-c", script] : ["sh", "-c", script, "--", key];
         try {
             const o = Qt.createQmlObject('import QtQuick\nimport Quickshell.Io\nProcess { id: sp; command: ' +
-                JSON.stringify(cmd) + '\n onExited: code => sp.destroy() }', root, "keyringStore");
+                JSON.stringify(["sh", "-c", script]) +
+                '\n environment: ({ CAELESTIA_AI_KEY: ' + JSON.stringify(key) + ' })\n' +
+                ' onExited: code => sp.destroy() }', root, "keyringStore");
             o.running = true;
         } catch (e) {}
     }
 
-    // Move a key that predates keyring storage out of the config, once.
     function migratePlaintextKey(p, configKey) {
         const existing = (GlobalConfig.ai[configKey] || "").trim();
         if (existing === "")
@@ -635,15 +564,12 @@ Item {
         if (envKey && envKey.trim() !== "")
             return envKey.trim();
 
-        // Keyring next. A value still sitting in the config is a leftover from
-        // before keyring storage — hand it back this once, migrateKeys() moves it.
         const stored = root.keyringKeys[root.keyringOwner(which)];
         if (stored && stored !== "")
             return stored;
         return (configured || "").trim();
     }
 
-    // Config field backing each provider, used only for the one-time migration.
     readonly property var legacyKeyFields: ({
         "claude": "anthropicApiKey",
         "openai": "openaiApiKey",
@@ -663,12 +589,8 @@ Item {
         return root.getApiKeyFor(root.provider);
     }
 
-    // Providers that need a key before they can send anything.
     readonly property bool needsApiKey: isClaude || isOpenaiCompat
 
-    // The model to send for the active provider. Nothing is hardcoded: until a
-    // provider's list has been fetched the saved choice is used as-is, and when
-    // there is no saved choice the first model the provider offered wins.
     function activeModel() {
         if (isClaudeCode)
             return GlobalConfig.ai.defaultClaudeCodeModel || "default";
@@ -679,7 +601,6 @@ Item {
         return GlobalConfig.ai.defaultOllamaModel || root.ollamaModelsList[0] || "";
     }
 
-    // The config field holding the saved model choice for an OpenAI-compatible provider.
     function defaultModelField(p) {
         const which = p || provider;
         if (which === "gemini")
@@ -693,7 +614,6 @@ Item {
         return "defaultOpenaiModel";
     }
 
-    // Providers exposed in the provider selector (respecting the enable toggles).
     readonly property var providerList: {
         var l = [];
         if (GlobalConfig.ai.enableOllama)
@@ -749,22 +669,14 @@ Item {
 
     property bool inAgentLoop: false
 
-    // Rate limiting. Providers answer a 429 with how long to wait, so honour that
-    // instead of surfacing an error the user can only respond to by waiting anyway.
     property int rateLimitRetries: 0
 
     readonly property int maxRateLimitRetries: 3
 
-    property bool onFreeTier: false   // learned from the quota metric name in a 429
+    property bool onFreeTier: false
 
-    // Ticks once a second so the status line counts down rather than showing a
-    // number frozen at whatever the wait started as.
     property int rateLimitSecondsLeft: 0
 
-    // A pending retry belongs to the conversation and model it was scheduled for.
-    // Without this a wait left over from a cancelled chat fires later and answers
-    // a prompt the user has already moved on from — on whatever model is selected
-    // by then — and those stray requests go on to trigger fresh rate limits.
     function cancelRateLimitRetry(): void {
         rateLimitRetryTimer.stop();
         rateLimitRetryTimer.retryFn = null;
@@ -786,12 +698,12 @@ Item {
         onTriggered: {
             root.rateLimitSecondsLeft--;
             if (root.rateLimitSecondsLeft > 0) {
-                root.currentActionText = qsTr("Rate limited — retrying in %1s…").arg(root.rateLimitSecondsLeft);
+                root.currentActionText = qsTr("Rate limited - retrying in %1s…").arg(root.rateLimitSecondsLeft);
                 return;
             }
             stop();
             if (forChat !== root.currentChatId || forModel !== root.activeModel()) {
-                retryFn = null;          // the user moved on; the answer is no longer wanted
+                retryFn = null;
                 root.currentActionText = "";
                 root.isTyping = false;
                 root.isThinking = false;
@@ -802,9 +714,6 @@ Item {
         }
     }
 
-    // Seconds to wait, from the provider's own answer: the Retry-After header if
-    // present, else the "retry in 12.3s" the message spells out. Falls back to a
-    // short pause when neither is given.
     function rateLimitDelayMs(xhr) {
         const header = xhr.getResponseHeader("Retry-After");
         if (header && !isNaN(parseFloat(header)))
@@ -820,7 +729,6 @@ Item {
         return "'" + String(str).replace(/'/g, "'\\''") + "'";
     }
 
-    // Parse <tool_call>{...}</tool_call> blocks from model response text
     function parseTextToolCalls(text) {
         var calls = [];
         var startTag = "<tool_call>";
@@ -832,7 +740,6 @@ Item {
             var end = text.indexOf(endTag, start);
             if (end === -1) break;
             var jsonStr = text.substring(start + startTag.length, end).trim();
-            // Remove markdown code block fences if the model included them
             jsonStr = jsonStr.replace(/^```[a-zA-Z]*\n?/, "");
             jsonStr = jsonStr.replace(/```$/, "");
             jsonStr = jsonStr.trim();
@@ -846,12 +753,10 @@ Item {
         return calls;
     }
 
-    // Strip all <tool_call>...</tool_call> blocks (and text after partial open tag)
     function stripToolCalls(text) {
         var startTag = "<tool_call>";
         var endTag = "</tool_call>";
         var result = text;
-        // Remove complete blocks
         while (true) {
             var s = result.indexOf(startTag);
             if (s === -1) break;
@@ -933,7 +838,7 @@ Item {
         } else if (type === "screenshot_encode") {
             var b64 = stdout.replace(/\n/g, "").trim();
             accumulatedToolImage = b64;
-            accumulatedToolResults += "Result of take_screenshot:\nScreenshot taken. Analyse the attached image.\n\n";
+            accumulatedToolResults += "Result of take_screenshot:\nScreenshot taken. Analyze the attached image.\n\n";
             runningToolsCount--;
             checkToolsFinished();
         } else if (type.startsWith("exec_")) {
@@ -943,12 +848,6 @@ Item {
             if (!outText && !errText) {
                 outText = "(Command completed with no output. If it was a background task, it has been launched successfully.)";
             }
-            // Plain prose, not a pseudo-protocol dump. The old "Tool:/Command
-            // executed:/Output:/Error:" framing made Gemini either imitate the
-            // format back (answering with fake tool output) or refuse outright with
-            // finish_reason function_call_filter: MALFORMED_FUNCTION_CALL and an
-            // empty response, which looked like generation stopping dead. Echoing
-            // the raw command array back at the model never helped it either.
             accumulatedToolResults += "Result of " + toolName + ":\n" + outText + (errText ? "\n\nErrors reported:\n" + errText : "") + "\n\n";
             runningToolsCount--;
             checkToolsFinished();
@@ -962,15 +861,11 @@ Item {
         }
     }
 
-    // ---- Claude Code provider (subscription `claude` CLI, no API key) ----
 
     function claudeCodeCwd() {
         return Quickshell.env("HOME") || ".";
     }
 
-    // Resolve the `claude` binary without depending on the shell PATH (Quickshell may
-    // not inherit ~/.local/bin). If the config value is left at the default "claude",
-    // point at the official installer location; a custom value is used verbatim.
     function claudeCodeBinPath() {
         var b = (GlobalConfig.ai.claudeCodeBin || "claude").trim();
         if (b === "" || b === "claude") {
@@ -982,9 +877,10 @@ Item {
         return b;
     }
 
-    // ---- Claude accounts (multi-login via CLAUDE_CONFIG_DIR) ----
-    // The default ~/.claude login is always present as an implicit "Default" (id "").
-    // Additional accounts each get their own config dir under ~/.config/caelestia/claude/<id>.
+    function claudeCodePermissionArgs() {
+        return GlobalConfig.ai.claudeCodeSkipPermissions ? ["--dangerously-skip-permissions"] : [];
+    }
+
     function claudeAccounts() {
         var list = [{ "id": "", "name": "Default", "dir": "" }];
         try {
@@ -1018,7 +914,6 @@ Item {
         return activeClaudeAccountObj().dir || "";
     }
 
-    // Real display names (login email / name) read from each account's .claude.json.
     property var resolvedAccountNames: ({})
 
     function accountJsonPath(id) {
@@ -1038,7 +933,6 @@ Item {
         return "Default";
     }
 
-    // One FileView per account resolves its login name from .claude.json.
     Instantiator {
         model: root.claudeAccountIds
         delegate: FileView {
@@ -1070,7 +964,6 @@ Item {
         return l;
     }
 
-    // Env-var line injected into the dynamically-built Process (empty for Default).
     function claudeCodeEnvSnippet() {
         var dir = activeClaudeConfigDir();
         if (dir && dir !== "")
@@ -1088,7 +981,6 @@ Item {
         Logger.log("[ClaudeCode] " + t);
     }
 
-    // Heuristic: does this CLI output indicate the Claude account isn't logged in?
     function isClaudeCodeAuthError(text) {
         if (!text)
             return false;
@@ -1111,7 +1003,6 @@ Item {
         return "It appears that Claude is not logged into your account.\n\nOpen a terminal, run the command `claude`, and log in with your subscription, then try again here.";
     }
 
-    // Generate a short chat title via a one-shot `claude -p ... --output-format json`.
     function generateClaudeCodeTitleAsync(chatId, firstMessage) {
         if (!firstMessage)
             return;
@@ -1161,7 +1052,6 @@ Item {
     }
 
     function sendClaudeCode(promptText) {
-        // Drop any stale empty assistant placeholder, then add a fresh bubble to stream into.
         for (var i = chatHistory.count - 1; i >= 0; i--) {
             var m = chatHistory.get(i);
             if (!m.isUser && !m.isFinished && m.text === "")
@@ -1178,8 +1068,6 @@ Item {
         var bin = claudeCodeBinPath();
         var sid = claudeCodeSessionFor(currentChatId);
 
-        // Fresh session (new chat, or the active account changed) → seed it with the
-        // prior transcript so the new account continues the same conversation.
         var promptToSend = promptText;
         if (sid === "") {
             var transcript = claudeCodeTranscript();
@@ -1187,7 +1075,8 @@ Item {
                 promptToSend = transcript;
         }
 
-        var cmd = [bin, "-p", promptToSend, "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
+        var cmd = [bin, "-p", promptToSend, "--output-format", "stream-json", "--verbose", "--include-partial-messages"].concat(claudeCodePermissionArgs());
+
         var mdl = GlobalConfig.ai.defaultClaudeCodeModel || "default";
         if (mdl && mdl !== "default") {
             cmd.push("--model");
@@ -1248,7 +1137,7 @@ Item {
         try {
             evt = JSON.parse(line);
         } catch (e) {
-            return; // non-JSON diagnostic output
+            return;
         }
 
         if (evt.session_id)
@@ -1257,7 +1146,6 @@ Item {
         if (evt.type === "system")
             return;
 
-        // Token-level streaming (when the CLI emits partial messages).
         if (evt.type === "stream_event" && evt.event) {
             var ev = evt.event;
             if (ev.type === "content_block_delta" && ev.delta) {
@@ -1363,8 +1251,6 @@ Item {
                                 list.push(response.models[i].name);
                             }
                         }
-                        // Only what this Ollama instance actually has pulled — a
-                        // guessed list would just offer models that aren't installed.
                         ollamaModelsList = list;
                         if (list.length > 0 && list.indexOf(GlobalConfig.ai.defaultOllamaModel) === -1)
                             GlobalConfig.ai.defaultOllamaModel = list[0];
@@ -1380,18 +1266,12 @@ Item {
         xhr.send();
     }
 
-    // Models offered by the OpenAI-compatible providers, keyed by provider id.
-    // Fetched from /models on demand; the fallbacks below are used until a fetch
-    // succeeds (and when it can't, e.g. no key yet).
     property var openaiCompatModels: ({})
 
     function openaiCompatModelList(p) {
         return root.openaiCompatModels[p || provider] || [];
     }
 
-    // Providers charge a request for their model list too, and on a free tier that
-    // is quota the user would rather spend on answers — so fetch each provider's
-    // list once per session instead of every time the sidebar opens.
     property var modelsFetched: ({})
 
     function fetchOpenaiCompatModels(p, force = false) {
@@ -1399,8 +1279,6 @@ Item {
         if (!force && root.modelsFetched[which])
             return;
         const key = root.getApiKeyFor(which);
-        // OpenRouter and opencode publish their catalogues without auth; the rest
-        // need the key.
         const publicCatalogue = which === "openrouter" || which === "opencode" || which === "opencode-go";
         if (key === "" && !publicCatalogue)
             return;
@@ -1423,14 +1301,9 @@ Item {
                     const id = parsed.data[i].id;
                     if (!id)
                         continue;
-                    // Gemini prefixes ids with "models/"; the chat endpoint accepts either,
-                    // but the bare id is what users recognise.
                     list.push(id.indexOf("models/") === 0 ? id.substring(7) : id);
                 }
-                // Only chat-capable models are useful here — drop embedding/audio/image ones.
                 list = list.filter(m => !/embed|whisper|tts|audio|image|vision-preview|moderation|rerank|dall-e/i.test(m));
-                // opencode lists models the shell has no wire format for; offering them
-                // would only produce a failed send once the user picked one.
                 if (which === "opencode" || which === "opencode-go")
                     list = list.filter(m => root.opencodeSupports(which, m));
                 list.sort();
@@ -1446,7 +1319,6 @@ Item {
                 seen[which] = true;
                 root.modelsFetched = seen;
 
-                // Keep the saved default honest: if it isn't offered, fall back to the first.
                 const cfgKey = root.defaultModelField(which);
                 if (list.indexOf(GlobalConfig.ai[cfgKey]) === -1)
                     GlobalConfig.ai[cfgKey] = list[0];
@@ -1486,7 +1358,6 @@ Item {
             if (allChatSessions[i].id === id) {
                 var msgs = allChatSessions[i].messages;
                 for (var j = 0; j < msgs.length; j++) {
-                    // Strictly sanitize incoming JSON data before ListModel append
                     chatHistory.append({
                         "isUser": msgs[j].isUser === true,
                         "text": msgs[j].text || "",
@@ -1510,7 +1381,6 @@ Item {
         if (jsonStr) {
             try {
                 var parsed = JSON.parse(jsonStr);
-                // Protect against corrupted saves
                 if (Array.isArray(parsed)) {
                     allChatSessions = parsed.filter(s => s !== null && s.id);
                 }
@@ -1519,7 +1389,6 @@ Item {
 
         historySessionsModel.clear();
         for (var i = 0; i < allChatSessions.length; i++) {
-            // Strictly enforce string values
             historySessionsModel.append({
                 "id": allChatSessions[i].id || ("chat_" + Date.now()),
                 "title": allChatSessions[i].title || "Chat"
@@ -1534,6 +1403,8 @@ Item {
     }
 
     function saveHistory() {
+        if (!GlobalConfig.ai.saveChatHistory)
+            return;
         var msgs = [];
         for (var i = 0; i < chatHistory.count; i++) {
             var msg = chatHistory.get(i);
@@ -1685,8 +1556,6 @@ Item {
         if (root.isOpenaiCompat) {
             if (root.getApiKey() === "")
                 return;
-            // Same per-model wire split as sendPrompt — an opencode model on /messages
-            // needs the Anthropic shape here too.
             const useAnthropic = root.anthropicWire;
             xhr.open("POST", root.openaiCompatBase() + (useAnthropic ? "/messages" : "/chat/completions"), true);
             xhr.setRequestHeader("Content-Type", "application/json");
@@ -1787,11 +1656,10 @@ Item {
     function sendPrompt(promptText, isSystemToolResult = false, base64Image = null, toolName = "", isRetry = false) {
         if (!promptText.trim() && !base64Image) return;
 
-        // Sending a message dismisses any open prompt suggestions.
         promptSuggestions = [];
 
         if (!isRetry)
-            cancelRateLimitRetry();   // a new send supersedes any wait still pending
+            cancelRateLimitRetry();
 
         if (!isSystemToolResult && !isRetry) {
             chatHistory.append({
@@ -1838,7 +1706,6 @@ Item {
             currentActionText = "Thinking...";
         }
 
-        // Claude Code (subscription CLI) uses a Process, not XMLHttpRequest.
         if (root.isClaudeCode) {
             root.sendClaudeCode(promptText);
             return;
@@ -1848,9 +1715,6 @@ Item {
         root.currentRequest = xhr;
 
         var model = root.activeModel();
-        // Anthropic Messages vs OpenAI chat completions is a property of the model on
-        // opencode, not of the provider, so the endpoint, body and stream parsing all
-        // key off this rather than off isClaude.
         const useAnthropic = root.anthropicWire;
         if (root.isClaude) {
             var claudeBase = GlobalConfig.ai.anthropicUrl || "https://api.anthropic.com";
@@ -1858,7 +1722,6 @@ Item {
             xhr.setRequestHeader("Content-Type", "application/json");
             xhr.setRequestHeader("x-api-key", root.getApiKey());
             xhr.setRequestHeader("anthropic-version", "2023-06-01");
-            // QML's XMLHttpRequest presents a browser-like origin; this header opts into direct access.
             xhr.setRequestHeader("anthropic-dangerous-direct-browser-access", "true");
         } else if (root.isOpenaiCompat) {
             xhr.open("POST", root.openaiCompatBase() + (useAnthropic ? "/messages" : "/chat/completions"), true);
@@ -1921,7 +1784,6 @@ Item {
                         var chunkReasoning = "";
 
                         if (useAnthropic) {
-                            // Anthropic streams Server-Sent Events; only "data:" lines carry JSON.
                             if (line.indexOf("event:") === 0) {
                                 processedTextLength += rawLine.length + 1;
                                 continue;
@@ -1950,8 +1812,6 @@ Item {
                                 break;
                             }
                         } else if (root.isOpenaiCompat) {
-                            // OpenAI-compatible streaming: SSE where each "data:" line is a
-                            // chunk holding choices[0].delta. "[DONE]" ends the stream.
                             if (line.indexOf("data:") !== 0) {
                                 processedTextLength += rawLine.length + 1;
                                 continue;
@@ -1969,15 +1829,12 @@ Item {
                                 } else if (oaiEvt.choices && oaiEvt.choices.length > 0) {
                                     var delta = oaiEvt.choices[0].delta || {};
                                     chunkContent = delta.content || "";
-                                    // Reasoning models expose their thinking under different
-                                    // keys depending on the provider.
                                     chunkReasoning = delta.reasoning_content || delta.reasoning || "";
                                 }
                             } catch (e) {
                                 break;
                             }
                         } else {
-                            // Ollama streams newline-delimited JSON objects.
                             try {
                                 var parsed = JSON.parse(line);
                                 processedTextLength += rawLine.length + 1;
@@ -2049,7 +1906,6 @@ Item {
                                     var toolName = toolCall.name;
                                     var args = toolCall.args || {};
 
-                                    // Count async tools (set_timer and get_weather are synchronous, skip count for them)
                                     if (toolName === "take_screenshot" || toolName === "web_search" || toolName === "read_webpage" || toolName === "open_app" || toolName === "caelestia_command") {
                                         runningToolsCount++;
                                     }
@@ -2109,11 +1965,10 @@ Item {
 
                                     } else {
                                         Logger.log("[AI] Unknown tool: " + toolName);
-                                        runningToolsCount--; // don't block on unknown tools
+                                        runningToolsCount--;
                                     }
                                 }
 
-                                // set_timer is synchronous — check if all async tools are already done
                                 if (runningToolsCount === 0) {
                                     if (accumulatedToolResults !== "") {
                                         checkToolsFinished();
@@ -2138,18 +1993,11 @@ Item {
                         }
                     } else {
                         var providerName = root.providerLabel(root.provider);
-                        // Providers explain themselves in the error body — a rate limit
-                        // even says how long to wait. Surfacing that beats a bare status
-                        // code the user can do nothing with.
                         var apiDetail = "";
                         try {
                             const errBody = JSON.parse(xhr.responseText);
                             const e = Array.isArray(errBody) ? (errBody[0] || {}).error : errBody.error;
                             if (e) {
-                                // OpenRouter wraps the upstream provider's error: its own
-                                // message is just "Provider returned error", and the part
-                                // worth reading (which model, which provider, what to do)
-                                // sits in metadata.raw.
                                 const raw = e.metadata && e.metadata.raw ? String(e.metadata.raw) : "";
                                 const provider = e.metadata && e.metadata.provider_name ? String(e.metadata.provider_name) : "";
                                 if (raw)
@@ -2158,12 +2006,6 @@ Item {
                                     apiDetail = " " + String(e.message).split("\n")[0];
                             }
                         } catch (e) {}
-                        // A rate limit is not really a failure — the provider told us
-                        // when it will accept the next request, so wait that long and
-                        // finish the answer instead of dropping it on the user.
-                        // A daily quota does not come back in the seconds the provider
-                        // suggests retrying after, so retrying just spends more of the
-                        // very allowance that ran out. Only wait out short-term limits.
                         const perDayQuota = /PerDay|per day/i.test(xhr.responseText || "");
                         if (xhr.status === 429 && perDayQuota)
                             root.cancelRateLimitRetry();
@@ -2174,7 +2016,7 @@ Item {
                             const waitMs = root.rateLimitDelayMs(xhr);
                             root.rateLimitRetries++;
                             root.rateLimitSecondsLeft = Math.max(1, Math.round(waitMs / 1000));
-                            root.currentActionText = qsTr("Rate limited — retrying in %1s…").arg(root.rateLimitSecondsLeft);
+                            root.currentActionText = qsTr("Rate limited - retrying in %1s…").arg(root.rateLimitSecondsLeft);
                             root.isTyping = true;
                             root.isThinking = true;
                             rateLimitRetryTimer.forChat = root.currentChatId;
@@ -2186,12 +2028,12 @@ Item {
 
                         var hint = "";
                         if (xhr.status === 429 && perDayQuota)
-                            hint = " This model's daily free quota is used up — it resets tomorrow. Pick another model, or use Claude Code, which is not on this quota.";
+                            hint = " This model's daily free quota is used up - it resets tomorrow. Pick another model, or use Claude Code, which is not on this quota.";
                         else if (xhr.status === 429)
-                            hint = " Rate limit reached and still limited after " + root.maxRateLimitRetries + " retries — wait a minute and try again.";
+                            hint = " Rate limit reached and still limited after " + root.maxRateLimitRetries + " retries - wait a minute and try again.";
                         else if (root.needsApiKey && (xhr.status === 401 || xhr.status === 403))
                             hint = " Check your API key.";
-                        var errMsg = (xhr.status === 0) ? "Generation cancelled" : (providerName + " request failed (status " + xhr.status + ")." + hint + apiDetail);
+                        var errMsg = (xhr.status === 0) ? "Generation canceled" : (providerName + " request failed (status " + xhr.status + ")." + hint + apiDetail);
                         var currentText = chatHistory.get(chatHistory.count - 1).text;
                         if (currentText.trim() === "") {
                             chatHistory.setProperty(chatHistory.count - 1, "text", errMsg);
@@ -2216,8 +2058,6 @@ Item {
 
         var requestBody;
         if (useAnthropic) {
-            // Anthropic Messages API: system prompt is a top-level field; messages must
-            // carry non-empty content and cannot include the streaming placeholder.
             var claudeMessages = [];
             for (var i = 0; i < chatHistory.count; i++) {
                 var msg = chatHistory.get(i);
@@ -2273,8 +2113,6 @@ Item {
                 };
                 if (base64Image) {
                     if (root.isOpenaiCompat) {
-                        // OpenAI carries images inline in the content array as data URLs;
-                        // Ollama takes a separate base64 "images" field.
                         toolMsg["content"] = [
                             { "type": "text", "text": promptText },
                             { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64," + base64Image } }
@@ -2286,8 +2124,6 @@ Item {
                 messages.push(toolMsg);
             }
 
-            // Native tool-calling API removed; using text-based <tool_call> parsing instead,
-            // which is compatible with all models including llama3, mistral, phi, etc.
             requestBody = {
                 "model": model,
                 "messages": messages,
@@ -2304,7 +2140,6 @@ Item {
         anchors.fill: parent
         anchors.margins: Tokens.padding.medium
 
-         // Mode Switcher Row (Chat / History)
          RowLayout {
              id: modeSwitcherRow
 
@@ -2437,8 +2272,6 @@ Item {
 
          }
 
-         // Provider + model (+ account) selectors on their own row; a Flow so the
-         // pills wrap to a second line instead of overflowing a narrow sidebar.
          Flow {
              id: selectorRow
 
@@ -2449,7 +2282,6 @@ Item {
              z: 10
              spacing: Tokens.spacing.small
 
-             // Provider Selector Split Button (Ollama / Claude Code)
              SplitButton {
                  id: providerSelector
 
@@ -2482,7 +2314,6 @@ Item {
                  }
              }
 
-             // Model Selector Split Button
              SplitButton {
                  id: modelSelector
 
@@ -2494,7 +2325,6 @@ Item {
                  menu.onItemSelected: item => {
                      if (root.isClaudeCode) {
                          GlobalConfig.ai.defaultClaudeCodeModel = item.modelData;
-                         // Effort levels differ per model — reset to default on model change.
                          GlobalConfig.ai.claudeCodeEffort = "default";
                      } else if (root.isClaude)
                          GlobalConfig.ai.defaultClaudeModel = item.modelData;
@@ -2531,7 +2361,6 @@ Item {
                  }
              }
 
-             // Effort / thinking-level Selector (Claude Code).
              SplitButton {
                  id: effortSelector
 
@@ -2563,7 +2392,6 @@ Item {
                  }
              }
 
-             // Account Selector (Claude Code multi-login) — only when >1 account exists.
              SplitButton {
                  id: accountSelector
 
@@ -2607,7 +2435,6 @@ Item {
              anchors.right: parent.right
              anchors.topMargin: Tokens.spacing.medium
 
-             // Chat View
              Item {
                  anchors.fill: parent
                  opacity: !isHistoryTab ? 1 : 0
@@ -2645,7 +2472,7 @@ Item {
                                  id: emptyStateLogo
 
                                  anchors.fill: parent
-                                 visible: false // hide original for MultiEffect to take over
+                                 visible: false
                              }
 
                              MultiEffect {
@@ -2707,7 +2534,6 @@ Item {
                              radius: Tokens.rounding.large
                              color: Colours.tPalette.m3surfaceContainer
 
-                             // Asymmetric corners
                              topLeftRadius: Tokens.rounding.large
                              topRightRadius: Tokens.rounding.large
                              bottomLeftRadius: 4
@@ -2729,11 +2555,9 @@ Item {
                                          color: Colours.palette.m3primary
                                      }
 
-                                     // M3 Expressive Animated Text Wrapper
                                      Item {
                                          width: mainText.implicitWidth
                                          height: mainText.implicitHeight
-                                         // The bubble smoothly expands/shrinks as the text width changes
 
                                          Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
@@ -2901,13 +2725,11 @@ Item {
                              anchors.right: delegateItem.isUser ? parent.right : undefined
                              anchors.left: delegateItem.isUser ? undefined : parent.left
 
-                             // Let implicitWidth dictate width (with +8 buffer for layout engine) to stop short words from splitting line breaks
                              width: Math.min(maxBubbleWidth, bubbleLayout.implicitWidth + Tokens.padding.medium * 2 + 8)
                              height: bubbleLayout.implicitHeight + Tokens.padding.medium * 2
                              radius: Tokens.rounding.large
                              color: delegateItem.isUser ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainer
 
-                             // Asymmetric corners
                              topLeftRadius: Tokens.rounding.large
                              topRightRadius: Tokens.rounding.large
                              bottomLeftRadius: delegateItem.isUser ? Tokens.rounding.large : 4
@@ -2937,7 +2759,7 @@ Item {
                                          spacing: Tokens.spacing.small
 
                                          Text {
-                                             text: "Thought Process"
+                                             text: qsTr("Thought Process")
                                              color: Colours.palette.m3onSurfaceVariant
                                              font: Tokens.font.body.small
                                          }
@@ -3058,7 +2880,6 @@ Item {
                      }
                  }
 
-                 // Scroll to bottom button
                  Item {
                      id: scrollBtnWrapper
 
@@ -3105,7 +2926,6 @@ Item {
                      }
                  }
 
-                 // Prompt suggestion chips (Claude Code) — float just above the input.
                  ColumnLayout {
                      id: suggestionBox
 
@@ -3117,7 +2937,6 @@ Item {
                      spacing: Tokens.spacing.small
                      visible: root.isClaudeCode && root.promptSuggestions.length > 0
 
-                     // Header with a close button.
                      RowLayout {
                          Layout.fillWidth: true
                          spacing: Tokens.spacing.small
@@ -3189,7 +3008,6 @@ Item {
                      }
                  }
 
-                 // Input Box Row
                  StyledRect {
                      id: inputBoxRow
 
@@ -3278,7 +3096,6 @@ Item {
                              }
                          }
 
-                         // Prompt suggestions trigger (Claude Code).
                          Item {
                              visible: root.isClaudeCode
                              Layout.preferredWidth: visible ? 32 : 0
@@ -3356,7 +3173,6 @@ Item {
                  }
              }
 
-             // History Grid View
              Item {
                  anchors.fill: parent
                  opacity: isHistoryTab ? 1 : 0
@@ -3464,7 +3280,6 @@ Item {
                      }
                  }
 
-                 // "Clear All" button
                  StyledRect {
                      id: clearAllButton
 
@@ -3492,14 +3307,13 @@ Item {
                              font: Tokens.font.icon.small
                          }
                          Text {
-                             text: "Clear All"
+                             text: qsTr("Clear All")
                              color: Colours.palette.m3onErrorContainer
                              font: Tokens.font.body.small
                          }
                      }
                  }
 
-                 // "New Chat" button
                  StyledRect {
                      id: newChatButton
 
@@ -3527,7 +3341,7 @@ Item {
                              font: Tokens.font.icon.small
                          }
                          Text {
-                             text: "New Chat"
+                             text: qsTr("New Chat")
                              color: Colours.palette.m3onPrimaryContainer
                              font: Tokens.font.body.small
                          }

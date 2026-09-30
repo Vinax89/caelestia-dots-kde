@@ -18,6 +18,18 @@ kwin-effects/workspace-tracker/build/
 
 kdotool/
 run.sh
-kde-material-you-colors/
 kwin-effects-better-blur-dx/
 plasma-workspace/
+cava/
+
+/CONTEXT.md
+/CLAUDE.md
+/docs/agents/
+/docs/adr/
+# Generated for Crowdin before upload; never committed.
+/shell/translations/caelestia_en.ts
+/shell/translations/caelestia_en.qm
+
+# caelestia-kde
+caelestia-kde-plugins/
+wallpaper-selector/

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
+import Caelestia.Components
 import Caelestia.Config
 import qs.components
 import qs.services
@@ -9,119 +10,101 @@ import qs.services
 Item {
     id: root
 
-    required property Repeater workspaces
-    required property var occupied
-    required property int groupOffset
+    required property var workspaces
+    required property int wsSpacing
+    required property bool isHorizontal
 
-    property list<var> pills: []
+    readonly property color colour: Colours.layer(Colours.palette.m3surfaceContainerHigh, 2)
+    property color colourAnimated: colour
 
-    onOccupiedChanged: {
-        if (!occupied)
-            return;
-        let count = 0;
-        const start = groupOffset;
-        const wsCount = root.workspaces.count > 0 ? root.workspaces.count : Config.bar.workspaces.shown;
-        const end = start + wsCount;
-        for (const [ws, occ] of Object.entries(occupied)) {
-            if (ws > start && ws <= end && occ) {
-                const isFirstInGroup = Number(ws) === start + 1;
-                const isLastInGroup = Number(ws) === end;
-                if (isFirstInGroup || !occupied[ws - 1]) {
-                    if (pills[count])
-                        pills[count].start = ws;
-                    else
-                        pills.push(pillComp.createObject(root, {
-                            start: ws
-                        }));
-                    count++;
+    Behavior on colourAnimated {
+        CAnim {}
+    }
+
+    // Wrappers so the rects can extend 1px past the strip and still be faded as
+    // one layer.
+    Item {
+        anchors.fill: parent
+        anchors.margins: -1
+
+        opacity: root.colourAnimated.a
+        layer.enabled: opacity < 1
+
+        Item {
+            anchors.fill: parent
+            anchors.margins: 1
+
+            AnimatedRepeater {
+                model: ScriptModel {
+                    values: root.workspaces
                 }
-                if ((isLastInGroup || !occupied[ws + 1]) && pills[count - 1])
-                    pills[count - 1].end = ws;
-            }
-        }
-        if (pills.length > count)
-            pills.splice(count, pills.length - count).forEach(p => p.destroy());
-    }
 
-    Repeater {
-        model: ScriptModel {
-            values: root.pills.filter(p => p)
-        }
+                removeDuration: Tokens.anim.durations.expressiveDefaultEffects
 
-        StyledRect {
-            id: rect
-
-            required property var modelData
-
-            readonly property Workspace start: root.workspaces.count > 0 ? root.workspaces.itemAt(getWsIdx(modelData.start)) ?? null : null // qmllint disable incompatible-type
-            readonly property Workspace end: root.workspaces.count > 0 ? root.workspaces.itemAt(getWsIdx(modelData.end)) ?? null : null // qmllint disable incompatible-type
-            readonly property bool isHorizontal: Config.bar.position === "top" || Config.bar.position === "bottom"
-            readonly property real rawScale: !isNaN(Config.bar.scale) ? Config.bar.scale : 1.0
-            readonly property real scaleFactor: rawScale < 1.0 ? Math.sqrt(Math.max(0.1, rawScale)) : rawScale
-            readonly property int barThickness: Math.round(Tokens.sizes.bar.innerWidth * scaleFactor)
-
-            function getWsIdx(ws: int): int {
-                let i = ws - 1;
-                const count = root.workspaces.count > 0 ? root.workspaces.count : Config.bar.workspaces.shown;
-                while (i < 0)
-                    i += count;
-                return i % count;
-            }
-
-            anchors.horizontalCenter: isHorizontal ? undefined : root.horizontalCenter
-            anchors.verticalCenter: isHorizontal ? root.verticalCenter : undefined
-
-            x: isHorizontal ? ((start?.x ?? 0) - 1) : 0
-            y: isHorizontal ? 0 : ((start?.y ?? 0) - 1)
-            implicitWidth: isHorizontal ? (start && end ? end.x + end.size - start.x + 2 : 0) : (barThickness - Tokens.padding.small + 2)
-            implicitHeight: isHorizontal ? (barThickness - Tokens.padding.small + 2) : (start && end ? end.y + end.size - start.y + 2 : 0)
-
-            color: Colours.layer(Colours.palette.m3surfaceContainerHigh, 2)
-            radius: Tokens.rounding.full
-
-            scale: 0
-            Component.onCompleted: scale = 1
-
-            Behavior on scale {
-                Anim {
-                    easing: Tokens.anim.standardDecel
-                }
-            }
-
-            Behavior on x {
-                enabled: isHorizontal
-
-                Anim {}
-            }
-
-            Behavior on y {
-                enabled: !isHorizontal
-
-                Anim {}
-            }
-
-            Behavior on implicitWidth {
-                enabled: isHorizontal
-
-                Anim {}
-            }
-
-            Behavior on implicitHeight {
-                enabled: !isHorizontal
-
-                Anim {}
+                OccupiedRect {}
             }
         }
     }
 
-    Component {
-        id: pillComp
+    component OccupiedRect: StyledRect {
+        id: rect
 
-        Pill {}
-    }
+        required property int index
+        required property Workspace modelData
 
-    component Pill: QtObject {
-        property int start
-        property int end
+        readonly property real pillRadius: modelData ? (root.isHorizontal ? modelData.height : modelData.width) / 2 : 0
+        property real leadRadius: ifAdjacent(0, -1, 0, pillRadius)
+        property real trailRadius: ifAdjacent(root.workspaces.length - 1, 1, 0, pillRadius)
+        property real leadPadding: ifAdjacent(0, -1, root.wsSpacing, 0)
+        property real trailPadding: ifAdjacent(root.workspaces.length - 1, 1, root.wsSpacing, 0)
+
+        function ifAdjacent(exclIdx: int, adj: int, yes: real, no: real): real {
+            if (AnimatedRepeater.adding || AnimatedRepeater.removing || !modelData?.isOccupied || index === exclIdx)
+                return no;
+            return root.workspaces[index + adj]?.isOccupied ? yes : no;
+        }
+
+        x: modelData ? modelData.x - (root.isHorizontal ? leadPadding + 1 : 1) : 0
+        y: modelData ? modelData.y - (root.isHorizontal ? 1 : leadPadding + 1) : 0
+        implicitWidth: root.isHorizontal ? (modelData ? modelData.size + leadPadding + trailPadding + 2 : 0) : (modelData ? modelData.width + 2 : 0)
+        implicitHeight: root.isHorizontal ? (modelData ? modelData.height + 2 : 0) : (modelData ? modelData.size + leadPadding + trailPadding + 2 : 0)
+
+        topLeftRadius: leadRadius
+        bottomLeftRadius: root.isHorizontal ? leadRadius : trailRadius
+        topRightRadius: root.isHorizontal ? trailRadius : leadRadius
+        bottomRightRadius: trailRadius
+
+        color: Qt.alpha(root.colour, 1)
+        opacity: modelData?.isOccupied ? 1 : 0
+
+        Behavior on leadRadius {
+            Anim {
+                type: Anim.DefaultEffects
+            }
+        }
+
+        Behavior on trailRadius {
+            Anim {
+                type: Anim.DefaultEffects
+            }
+        }
+
+        Behavior on leadPadding {
+            Anim {
+                type: Anim.DefaultEffects
+            }
+        }
+
+        Behavior on trailPadding {
+            Anim {
+                type: Anim.DefaultEffects
+            }
+        }
+
+        Behavior on opacity {
+            Anim {
+                type: Anim.DefaultEffects
+            }
+        }
     }
 }

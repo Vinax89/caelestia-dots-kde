@@ -9,147 +9,132 @@ pragma ComponentBehavior: Bound
 // //@ pragma DefaultEnv QSG_RENDER_LOOP=threaded
 // //@ pragma DefaultEnv QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
 
+import QtQuick
+import QtQml
+import Quickshell
+import Quickshell.Io
+import Caelestia
+import Caelestia.Config
+import qs.components.containers
+import qs.services
+import qs.services.api
+import qs.utils
 import "services" as Services
 import "modules"
 import "modules/drawers"
 import "modules/background"
-import "modules/shimeji"
 import "modules/areapicker"
-import "modules/lock"
 import "modules/polkit"
 import "modules/screenshot/regionSelector"
 import "modules/overview"
-import "modules/welcome" as Welcome
-import QtQml
-import Quickshell
-import Quickshell.Io
-import Caelestia.Config
-import qs.components.containers
-import qs.services
-import qs.utils
+import "modules/whatsnew" as WhatsNew
 
 ShellRoot {
+    id: root
+
+    property var regionSelector: RegionSelector {}
+
+    property var _arpcInit: null
+    property var _gameModeInit: null
+    property var _updateCheckerInit: null
+    property var _autoSchemeInit: null
+
     settings.watchFiles: false
 
-    // Several QtCore.Settings {} elements throughout the codebase (BlurOffsets,
-    // ContentWindow, UpdateChecker) rely on QCoreApplication's organization/app
-    // identifiers to build their QSettings storage path. Quickshell's host
-    // binary never sets these, so QSettings previously failed to initialize
-    // (status code 1) with "application identifiers have not been set"
-    // warnings everywhere. Setting Qt.application.* here runs during this
-    // object's property-binding phase, which always completes (for the whole
-    // tree) before any child's componentComplete/Component.onCompleted -
-    // i.e. before any Settings {} element is finalized - so this reliably
-    // fixes it project-wide from a single place.
-    readonly property bool _appIdentifiersSet: (function() {
-        Qt.application.organization = "Caelestia";
-        Qt.application.domain = "caelestia.dots";
-        Qt.application.name = "caelestia-shell";
-        return true;
-    })()
+    Component.onCompleted: {
+        deferredStartup.start();
+    }
+
+    Binding {
+        target: ShellState
+        property: "shellRoot"
+        value: root
+    }
+
+    Binding {
+        target: Translations
+        property: "extraSearchPaths"
+        value: [Qt.resolvedUrl("translations")]
+    }
+
+    Binding {
+        target: Translations
+        property: "language"
+        value: GlobalConfig.general.language
+    }
 
     GSFLoader {}
+    ServiceLoader {}
 
     Background {}
     BadAppleOverlay {}
 
     Drawers {}
-    // AreaPicker {}
-    Lock {
-        id: lock
-    }
-    // PolkitModule {}
-
-    property var regionSelector: RegionSelector {}
 
     IpcHandler {
-        target: "region"
-
         function screenshot(): void {
-            regionSelector.screenshot()
+            regionSelector.screenshot();
         }
 
         function search(): void {
-            regionSelector.search()
+            regionSelector.search();
         }
 
         function ocr(): void {
-            regionSelector.ocr()
+            regionSelector.ocr();
         }
 
         function record(): void {
-            regionSelector.record()
+            regionSelector.record();
         }
 
         function recordWithSound(): void {
-            regionSelector.recordWithSound()
+            regionSelector.recordWithSound();
         }
+
+        target: "region"
     }
 
-    Variants {
-        model: Quickshell.screens.filter(s => (GlobalConfig.shimeji?.enabled ?? false) && (GlobalConfig.shimeji?.path?.length ?? 0) > 0 && !Strings.testRegexList(GlobalConfig.shimeji?.excludedScreens ?? [], s.name))
-
-        Shimeji {
-            shimejiCount: GlobalConfig.shimeji?.count ?? 1
+    IpcHandler {
+        function lock(): void {
+            Quickshell.execDetached(["loginctl", "lock-session"]);
+            Audio.playLock();
         }
+
+        function unlock(): void {
+            Quickshell.execDetached(["loginctl", "unlock-session"]);
+        }
+
+        target: "lock"
     }
 
-    ConfigToasts {}
     Shortcuts {}
     ScreenCorners {}
 
-    Component.onCompleted: {
-        Qt.callLater(() => { Weather.reload(); });
+    Timer {
+        id: deferredStartup
+
+        interval: 250
+        repeat: false
+
+        onTriggered: {
+            PluginLoader.loadPlugins();
+            bbdxCheckProcess.running = true;
+            root._arpcInit = DiscordRPC;
+            root._gameModeInit = GameMode;
+            root._updateCheckerInit = UpdateChecker;
+            root._autoSchemeInit = AutoScheme;
+        }
     }
 
     Services.StartupTasks {}
-    Welcome.WelcomeWidget {}
+    WhatsNew.WhatsNewWindow {}
 
     Process {
         id: bbdxCheckProcess
 
-        running: true
-        command: ["bash", "-c", `
-            IS_ENABLED=$(kreadconfig6 --file kwinrc --group Plugins --key better_blur_dxEnabled)
-            if [ "$IS_ENABLED" = "true" ]; then
-                BLUR_MATCHING=$(kreadconfig6 --file kwinrc --group Effect-better-blur-dx --key BlurMatching)
-                BLUR_NON_MATCHING=$(kreadconfig6 --file kwinrc --group Effect-better-blur-dx --key BlurNonMatching)
-                WINDOW_CLASSES=$(kreadconfig6 --file kwinrc --group Effect-better-blur-dx --key WindowClasses)
-
-                if [ -z "$BLUR_MATCHING" ]; then BLUR_MATCHING="true"; fi
-                if [ -z "$BLUR_NON_MATCHING" ]; then BLUR_NON_MATCHING="false"; fi
-
-                MODIFIED=false
-
-                if [ "$BLUR_MATCHING" = "true" ] && [ "$BLUR_NON_MATCHING" = "false" ]; then
-                    if echo "$WINDOW_CLASSES" | grep -q '\\bquickshell\\b'; then
-                        # Remove quickshell without destroying the rest of the line if comma-separated
-                        NEW_CLASSES=$(echo "$WINDOW_CLASSES" | sed -E 's/\\bquickshell\\b//g' | sed 's/,,/,/g' | sed 's/^,//' | sed 's/,$//')
-                        kwriteconfig6 --file kwinrc --group Effect-better-blur-dx --key WindowClasses "$NEW_CLASSES"
-                        MODIFIED=true
-                    fi
-                elif [ "$BLUR_MATCHING" = "false" ] && [ "$BLUR_NON_MATCHING" = "true" ]; then
-                    if ! echo "$WINDOW_CLASSES" | grep -q '\\bquickshell\\b'; then
-                        if [ -z "$WINDOW_CLASSES" ]; then
-                            NEW_CLASSES="quickshell"
-                        elif echo "$WINDOW_CLASSES" | grep -q ','; then
-                            NEW_CLASSES="$WINDOW_CLASSES,quickshell"
-                        else
-                            NEW_CLASSES="$WINDOW_CLASSES"$'\n'"quickshell"
-                        fi
-                        kwriteconfig6 --file kwinrc --group Effect-better-blur-dx --key WindowClasses "$NEW_CLASSES"
-                        MODIFIED=true
-                    fi
-                fi
-
-                if [ "$MODIFIED" = "true" ]; then
-                    qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
-                    qdbus6 org.kde.KWin /Effects reconfigureEffect better_blur_dx 2>/dev/null || true
-                fi
-
-                echo "BBDX_ENABLED"
-            fi
-        `]
+        running: false
+        command: ["bash", Quickshell.shellDir + "/scripts/bbdx-window-classes.sh"]
 
         stdout: StdioCollector {
             id: bbdxStdout
@@ -163,17 +148,5 @@ ShellRoot {
     }
 
     BatteryMonitor {}
-    IdleMonitors {
-        lock: lock
-    }
     BluetoothReconnect {}
-
-    // Force service initialization
-    property var _arpcInit: DiscordRPC
-
-    property var _gameModeInit: GameMode
-
-    property var _updateCheckerInit: UpdateChecker
-
-    property var _autoSchemeInit: AutoScheme
 }

@@ -35,7 +35,7 @@ MaterialShape {
     }
     readonly property real springMaxVelocity: {
         const wn = Math.sqrt(stiffness);
-        const factor = Math.exp(-z * Math.acos(z) / Math.sqrt(1 - z * z));
+        const factor = Math.exp(-dampingRatio * Math.acos(dampingRatio) / Math.sqrt(1 - dampingRatio * dampingRatio));
         return wn * factor;
     }
     property bool springSettled: true
@@ -69,7 +69,7 @@ MaterialShape {
                 root.springSettled = true;
             } else {
                 const [pos, vel] = root.spring(t);
-                root.morphProgress = Math.min(1, pos); // Overshooting the morph looks weird
+                root.morphProgress = Math.min(1, pos);
                 root.thisLRotation = pos * root.morphAnimRotation;
                 root.scale = 1 + vel * root.morphScale / root.springMaxVelocity;
             }

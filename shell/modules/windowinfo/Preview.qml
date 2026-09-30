@@ -1,13 +1,13 @@
 pragma ComponentBehavior: Bound
 
-import org.kde.pipewire as Pipewire
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Widgets
 import Caelestia.Config
-import Caelestia.Services
 import qs.components
+import qs.components.effects
+import qs.components.images
 import qs.services
 
 Item {
@@ -28,6 +28,18 @@ Item {
         anchors.topMargin: Tokens.padding.large
         anchors.bottomMargin: Tokens.spacing.medium
 
+        AmbientGlow {
+            anchors.fill: preview
+            address: root.client?.address ?? ""
+            fallbackIcon: root.client ? WinIcons.sourceFor(null, root.client.class, root.client.iconName, root.client.pid ?? 0) : ""
+            sourceAspect: preview.windowAspect
+            deform: true
+            glowOpacity: GlobalConfig.appearance.ambientOpacity
+            radius: Tokens.rounding.medium
+            visible: !!root.client && opacity > 0.01
+            z: -1
+        }
+
         StyledClippingRect {
             id: preview
 
@@ -36,24 +48,6 @@ Item {
                 const h = root.client ? (root.client.height > 0 ? root.client.height : 10) : 10;
                 return w / h;
             }
-                        property var streamRequest: null
-                        property string lastRequestedAddress: ""
-                readonly property int screencastSerial: streamRequest ? (streamRequest.objectSerial || streamRequest.nodeId) : 0
-
-                        function updateStream() {
-                            const addr = (root.client && root.client.address) ? root.client.address : "";
-                            if (addr !== lastRequestedAddress) {
-                                if (lastRequestedAddress !== "") {
-                                    ScreencastManager.releaseStream(lastRequestedAddress);
-                                }
-                                if (addr !== "") {
-                                    streamRequest = ScreencastManager.requestStream(addr);
-                                } else {
-                                    streamRequest = null;
-                                }
-                                lastRequestedAddress = addr;
-                            }
-                        }
 
             width: {
                 const containerAspect = previewContainer.width / previewContainer.height;
@@ -74,25 +68,10 @@ Item {
             anchors.centerIn: parent
             radius: Tokens.rounding.medium
 
-                        // Deferred out of incubation: see ScreencastManager.
-                        Component.onCompleted: Qt.callLater(updateStream)
-                        Component.onDestruction: {
-                            if (lastRequestedAddress !== "") {
-                                ScreencastManager.releaseStream(lastRequestedAddress);
-                            }
-                        }
-
-                Connections {
-                    function onClientChanged() {
-                        preview.updateStream();
-                    }
-
-                    target: root
-                }
                 Loader {
                     asynchronous: true
                     anchors.centerIn: parent
-                    active: !root.client || parent.screencastSerial === 0
+                    active: !root.client
                     sourceComponent: ColumnLayout {
                         spacing: 0
 
@@ -116,18 +95,13 @@ Item {
                         }
                     }
                 }
-                Pipewire.PipeWireSourceItem {
-                    id: view
-
+                WindowPreview {
                     anchors.fill: parent
-                    visible: preview.screencastSerial !== 0
-                    Component.onCompleted: {
-                        if ("objectSerial" in this) {
-                            this.objectSerial = Qt.binding(() => preview.streamRequest ? preview.streamRequest.objectSerial : 0)
-                        } else if ("nodeId" in this) {
-                            this.nodeId = Qt.binding(() => preview.streamRequest ? preview.streamRequest.nodeId : 0)
-                        }
-                    }
+                    address: root.client?.address ?? ""
+                    fallbackIcon: root.client ? WinIcons.sourceFor(null, root.client.class, root.client.iconName, root.client.pid ?? 0) : ""
+                    fallbackScale: 0.4
+                    sourceAspect: preview.windowAspect
+                    visible: !!root.client
                 }
     }
 }

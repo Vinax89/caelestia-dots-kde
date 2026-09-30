@@ -1,9 +1,10 @@
 #include "audioprovider.hpp"
 
-#include "audiocollector.hpp"
-#include "service.hpp"
 #include <qloggingcategory.h>
 #include <qthread.h>
+
+#include "audiocollector.hpp"
+#include "service.hpp"
 
 Q_LOGGING_CATEGORY(lcAp, "caelestia.services.ap", QtInfoMsg)
 Q_LOGGING_CATEGORY(lcApProcessor, "caelestia.services.ap.processor", QtInfoMsg)
@@ -67,7 +68,7 @@ void AudioProvider::init() {
 
 void AudioProvider::start() {
     if (m_processor) {
-        AudioCollector::instance(); // Create instance on main thread
+        AudioCollector::instance();
         QMetaObject::invokeMethod(m_processor, &AudioProcessor::start);
     }
 }

@@ -1,31 +1,28 @@
 #!/bin/bash
 set -euo pipefail
 
-# Every teardown step below is best-effort: the shell may already be stopped,
-# and none of these failing should prevent the restart at the end.
-/usr/bin/caelestia shell -k 2>/dev/null || true
-sleep 1.3
+# Restart the shell through the systemd user unit the install wrote. Restarting
+# that unit keeps the restart environment identical to login startup, which is the
+# whole point of going through it.
+#
+# One unit name for both install kinds: the package ships
+# /usr/lib/systemd/user/caelestia-shell.service, and 10-autostart.sh writes the
+# same unit for a checkout with the checkout's paths in it. It replaced the
+# desktop entry that KDE's xdg-autostart generator turned into
+# app-caelestiashell@autostart.service, so one mechanism starts the shell instead
+# of two racing each other.
+#
+# Do not replace this with the CLI's `caelestia shell -d`: that daemonises,
+# which points the shell's stdio at /dev/null, and every application launched
+# from the shell then inherits a stdout that goes nowhere. Vesktop deadlocks
+# when a call starts in exactly that state (issue #402, reproducible with
+# `vesktop >/dev/null 2>&1`).
+#
+# Callers: the shell's own restart actions (PluginsPage, AppearancePage,
+# Toggles) and update.sh.
 
-if pgrep -x quickshell > /dev/null; then
-    killall -w quickshell 2>/dev/null || true
+if command -v systemctl >/dev/null 2>&1; then
+    exec systemctl --user restart caelestia-shell.service
 fi
-if pgrep -x qs > /dev/null; then
-    killall -w qs 2>/dev/null || true
-fi
 
-# Wipe the stale Quickshell socket locks
-rm -rf "${XDG_RUNTIME_DIR:-/run/user/$UID}/quickshell/"* || true
-
-# shellcheck disable=SC1091
-. /etc/profile || true
-[ -f ~/.profile ] && { . ~/.profile || true; }
-[ -f ~/.bashrc ] && { . ~/.bashrc || true; }
-export QML2_IMPORT_PATH="$HOME/.local/lib/qt6/qml"
-export CAELESTIA_LIB_DIR="$HOME/.local/lib/caelestia"
-export QS_NO_RELOAD_POPUP=1
-export QS_DROP_EXPENSIVE_FONTS=1
-export QS_DISABLE_CRASH_HANDLER=1
-export QSG_RENDER_LOOP=threaded
-export QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
-
-/usr/bin/caelestia shell -d
+exit 1

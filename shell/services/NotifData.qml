@@ -32,20 +32,19 @@ QtObject {
     property string appIcon
     property string appName
     property string image
-    property var hints // Hints are not persisted across restarts
+    property var hints
     property real expireTimeout: GlobalConfig.notifs.defaultExpireTimeout
     property int urgency: NotificationUrgency.Normal
     property bool resident
     property bool hasActionIcons
     property list<var> actions
 
-    readonly property bool hasFullscreen: Hypr.hasFullscreen()
+    readonly property bool hasFullscreen: Kwin.hasFullscreen()
 
     readonly property Timer timer: Timer {
         running: true
         interval: notif.expireTimeout > 0 ? notif.expireTimeout : notif.hasFullscreen ? GlobalConfig.notifs.fullscreenExpireTimeout : GlobalConfig.notifs.defaultExpireTimeout
         onTriggered: {
-            // Always expire if the active workspace has a fullscreen window
             if (GlobalConfig.notifs.expire || notif.hasFullscreen)
                 notif.popup = false;
         }
@@ -103,7 +102,8 @@ QtObject {
 
     readonly property Connections conn: Connections {
         function onClosed(): void {
-            notif.close();
+            if (!notif.closed)
+                notif.close();
         }
 
         function onSummaryChanged(): void {
@@ -200,17 +200,17 @@ QtObject {
     }
 
     function close(): void {
+        if (closed && !notification)
+            return;
         closed = true;
         if (locks.size > 0)
-            return; // a view is still animating this one; unlock() closes it later
+            return;
 
-        // Removing it from the list is separate from dismissing it, so a caller
-        // that has already detached this notification (Notifs.clear(), which
-        // empties the list in one go) still gets it dismissed and destroyed
-        // rather than leaked.
         if (Notifs.list.includes(this))
             Notifs.list = Notifs.list.filter(n => n !== this);
-        notification?.dismiss();
+        const notifObj = notification;
+        notification = null;
+        notifObj?.dismiss();
         destroy();
     }
 

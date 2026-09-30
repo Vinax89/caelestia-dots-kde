@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# 06-services.sh  Enable systemd user services and reload KWin.
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/install-kind.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/log.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/privileges.sh"
+
 echo
 echo ""
-echo "  Step 6/11  Services & KWin"
+info "Configuring services and KWin"
 echo ""
 
 if systemctl --user is-enabled --quiet qs-kwin-bridge.service 2>/dev/null || \
@@ -35,12 +38,37 @@ else
     echo "  Existing virtual desktop configuration found - leaving it untouched."
 fi
 
-# ydotoold (on-screen keyboard key injection) uses uaccess so only the
-# currently active local session receives /dev/uinput access. Do not grant
-# every user in the input group raw access to all input devices.
+UINPUT_RULE="/etc/udev/rules.d/70-uinput.rules"
+LEGACY_UINPUT_RULE="/etc/udev/rules.d/80-uinput.rules"
+UINPUT_RULE_LINE='KERNEL=="uinput", MODE="0600", OPTIONS+="static_node=uinput", TAG+="uaccess"'
+
+uinput_rule_current() {
+    [[ -f "$UINPUT_RULE" ]] && grep -q 'TAG+="uaccess"' "$UINPUT_RULE"
+}
+
+system_setup_needed() {
+    install_is_packaged && return 1
+    systemctl is-enabled --quiet keyd.service 2>/dev/null && return 0
+    systemctl is-active --quiet keyd.service 2>/dev/null && return 0
+    uinput_rule_current || return 0
+    [[ ! -f "$LEGACY_UINPUT_RULE" ]] || return 0
+    return 1
+}
+
+if ! system_setup_needed; then
+    if install_is_packaged; then
+        skip "System-level configuration belongs to the package."
+    else
+        skip "System-level configuration already in place."
+    fi
+else
 echo "  Applying system-level configurations (requires root)..."
-sudo bash -s << 'EOF'
-set -euo pipefail
+caelestia_sudo bash -s -- "$USER" "$UINPUT_RULE" "$LEGACY_UINPUT_RULE" "$UINPUT_RULE_LINE" << 'EOF'
+TARGET_USER="$1"
+UINPUT_RULE="$2"
+LEGACY_UINPUT_RULE="$3"
+UINPUT_RULE_LINE="$4"
+RULE_CHANGED=""
 
 if systemctl is-enabled --quiet keyd.service 2>/dev/null || \
    systemctl is-active --quiet keyd.service 2>/dev/null; then
@@ -49,19 +77,40 @@ if systemctl is-enabled --quiet keyd.service 2>/dev/null || \
 fi
 
 echo "  Setting up ydotoold (OSK key injection daemon)..."
-cat > /etc/udev/rules.d/80-uinput.rules <<'RULE'
-KERNEL=="uinput", TAG+="uaccess"
-RULE
-udevadm control --reload-rules 2>/dev/null || true
-udevadm trigger --subsystem-match=misc --sysname-match=uinput 2>/dev/null || true
-echo "  [OK]  udev uaccess rule for uinput created."
-EOF
 
-# Deploy ydotoold-wrapper script to ~/.local/bin
+if [ -f "$LEGACY_UINPUT_RULE" ]; then
+    rm -f "$LEGACY_UINPUT_RULE"
+    RULE_CHANGED=1
+    if id -nG "$TARGET_USER" | grep -qw input; then
+        if gpasswd -d "$TARGET_USER" input >/dev/null 2>&1; then
+            echo "  Removed $TARGET_USER from the 'input' group (takes effect on next login)."
+        else
+            echo "  Could not remove $TARGET_USER from the 'input' group; run: sudo gpasswd -d $TARGET_USER input"
+        fi
+    fi
+fi
+
+if [ ! -f "$UINPUT_RULE" ]; then
+    printf '%s\n' "$UINPUT_RULE_LINE" > "$UINPUT_RULE"
+    RULE_CHANGED=1
+    echo "  udev rule for uinput created (active session only, no group membership)."
+fi
+
+if [ -n "$RULE_CHANGED" ]; then
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --sysname-match=uinput 2>/dev/null || true
+fi
+
+if [ ! -e /dev/uinput ]; then
+    echo "  /dev/uinput is not present yet; the on-screen keyboard needs it. Load it with: modprobe uinput"
+fi
+EOF
+fi
+
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/ydotoold-wrapper" << 'WRAPPER'
 #!/bin/bash
-# ydotoold-wrapper starts ydotoold with the active-session uaccess rule above.
+# ydotoold-wrapper  starts ydotoold with uinput access (the active session gets it from the udev rule)
 SOCKET="${YDOTOOL_SOCKET:-/run/user/$(id -u)/.ydotool_socket}"
 if [ -S "$SOCKET" ] && pidof ydotoold > /dev/null 2>&1; then
     exit 0
@@ -71,9 +120,8 @@ exec /usr/bin/ydotoold \
     --socket-perm=0660
 WRAPPER
 chmod +x "$HOME/.local/bin/ydotoold-wrapper"
-echo "  [OK]  ydotoold-wrapper deployed to ~/.local/bin."
+ok "ydotoold-wrapper deployed to ~/.local/bin."
 
-# Deploy and enable ydotoold systemd user service
 mkdir -p "$HOME/.config/systemd/user"
 cat > "$HOME/.config/systemd/user/ydotoold.service" << 'UNIT'
 [Unit]
@@ -92,8 +140,11 @@ WantedBy=graphical-session.target
 UNIT
 systemctl --user daemon-reload
 systemctl --user enable ydotoold.service 2>/dev/null || true
-systemctl --user start ydotoold.service 2>/dev/null || \
-    echo "  [INFO] ydotoold will start on next login."
-echo "  [OK]  ydotoold service configured."
+if systemctl --user start ydotoold.service 2>/dev/null; then
+    ok "ydotoold started."
+else
+    info "ydotoold will start on next login."
+fi
+ok "ydotoold service configured."
 
-echo "[OK]  Services configured."
+ok "Services configured."

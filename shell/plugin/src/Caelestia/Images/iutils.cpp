@@ -1,8 +1,8 @@
 #include "iutils.hpp"
 
-#include "cachingimageprovider.hpp"
-
 #include <qfileinfo.h>
+
+#include "cachingimageprovider.hpp"
 
 namespace caelestia::images {
 
@@ -10,7 +10,7 @@ namespace {
 
 IUtils* s_instance = nullptr;
 
-} // namespace
+}
 
 IUtils* IUtils::getInstance() {
     return s_instance;
@@ -34,13 +34,13 @@ QUrl IUtils::urlForPath(const QString& path, int fillMode) {
 
     QString prefix;
     switch (fillMode) {
-    case 1: // Image.PreserveAspectFit
+    case 1:
         prefix = QStringLiteral("fcache");
         break;
-    case 2: // Image.PreserveAspectCrop
+    case 2:
         prefix = QStringLiteral("ccache");
         break;
-    default: // Image.Stretch or any other ones
+    default:
         prefix = QStringLiteral("scache");
         break;
     }
@@ -69,7 +69,8 @@ bool IUtils::isVideo(const QString& path) {
         return false;
 
     const QString suffix = QFileInfo(path).suffix().toLower();
-    static const QStringList videoExtensions = { "mp4", "webm", "mkv", "avi", "mov", "wmv", "flv" };
+    static const QStringList videoExtensions = { QStringLiteral("mp4"), QStringLiteral("webm"), QStringLiteral("mkv"),
+        QStringLiteral("avi"), QStringLiteral("mov"), QStringLiteral("wmv"), QStringLiteral("flv") };
     return videoExtensions.contains(suffix);
 }
 

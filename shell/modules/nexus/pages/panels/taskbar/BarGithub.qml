@@ -17,14 +17,39 @@ PageBase {
     title: qsTr("GitHub")
     isSubPage: true
 
+    readonly property bool githubProblem: BarComponents.GithubStore.tokenMissing || BarComponents.GithubStore.lastError !== ""
+
+    readonly property string githubStatusLabel: {
+        if (BarComponents.GithubStore.tokenMissing)
+            return qsTr("No token set");
+        if (BarComponents.GithubStore.lastError !== "")
+            return qsTr("Last fetch failed");
+        if (BarComponents.GithubStore.available) {
+            return BarComponents.GithubStore.username !== ""
+                ? qsTr("Connected as %1").arg(BarComponents.GithubStore.username)
+                : qsTr("Connected");
+        }
+        return qsTr("Not fetched yet");
+    }
+
+    readonly property string githubStatusDetail: {
+        if (BarComponents.GithubStore.tokenMissing)
+            return qsTr("Paste a token below and save it to enable the widget");
+        if (BarComponents.GithubStore.lastError !== "")
+            return BarComponents.GithubStore.lastError;
+        return "";
+    }
+
+    readonly property string githubStatusIcon: githubProblem ? "error" : (BarComponents.GithubStore.available ? "check_circle" : "hourglass_empty")
+
+    readonly property color githubStatusColour: githubProblem ? Colours.palette.m3error : Colours.palette.m3onSurfaceVariant
+
     function saveToken(token: string): void {
+        saveProc.environment = ({ CAELESTIA_GITHUB_TOKEN: token });
         if (!token) {
             saveProc.command = ["secret-tool", "clear", "service", "caelestia-shell", "account", "github"];
         } else {
-            // `<<< "$1"` writes the secret to a temp file on disk (that is how bash
-        // implements here-strings) and appends a trailing newline. Piping from
-        // printf does neither -- the same form AiSettingsPage.qml already uses.
-        saveProc.command = ["sh", "-c", "printf %s \"$1\" | secret-tool store --label=\"Caelestia GitHub Token\" service caelestia-shell account github", "--", token];
+            saveProc.command = ["bash", "-c", "printf %s \"$CAELESTIA_GITHUB_TOKEN\" | secret-tool store --label=\"Caelestia GitHub Token\" service caelestia-shell account github"];
         }
         saveProc.running = true;
     }
@@ -62,9 +87,16 @@ PageBase {
             text: qsTr("Configuration")
         }
 
+        InfoRow {
+            first: true
+            icon: root.githubStatusIcon
+            iconColour: root.githubStatusColour
+            label: root.githubStatusLabel
+            subtext: root.githubStatusDetail
+        }
+
         ToggleRow {
             Layout.fillWidth: true
-            first: true
             text: qsTr("Component background")
             subtext: qsTr("Render a solid background behind the GitHub activity widget")
             checked: Config.bar.github.background
