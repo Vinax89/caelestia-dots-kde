@@ -2,7 +2,7 @@
 
 <img src="assets/logo.svg" width="64" alt="Caelestia logo" />
 
-# caelestia-kde
+# caelestia-dots-kde (personal fork)
 
 [![Arch Linux](https://img.shields.io/badge/Arch_Linux-1793d1?logo=arch-linux&logoColor=white&style=for-the-badge&labelColor=101418)](https://archlinux.org)
 [![Fedora](https://img.shields.io/badge/Fedora-51A2DA?logo=fedora&logoColor=white&style=for-the-badge&labelColor=101418)](https://fedoraproject.org)
@@ -16,9 +16,16 @@
 https://github.com/user-attachments/assets/38b24e7f-fdd9-43db-872b-8c0ac23a44fd
 
 > [!NOTE]
-> This repo is the KDE Plasma port of [`caelestia-dots/shell`](https://github.com/caelestia-dots/shell).
-> Upstream runs on Hyprland; the port runs the same shell on KWin and Plasma. For the original
-> Hyprland dotfiles, see [`caelestia-dots/caelestia`](https://github.com/caelestia-dots/caelestia).
+> This is [Vinax89](https://github.com/Vinax89)'s personal fork of
+> [ladybug-me/caelestia-kde](https://github.com/ladybug-me/caelestia-kde), maintained
+> for personal use with local changes, security hardening, and selected upstream updates.
+> The KDE port is built on [caelestia-dots/shell](https://github.com/caelestia-dots/shell)
+> and runs on KWin and Plasma. The original Hyprland dotfiles are available at
+> [caelestia-dots/caelestia](https://github.com/caelestia-dots/caelestia).
+
+Changes in this fork are maintained in `Vinax89/caelestia-dots-kde`. Installation
+and update commands below target this personal fork. For the upstream KDE project,
+see [ladybug-me/caelestia-kde](https://github.com/ladybug-me/caelestia-kde).
 
 ## Installation
 
@@ -87,7 +94,7 @@ Settings are written to `~/.config/caelestia/shell.json`.
 | Full reset needed | See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
 
 For detailed logs, enable Debug Mode in Nexus -> About -> Advanced, then run
-`caelestia shell -l`. Bug reports and questions go to
+`caelestia shell -l`. Issues specific to this fork go to
 [GitHub Issues](https://github.com/Vinax89/caelestia-dots-kde/issues).
 
 ## Repository layout
@@ -107,19 +114,11 @@ assets/        the logo and screenshots used by the docs
 .github/       workflows, issue and PR templates, CI checks
 ```
 
-<a href="https://www.star-history.com/?repos=ladybug-me%2Fcaelestia-kde&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Vinax89/caelestia-dots-kde&type=date&theme=dark&legend=top-left&sealed_token=NFI4jXcoZAI26MlGX2jEasHMRd1PIS09clm_CVDS7SFGajH3wiHlN72P8WzuOQT2k2F71ZOCGl_xoy8eVpWlWtA0ACY3koK0NIS1-vLecN0vbvYgrZDN9kp8sQn7NT2xPNeilgrmzYWTzgdQYgskaDMGophAKmy6r6LUfQj8iFjy-Gunuqnte3EY14fX" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Vinax89/caelestia-dots-kde&type=date&legend=top-left&sealed_token=NFI4jXcoZAI26MlGX2jEasHMRd1PIS09clm_CVDS7SFGajH3wiHlN72P8WzuOQT2k2F71ZOCGl_xoy8eVpWlWtA0ACY3koK0NIS1-vLecN0vbvYgrZDN9kp8sQn7NT2xPNeilgrmzYWTzgdQYgskaDMGophAKmy6r6LUfQj8iFjy-Gunuqnte3EY14fX" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Vinax89/caelestia-dots-kde&type=date&legend=top-left&sealed_token=NFI4jXcoZAI26MlGX2jEasHMRd1PIS09clm_CVDS7SFGajH3wiHlN72P8WzuOQT2k2F71ZOCGl_xoy8eVpWlWtA0ACY3koK0NIS1-vLecN0vbvYgrZDN9kp8sQn7NT2xPNeilgrmzYWTzgdQYgskaDMGophAKmy6r6LUfQj8iFjy-Gunuqnte3EY14fX" />
- </picture>
-</a>
-
 ## Credits
 
 - [caelestia-dots/shell](https://github.com/caelestia-dots/shell) and the [Caelestia dotfiles](https://github.com/caelestia-dots/caelestia) by [@soramanew](https://github.com/soramanew) - the design language, shell and dotfiles this port is built on
-- [ladybug-me](https://github.com/ladybug-me) - KDE port lead
-- [0xSolanaceae](https://github.com/0xSolanaceae) - Head maintainer
+- [ladybug-me](https://github.com/ladybug-me) - upstream KDE port lead
+- [0xSolanaceae](https://github.com/0xSolanaceae) - upstream head maintainer
 - [Bali10050](https://github.com/Bali10050/Darkly) - Darkly Qt
 - [wrymt](https://github.com/wrymt/darkly-gtk) - Darkly GTK
 - [Haidir](https://bitbucket.org/dirn-typo/yet-another-monochrome-icon-set) - icon set
